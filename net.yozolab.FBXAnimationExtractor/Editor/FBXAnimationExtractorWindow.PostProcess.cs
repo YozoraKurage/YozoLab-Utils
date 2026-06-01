@@ -11,16 +11,29 @@ using System.Collections.Generic;
 /// </summary>
 public partial class FBXAnimationExtractorWindow
 {
-    private void ApplyPostProcessRules(AnimationClip clip, string clipName, string sourceFbxPath)
+    /// <summary>
+    /// 抽出後クリップにルールを適用する。
+    /// Generic Extract が Separate モードのときは、非Humanoidカーブを格納した別クリップ(in-memory)を返す。
+    /// Merge モード/未設定時は null を返す。
+    /// </summary>
+    private AnimationClip ApplyPostProcessRules(AnimationClip clip, string clipName, string sourceFbxPath)
     {
         AnimationPostProcessRule matchingRule = FindMatchingRule(clipName);
 
         if (matchingRule == null)
-            return;
+            return null;
 
-        if (matchingRule.genericExtract)
+        bool needsGenericReimport = matchingRule.genericExtract
+            || (matchingRule.eventMarkers != null && matchingRule.eventMarkers.Count > 0);
+
+        // EventMarker の集計結果。functionName ごとに発火時刻のセットを集める。
+        // 同じ marker が複数キー時刻を持つ前提なので、複数の Event が打たれる。
+        var markerEventSources = new List<MarkerEventSource>();
+        AnimationClip separateGenericClip = null;
+
+        if (needsGenericReimport)
         {
-            MergeGenericTransformAnimation(clip, sourceFbxPath, matchingRule.genericExtractTargets, matchingRule.fixScale, matchingRule.fixScaleObjects, matchingRule.ignoreScaleKey);
+            separateGenericClip = ProcessGenericExtractAndEventMarkers(clip, sourceFbxPath, matchingRule, markerEventSources);
         }
 
         Debug.Log($"[FBX Animation Extractor] Applying post-process rule: {matchingRule.targetName} -> {clipName}");
@@ -37,7 +50,30 @@ public partial class FBXAnimationExtractorWindow
             timeOffset = (maxDeletedFrame + 1) / frameRate; // 最大削除フレーム+1フレーム分をオフセット
         }
 
-        // カーブを取得
+        ApplyCurveFrameAdjustments(clip, matchingRule, frameRate, timeOffset);
+        if (separateGenericClip != null)
+        {
+            ApplyCurveFrameAdjustments(separateGenericClip, matchingRule, frameRate, timeOffset);
+            separateGenericClip.frameRate = frameRate;
+        }
+
+        // FBXキー由来のEventをHumanoid clipへ注入(時間shift/delete を反映)
+        ApplyMarkerEvents(clip, markerEventSources, matchingRule, frameRate, timeOffset);
+
+        // 手書きAnimationEventsの注入(後方互換・非推奨)
+        ApplyAnimationEvents(clip, matchingRule.animationEvents);
+
+        EditorUtility.SetDirty(clip);
+        if (separateGenericClip != null)
+        {
+            EditorUtility.SetDirty(separateGenericClip);
+        }
+
+        return separateGenericClip;
+    }
+
+    private void ApplyCurveFrameAdjustments(AnimationClip clip, AnimationPostProcessRule rule, float frameRate, float timeOffset)
+    {
         EditorCurveBinding[] curveBindings = AnimationUtility.GetCurveBindings(clip);
 
         foreach (var binding in curveBindings)
@@ -47,23 +83,19 @@ public partial class FBXAnimationExtractorWindow
                 continue;
 
             // 1. 指定フレームを削除
-            if (matchingRule.framesToDelete != null && matchingRule.framesToDelete.Count > 0)
+            if (rule.framesToDelete != null && rule.framesToDelete.Count > 0)
             {
-                curve = DeleteFrames(curve, matchingRule.framesToDelete, frameRate);
+                curve = DeleteFrames(curve, rule.framesToDelete, frameRate);
             }
 
             // 2. 全カーブ共通の時間オフセットを適用
-            if (matchingRule.shiftToZeroFrame && timeOffset > 0f)
+            if (rule.shiftToZeroFrame && timeOffset > 0f)
             {
                 curve = ShiftByTime(curve, timeOffset);
             }
 
             AnimationUtility.SetEditorCurve(clip, binding, curve);
         }
-
-        ApplyAnimationEvents(clip, matchingRule.animationEvents);
-
-        EditorUtility.SetDirty(clip);
     }
 
     private void ApplyAnimationEvents(AnimationClip clip, List<AnimationEventRule> eventRules)
@@ -143,6 +175,7 @@ public partial class FBXAnimationExtractorWindow
         signatureBuilder.Append("|avatar:").Append(GetAvatarSignature(rule));
         signatureBuilder.Append("|shiftToZeroFrame:").Append(rule.shiftToZeroFrame);
         signatureBuilder.Append("|genericExtract:").Append(rule.genericExtract);
+        signatureBuilder.Append("|genericOutputMode:").Append((int)rule.genericOutputMode);
         signatureBuilder.Append("|ignoreScaleKey:").Append(rule.ignoreScaleKey);
         signatureBuilder.Append("|fixScale:").Append(rule.fixScale);
 
@@ -219,6 +252,31 @@ public partial class FBXAnimationExtractorWindow
             }
         }
 
+        signatureBuilder.Append("|eventMarkers:");
+        if (rule.eventMarkers != null)
+        {
+            for (int i = 0; i < rule.eventMarkers.Count; i++)
+            {
+                if (i > 0)
+                {
+                    signatureBuilder.Append(";");
+                }
+
+                EventMarkerRule marker = rule.eventMarkers[i];
+                if (marker == null)
+                {
+                    continue;
+                }
+
+                signatureBuilder.Append(marker.targetObjectName?.Trim() ?? string.Empty);
+                signatureBuilder.Append(">").Append(marker.functionName?.Trim() ?? string.Empty);
+                signatureBuilder.Append(">").Append(marker.floatParameter.ToString("R"));
+                signatureBuilder.Append(">").Append(marker.intParameter);
+                signatureBuilder.Append(">").Append(marker.stringParameter?.Trim() ?? string.Empty);
+                signatureBuilder.Append(">").Append(GetObjectReferenceSignature(marker.objectReferenceParameter));
+            }
+        }
+
         return signatureBuilder.ToString();
     }
 
@@ -255,99 +313,352 @@ public partial class FBXAnimationExtractorWindow
     }
 
     // ═══════════════════════════════════════════════════════════════
-    //  Generic Extract: 非ヒューマノイドTransformアニメの抽出/マージ
+    //  Generic Extract: 非ヒューマノイドTransformアニメの抽出 + EventMarker走査
     // ═══════════════════════════════════════════════════════════════
-    private void MergeGenericTransformAnimation(AnimationClip targetClip, string fbxPath, List<GenericExtractTargetRule> extractTargets, bool fixScale, List<string> fixScaleObjects, bool ignoreScaleKey)
+
+    /// <summary>
+    /// FBX由来Eventの集計バッファ。functionName と紐付くキー時刻を集める。
+    /// ProcessGenericReimportPass 内で binding ごとに追加する。
+    /// </summary>
+    private struct MarkerEventSource
+    {
+        public EventMarkerRule marker;
+        public float time;
+    }
+
+    /// <summary>
+    /// FBX を Generic として再インポートし、(1) EventMarker 対象のキー時刻を収集
+    /// (2) GenericExtract 対象のカーブを Merge 先 / Separate 先 に書き出す。
+    /// マーカー側だけ圧縮Offで取得し、prop curve 側は既定圧縮(KeyframeReduction)で抽出するため
+    /// 再インポートを分ける(マーカー収集パス / 抽出パス)。
+    /// Separate モードのときは生成した別clip(in-memory)を返す。
+    /// </summary>
+    private AnimationClip ProcessGenericExtractAndEventMarkers(AnimationClip humanoidClip, string fbxPath, AnimationPostProcessRule rule, List<MarkerEventSource> markerEventSources)
     {
         HashSet<string> humanoidBoneNames = CollectHumanoidBoneNames(fbxPath);
 
-        // Pass 1: all Generic objects except fixScaleObjects (scale 1x)
-        ProcessGenericExtractPass(targetClip, fbxPath, 1f, extractTargets, fixScaleObjects, false, fixScale, humanoidBoneNames, ignoreScaleKey);
+        bool separateMode = rule.genericExtract && rule.genericOutputMode == GenericOutputMode.Separate;
+        AnimationClip genericOutputClip = separateMode ? new AnimationClip { name = humanoidClip.name + "_generic" } : humanoidClip;
 
-        // Pass 2: fixScaleObjects only (scale 100x), only when Fix Scale is enabled with targets
-        if (fixScale && fixScaleObjects != null && fixScaleObjects.Count > 0)
+        // Separate モードでは Humanoid clip 側に紛れ込んでいる非Humanoidカーブを除去しておく。
+        // Generic 出力先と元clipが同じだと二重に持つことになるため。
+        if (separateMode)
         {
-            ProcessGenericExtractPass(targetClip, fbxPath, 100f, extractTargets, fixScaleObjects, true, fixScale, humanoidBoneNames, ignoreScaleKey);
+            StripNonHumanoidCurves(humanoidClip);
         }
 
-        EditorUtility.SetDirty(targetClip);
+        bool hasMarkers = rule.eventMarkers != null && rule.eventMarkers.Count > 0;
+
+        // (M) マーカー収集パス: 圧縮Off で値の変化しないキーも保持。prop curve は出力しない。
+        // KeyframeReduction はアノテーション専用キー(値が動かない)を削るため、マーカー側だけは Off 必須。
+        if (hasMarkers)
+        {
+            ProcessGenericReimportPass(
+                humanoidClip, genericOutputClip, fbxPath,
+                scale: 1f,
+                rule: rule,
+                humanoidBoneNames: humanoidBoneNames,
+                markerEventSources: markerEventSources,
+                isTargetPass: false,
+                compression: ModelImporterAnimationCompression.Off,
+                extractCurves: false);
+        }
+
+        // (E1) 抽出パス: 既定圧縮(KeyframeReduction)で prop curve を取り出す。マーカー走査はしない。
+        if (rule.genericExtract)
+        {
+            ProcessGenericReimportPass(
+                humanoidClip, genericOutputClip, fbxPath,
+                scale: 1f,
+                rule: rule,
+                humanoidBoneNames: humanoidBoneNames,
+                markerEventSources: null,
+                isTargetPass: false,
+                compression: ModelImporterAnimationCompression.KeyframeReduction,
+                extractCurves: true);
+
+            // (E2) FixScale パス: scale=100 で fixScaleObjects のみ抽出。
+            if (rule.fixScale && rule.fixScaleObjects != null && rule.fixScaleObjects.Count > 0)
+            {
+                ProcessGenericReimportPass(
+                    humanoidClip, genericOutputClip, fbxPath,
+                    scale: 100f,
+                    rule: rule,
+                    humanoidBoneNames: humanoidBoneNames,
+                    markerEventSources: null,
+                    isTargetPass: true,
+                    compression: ModelImporterAnimationCompression.KeyframeReduction,
+                    extractCurves: true);
+            }
+        }
+
+        EditorUtility.SetDirty(humanoidClip);
+
+        if (separateMode && HasAnyCurves(genericOutputClip))
+        {
+            return genericOutputClip;
+        }
+
+        // Separate モードでもカーブが1本も無ければ別clipは作らない。
+        return null;
     }
 
-    private void ProcessGenericExtractPass(AnimationClip targetClip, string fbxPath, float scale, List<GenericExtractTargetRule> extractTargets, List<string> targetObjects, bool isTargetPass, bool fixScale, HashSet<string> humanoidBoneNames, bool ignoreScaleKey)
+    private void ProcessGenericReimportPass(
+        AnimationClip humanoidClip,
+        AnimationClip genericOutputClip,
+        string fbxPath,
+        float scale,
+        AnimationPostProcessRule rule,
+        HashSet<string> humanoidBoneNames,
+        List<MarkerEventSource> markerEventSources,
+        bool isTargetPass,
+        ModelImporterAnimationCompression compression,
+        bool extractCurves)
     {
         string suffix = isTargetPass ? "_temp_generic_target" : "_temp_generic";
         string dupPath = fbxPath.Replace(".fbx", $"{suffix}.fbx").Replace(".FBX", $"{suffix}.FBX");
 
         AssetDatabase.CopyAsset(fbxPath, dupPath);
 
-        ModelImporter importer = AssetImporter.GetAtPath(dupPath) as ModelImporter;
-        if (importer != null)
+        try
         {
+            ModelImporter importer = AssetImporter.GetAtPath(dupPath) as ModelImporter;
+            if (importer == null) return;
+
             importer.animationType = ModelImporterAnimationType.Generic;
             importer.avatarSetup = ModelImporterAvatarSetup.CreateFromThisModel;
             importer.globalScale = scale;
+            importer.animationCompression = compression;
+
+            if (compression == ModelImporterAnimationCompression.Off)
+            {
+                // マーカーパス: アノテーションキー(値変化なし)を Unity に削られないよう error=0 で固定
+                importer.animationPositionError = 0f;
+                importer.animationRotationError = 0f;
+                importer.animationScaleError    = 0f;
+            }
+            // else: Unity 既定の error 値で curve fitting を行う(prop curve はサイズ最適化)
+
             importer.SaveAndReimport();
 
             UnityEngine.Object[] assets = AssetDatabase.LoadAllAssetsAtPath(dupPath);
             AnimationClip genericClip = assets.OfType<AnimationClip>().FirstOrDefault(c => !c.name.StartsWith("__preview__"));
+            if (genericClip == null) return;
 
-            if (genericClip != null)
+            bool collectMarkers = markerEventSources != null;
+            bool fixScaleTargetActive = rule.genericExtract
+                && rule.fixScale
+                && rule.fixScaleObjects != null
+                && rule.fixScaleObjects.Count > 0;
+
+            EditorCurveBinding[] curveBindings = AnimationUtility.GetCurveBindings(genericClip);
+            foreach (var binding in curveBindings)
             {
-                EditorCurveBinding[] curveBindings = AnimationUtility.GetCurveBindings(genericClip);
-                foreach (var binding in curveBindings)
+                if (string.IsNullOrEmpty(binding.path) || IsHumanoidBonePath(binding.path, humanoidBoneNames))
+                    continue;
+
+                // --- (1) EventMarker 走査 (マーカー収集パスのみ) ------------------------------
+                EventMarkerRule matchedMarker = null;
+                if (collectMarkers)
                 {
-                    if (!string.IsNullOrEmpty(binding.path) && !IsHumanoidBonePath(binding.path, humanoidBoneNames))
+                    matchedMarker = TryMatchEventMarker(binding.path, rule.eventMarkers);
+                    if (matchedMarker != null)
                     {
-                        GenericExtractTargetRule matchedExtractTarget;
-                        string relativePathFromTarget;
-                        if (!TryMatchGenericExtractTarget(binding.path, extractTargets, out matchedExtractTarget, out relativePathFromTarget))
+                        AnimationCurve markerCurve = AnimationUtility.GetEditorCurve(genericClip, binding);
+                        if (markerCurve != null && markerCurve.keys.Length > 0)
                         {
-                            continue;
-                        }
-
-                        bool isTargetObj = false;
-                        if (targetObjects != null)
-                        {
-                            foreach (var obj in targetObjects)
+                            foreach (var key in markerCurve.keys)
                             {
-                                if (!string.IsNullOrEmpty(obj) && binding.path.IndexOf(obj, StringComparison.OrdinalIgnoreCase) >= 0)
-                                {
-                                    isTargetObj = true;
-                                    break;
-                                }
+                                markerEventSources.Add(new MarkerEventSource { marker = matchedMarker, time = key.time });
                             }
-                        }
-
-                        // FixScaleが無効の場合、または指定オブジェクトが空の場合は1回目の抽出(isTargetPass==false)で全て抽出する
-                        bool fixScaleTargetActive = fixScale && targetObjects != null && targetObjects.Count > 0;
-
-                        bool shouldExtract = false;
-                        if (fixScaleTargetActive)
-                        {
-                            // 対象パスなら対象のものを追加し、通常パスなら対象以外のものを追加
-                            shouldExtract = (isTargetPass == isTargetObj);
-                        }
-                        else
-                        {
-                            // FixScale機能を使用しない場合は、通常パス(isTargetPass==false)で全て追加
-                            shouldExtract = !isTargetPass;
-                        }
-
-                        if (shouldExtract)
-                        {
-                            if (ignoreScaleKey && IsScaleProperty(binding.propertyName))
-                                continue;
-
-                            AnimationCurve curve = AnimationUtility.GetEditorCurve(genericClip, binding);
-                            EditorCurveBinding outputBinding = ApplyRepathToBinding(binding, matchedExtractTarget, relativePathFromTarget);
-                            AnimationUtility.SetEditorCurve(targetClip, outputBinding, curve);
                         }
                     }
                 }
+
+                // --- (2) Generic Extract 出力 (抽出パスのみ) ---------------------------------
+                if (!extractCurves)
+                    continue;
+
+                // マーカーオブジェクトは prop curve として出力しない (姿勢キーは捨てる)。
+                if (TryMatchEventMarker(binding.path, rule.eventMarkers) != null)
+                    continue;
+
+                GenericExtractTargetRule matchedExtractTarget;
+                string relativePathFromTarget;
+                if (!TryMatchGenericExtractTarget(binding.path, rule.genericExtractTargets, out matchedExtractTarget, out relativePathFromTarget))
+                    continue;
+
+                bool isTargetObj = false;
+                if (rule.fixScaleObjects != null)
+                {
+                    foreach (var obj in rule.fixScaleObjects)
+                    {
+                        if (!string.IsNullOrEmpty(obj) && binding.path.IndexOf(obj, StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            isTargetObj = true;
+                            break;
+                        }
+                    }
+                }
+
+                bool shouldExtract;
+                if (fixScaleTargetActive)
+                {
+                    // 対象パスなら対象のものを追加し、通常パスなら対象以外のものを追加
+                    shouldExtract = (isTargetPass == isTargetObj);
+                }
+                else
+                {
+                    // FixScale機能を使用しない場合は、通常パス(isTargetPass==false)で全て追加
+                    shouldExtract = !isTargetPass;
+                }
+
+                if (!shouldExtract)
+                    continue;
+
+                if (rule.ignoreScaleKey && IsScaleProperty(binding.propertyName))
+                    continue;
+
+                AnimationCurve curve = AnimationUtility.GetEditorCurve(genericClip, binding);
+                EditorCurveBinding outputBinding = ApplyRepathToBinding(binding, matchedExtractTarget, relativePathFromTarget);
+                AnimationUtility.SetEditorCurve(genericOutputClip, outputBinding, curve);
+            }
+        }
+        finally
+        {
+            AssetDatabase.DeleteAsset(dupPath);
+        }
+    }
+
+    private EventMarkerRule TryMatchEventMarker(string bindingPath, List<EventMarkerRule> markers)
+    {
+        if (markers == null || markers.Count == 0)
+            return null;
+
+        foreach (EventMarkerRule marker in markers)
+        {
+            if (marker == null || string.IsNullOrWhiteSpace(marker.targetObjectName) || string.IsNullOrWhiteSpace(marker.functionName))
+                continue;
+
+            string targetNameOrPath = NormalizeHierarchyPath(marker.targetObjectName);
+            if (string.IsNullOrEmpty(targetNameOrPath))
+                continue;
+
+            if (TryGetRelativePathFromTarget(NormalizeHierarchyPath(bindingPath), targetNameOrPath, out _))
+            {
+                return marker;
             }
         }
 
-        AssetDatabase.DeleteAsset(dupPath);
+        return null;
+    }
+
+    /// <summary>
+    /// 収集した MarkerEventSource を AnimationEvent として humanoid clip に注入する。
+    /// 同じ marker・同じ時刻が複数 binding(position/rotation/scale)から重複して入るため、
+    /// (marker, time) 単位で重複排除してから打つ。
+    /// shiftToZeroFrame / framesToDelete の調整も AnimationCurve と同じ規則で反映する。
+    /// </summary>
+    private void ApplyMarkerEvents(AnimationClip clip, List<MarkerEventSource> sources, AnimationPostProcessRule rule, float frameRate, float timeOffset)
+    {
+        if (sources == null || sources.Count == 0)
+            return;
+
+        float clipLength = clip.length;
+        if (clipLength <= 0f)
+        {
+            Debug.LogWarning($"[FBX Animation Extractor] Cannot place marker Animation Events on '{clip.name}' (clip length is 0).");
+            return;
+        }
+
+        // framesToDelete をキー時刻の HashSet 化 (許容誤差で吸収)
+        HashSet<float> deletedTimes = null;
+        if (rule.framesToDelete != null && rule.framesToDelete.Count > 0)
+        {
+            deletedTimes = new HashSet<float>();
+            foreach (int frame in rule.framesToDelete)
+            {
+                deletedTimes.Add(frame / frameRate);
+            }
+        }
+
+        // (marker, adjustedTime) で重複排除
+        var seen = new HashSet<(EventMarkerRule, long)>();
+        var newEvents = new List<AnimationEvent>();
+        const float tolerance = 0.0001f;
+
+        foreach (MarkerEventSource source in sources)
+        {
+            float time = source.time;
+
+            // フレーム削除済みなら捨てる
+            if (deletedTimes != null)
+            {
+                bool dropped = false;
+                foreach (float deleted in deletedTimes)
+                {
+                    if (Mathf.Abs(time - deleted) < tolerance)
+                    {
+                        dropped = true;
+                        break;
+                    }
+                }
+                if (dropped) continue;
+            }
+
+            // 時間shift適用
+            if (rule.shiftToZeroFrame && timeOffset > 0f)
+            {
+                time -= timeOffset;
+            }
+
+            if (time < 0f || time > clipLength + tolerance)
+                continue;
+
+            // (marker, time) で重複排除 (frame粒度で量子化)
+            long quantized = (long)Mathf.Round(time * frameRate);
+            if (!seen.Add((source.marker, quantized)))
+                continue;
+
+            newEvents.Add(new AnimationEvent
+            {
+                functionName = source.marker.functionName.Trim(),
+                time = time,
+                floatParameter = source.marker.floatParameter,
+                intParameter = source.marker.intParameter,
+                stringParameter = source.marker.stringParameter ?? string.Empty,
+                objectReferenceParameter = source.marker.objectReferenceParameter,
+                messageOptions = SendMessageOptions.DontRequireReceiver,
+            });
+        }
+
+        if (newEvents.Count == 0)
+            return;
+
+        List<AnimationEvent> combined = new List<AnimationEvent>(AnimationUtility.GetAnimationEvents(clip));
+        combined.AddRange(newEvents);
+        combined.Sort((a, b) => a.time.CompareTo(b.time));
+        AnimationUtility.SetAnimationEvents(clip, combined.ToArray());
+    }
+
+    private static void StripNonHumanoidCurves(AnimationClip clip)
+    {
+        EditorCurveBinding[] bindings = AnimationUtility.GetCurveBindings(clip);
+        foreach (var binding in bindings)
+        {
+            // Humanoid muscle / root motion カーブは path が空。
+            // path が非空 = 個別 Transform 駆動 = Generic 側の責務。
+            if (!string.IsNullOrEmpty(binding.path))
+            {
+                AnimationUtility.SetEditorCurve(clip, binding, null);
+            }
+        }
+    }
+
+    private static bool HasAnyCurves(AnimationClip clip)
+    {
+        return AnimationUtility.GetCurveBindings(clip).Length > 0
+            || AnimationUtility.GetObjectReferenceCurveBindings(clip).Length > 0;
     }
 
     private bool TryMatchGenericExtractTarget(string bindingPath, List<GenericExtractTargetRule> extractTargets, out GenericExtractTargetRule matchedTarget, out string relativePathFromTarget)

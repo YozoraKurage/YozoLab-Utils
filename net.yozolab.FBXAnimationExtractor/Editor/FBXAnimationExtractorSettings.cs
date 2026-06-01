@@ -40,6 +40,20 @@ public class FbxProcessCacheEntry
     public string sourceDependencyHash;
     public string ruleSignature;
     public string generatedClipAssetPath;
+
+    // Separate モードで生成された Generic 専用クリップのパス。Merge モードでは空文字。
+    public string generatedGenericClipAssetPath;
+}
+
+/// <summary>
+/// Generic Extract の出力モード。
+/// Merge   = 既存の挙動。非Humanoidカーブを Humanoid clip にマージする。
+/// Separate = Humanoid clip と <fbxName>_generic.anim に分離出力する。
+/// </summary>
+public enum GenericOutputMode
+{
+    Merge = 0,
+    Separate = 1,
 }
 
 /// <summary>
@@ -78,8 +92,41 @@ public class AnimationPostProcessRule
     [Tooltip("Object names to import at Scale Factor 100 during Fix Scale (partial match)")]
     public List<string> fixScaleObjects = new List<string>();
 
-    [Tooltip("Animation Events to place on the generated clip (time is normalized 0-1 relative to clip length)")]
+    [Tooltip("Output mode for Generic Extract. Merge keeps the existing behavior; Separate writes non-humanoid curves to <fbxName>_generic.anim")]
+    public GenericOutputMode genericOutputMode = GenericOutputMode.Merge;
+
+    [Tooltip("Event markers driven by FBX keyframes. Keys on the specified object become Animation Events at the same time on the humanoid clip")]
+    public List<EventMarkerRule> eventMarkers = new List<EventMarkerRule>();
+
+    [Tooltip("[DEPRECATED] Manually authored Animation Events placed at a normalized time. Prefer eventMarkers driven by FBX keyframes")]
     public List<AnimationEventRule> animationEvents = new List<AnimationEventRule>();
+}
+
+/// <summary>
+/// Event marker rule that converts FBX keyframes on a specific object
+/// into Animation Events on the generated humanoid clip.
+/// The target object's curve values are ignored - only key times are used.
+/// </summary>
+[Serializable]
+public class EventMarkerRule
+{
+    [Tooltip("Target object name or hierarchy path (same matching rule as GenericExtractTargetRule)")]
+    public string targetObjectName;
+
+    [Tooltip("Function name invoked by the Animation Event")]
+    public string functionName;
+
+    [Tooltip("Float parameter passed to the function")]
+    public float floatParameter;
+
+    [Tooltip("Int parameter passed to the function")]
+    public int intParameter;
+
+    [Tooltip("String parameter passed to the function")]
+    public string stringParameter;
+
+    [Tooltip("Object reference parameter passed to the function")]
+    public UnityEngine.Object objectReferenceParameter;
 }
 
 /// <summary>

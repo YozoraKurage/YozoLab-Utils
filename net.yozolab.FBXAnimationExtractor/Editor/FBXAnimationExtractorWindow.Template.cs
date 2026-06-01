@@ -27,10 +27,12 @@ public partial class FBXAnimationExtractorWindow
             framesToDelete = src.framesToDelete == null ? new List<int>() : new List<int>(src.framesToDelete),
             shiftToZeroFrame = src.shiftToZeroFrame,
             genericExtract = src.genericExtract,
+            genericOutputMode = src.genericOutputMode,
             genericExtractTargets = CopyExtractTargets(src.genericExtractTargets),
             ignoreScaleKey = src.ignoreScaleKey,
             fixScale = src.fixScale,
             fixScaleObjects = src.fixScaleObjects == null ? new List<string>() : new List<string>(src.fixScaleObjects),
+            eventMarkers = CopyEventMarkers(src.eventMarkers),
             animationEvents = CopyEventRules(src.animationEvents),
         };
         Debug.Log($"[FBX Animation Extractor] Template copied from \"{ruleTemplate.sourceTargetName}\".");
@@ -58,12 +60,14 @@ public partial class FBXAnimationExtractorWindow
                 : new List<int>(ruleTemplate.framesToDelete);
             dst.shiftToZeroFrame = ruleTemplate.shiftToZeroFrame;
             dst.genericExtract = ruleTemplate.genericExtract;
+            dst.genericOutputMode = ruleTemplate.genericOutputMode;
             dst.genericExtractTargets = CopyExtractTargets(ruleTemplate.genericExtractTargets);
             dst.ignoreScaleKey = ruleTemplate.ignoreScaleKey;
             dst.fixScale = ruleTemplate.fixScale;
             dst.fixScaleObjects = ruleTemplate.fixScaleObjects == null
                 ? new List<string>()
                 : new List<string>(ruleTemplate.fixScaleObjects);
+            dst.eventMarkers = CopyEventMarkers(ruleTemplate.eventMarkers);
             dst.animationEvents = CopyEventRules(ruleTemplate.animationEvents);
             applied++;
         }
@@ -111,6 +115,26 @@ public partial class FBXAnimationExtractorWindow
         return result;
     }
 
+    private static List<EventMarkerRule> CopyEventMarkers(List<EventMarkerRule> src)
+    {
+        var result = new List<EventMarkerRule>();
+        if (src == null) return result;
+        foreach (EventMarkerRule m in src)
+        {
+            if (m == null) { result.Add(null); continue; }
+            result.Add(new EventMarkerRule
+            {
+                targetObjectName = m.targetObjectName,
+                functionName = m.functionName,
+                floatParameter = m.floatParameter,
+                intParameter = m.intParameter,
+                stringParameter = m.stringParameter,
+                objectReferenceParameter = m.objectReferenceParameter,
+            });
+        }
+        return result;
+    }
+
     // ═══════════════════════════════════════════════════════════════
     //  Rule Detail Template の保持型
     // ═══════════════════════════════════════════════════════════════
@@ -122,10 +146,12 @@ public partial class FBXAnimationExtractorWindow
         public List<int> framesToDelete;
         public bool shiftToZeroFrame;
         public bool genericExtract;
+        public GenericOutputMode genericOutputMode;
         public List<GenericExtractTargetRule> genericExtractTargets;
         public bool ignoreScaleKey;
         public bool fixScale;
         public List<string> fixScaleObjects;
+        public List<EventMarkerRule> eventMarkers;
         public List<AnimationEventRule> animationEvents;
     }
 }
