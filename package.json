@@ -1,12 +1,11 @@
 {
   "name": "net.yozolab.yozolab-utils",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "displayName": "yozolab-utils",
   "description": "YozoLab's utility package for Unity",
   "unity": "2022.3",
   "author": {
     "name": "Yozolab"
   },
-  "keywords": [
-  ]
+  "keywords": []
 }
