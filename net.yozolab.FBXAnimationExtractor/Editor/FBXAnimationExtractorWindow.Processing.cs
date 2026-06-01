@@ -206,6 +206,17 @@ public partial class FBXAnimationExtractorWindow
                 // 既存ファイルがある場合: メタデータを保存してから中身を置き換え(GUID保持)
                 AnimationClipSettings existingSettings = AnimationUtility.GetAnimationClipSettings(existingClip);
                 CopyAnimationCurves(workingClip, existingClip);
+
+                // BUGFIX: AnimationClipSettings には stopTime/startTime(=クリップ長) も含まれる。
+                // 旧設定を丸ごと復元すると、新カーブが長くても旧 stopTime(例:1秒)に長さが
+                // 固定され、再抽出のたびにクリップが切り詰められてしまう。
+                // ループ等のメタは維持しつつ、長さだけは新カーブの実時間に追従させる。
+                float curvesEnd = GetCurvesEndTime(workingClip);
+                if (curvesEnd > 0f)
+                {
+                    existingSettings.startTime = 0f;
+                    existingSettings.stopTime  = curvesEnd;
+                }
                 AnimationUtility.SetAnimationClipSettings(existingClip, existingSettings);
                 EditorUtility.SetDirty(existingClip);
             }
@@ -245,6 +256,28 @@ public partial class FBXAnimationExtractorWindow
         }
 
         AnimationUtility.SetAnimationEvents(destinationClip, AnimationUtility.GetAnimationEvents(sourceClip));
+    }
+
+    /// <summary>全カーブ(float / オブジェクト参照)の最終キーフレーム時刻 = 本来のクリップ長を返す。</summary>
+    private static float GetCurvesEndTime(AnimationClip clip)
+    {
+        float max = 0f;
+
+        foreach (EditorCurveBinding binding in AnimationUtility.GetCurveBindings(clip))
+        {
+            AnimationCurve curve = AnimationUtility.GetEditorCurve(clip, binding);
+            if (curve != null && curve.length > 0)
+                max = Mathf.Max(max, curve[curve.length - 1].time);
+        }
+
+        foreach (EditorCurveBinding binding in AnimationUtility.GetObjectReferenceCurveBindings(clip))
+        {
+            ObjectReferenceKeyframe[] keys = AnimationUtility.GetObjectReferenceCurve(clip, binding);
+            if (keys != null && keys.Length > 0)
+                max = Mathf.Max(max, keys[keys.Length - 1].time);
+        }
+
+        return max;
     }
 
     private bool ShouldSkipProcessing(string fbxPath, string fbxName, string outputPath, AnimationPostProcessRule matchingRule, out string sourceDependencyHash, out string ruleSignature)
