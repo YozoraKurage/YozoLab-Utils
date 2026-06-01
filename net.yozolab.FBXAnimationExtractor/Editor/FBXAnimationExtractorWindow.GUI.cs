@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEditor;
 using System;
 using System.IO;
+using System.Linq;
 using System.Collections.Generic;
 
 /// <summary>
@@ -177,13 +178,79 @@ public partial class FBXAnimationExtractorWindow
             }
         }
 
-        DrawRuleToolbarExtras();
+        DrawAutoCollectButton();
 
         EditorGUILayout.EndHorizontal();
     }
 
-    /// <summary>派生クラスがツールバーへ追加ボタンを差し込むためのフック。</summary>
-    protected virtual void DrawRuleToolbarExtras() { }
+    private void DrawAutoCollectButton()
+    {
+        using (new EditorGUI.DisabledScope(settings == null || settings.targetDirectory == null))
+        {
+            if (GUILayout.Button(new GUIContent("Auto Collect",
+                    L10n.T("Target Directory以下のFBXを走査し、未登録の名前を Rule として追加します",
+                           "Scan FBX under Target Directory and add unregistered names as Rules")),
+                GUILayout.Width(110)))
+            {
+                AutoCollectFromTargetDirectory();
+            }
+        }
+    }
+
+    private void AutoCollectFromTargetDirectory()
+    {
+        if (settings == null || settings.targetDirectory == null)
+        {
+            Debug.LogWarning("[FBX Animation Extractor] Target Directory is not set.");
+            return;
+        }
+
+        string targetPath = AssetDatabase.GetAssetPath(settings.targetDirectory);
+        if (string.IsNullOrEmpty(targetPath) || !AssetDatabase.IsValidFolder(targetPath))
+        {
+            Debug.LogWarning("[FBX Animation Extractor] Target Directory is invalid.");
+            return;
+        }
+
+        string[] fbxGuids = AssetDatabase.FindAssets("t:Model", new[] { targetPath });
+        List<string> fbxNames = fbxGuids
+            .Select(AssetDatabase.GUIDToAssetPath)
+            .Where(p => p.ToLower().EndsWith(".fbx"))
+            .Select(Path.GetFileNameWithoutExtension)
+            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (fbxNames.Count == 0)
+        {
+            Debug.LogWarning($"[FBX Animation Extractor] No FBX files found under \"{targetPath}\".");
+            return;
+        }
+
+        serializedSettings.ApplyModifiedProperties();
+        Undo.RecordObject(settings, "Auto Collect Rules from Target");
+
+        var existingNames = new HashSet<string>(
+            settings.postProcessRules
+                .Where(r => r != null && !string.IsNullOrWhiteSpace(r.targetName))
+                .Select(r => r.targetName.Trim().ToLowerInvariant()));
+
+        int added = 0;
+        foreach (string name in fbxNames)
+        {
+            string key = name.Trim().ToLowerInvariant();
+            if (existingNames.Contains(key)) continue;
+
+            settings.postProcessRules.Add(new AnimationPostProcessRule { targetName = name });
+            existingNames.Add(key);
+            added++;
+        }
+
+        EditorUtility.SetDirty(settings);
+        serializedSettings.Update();
+        settings.SaveSettings();
+
+        Debug.Log($"[FBX Animation Extractor] Auto Collect: scanned {fbxNames.Count} FBX, added {added} new rule(s).");
+    }
 
     private void DrawTemplateToolbar()
     {
@@ -375,11 +442,42 @@ public partial class FBXAnimationExtractorWindow
     private void DrawGeneratedClipShortcut(string targetName)
     {
         AnimationClip generatedClip = ResolveGeneratedClipForRule(targetName);
+        AnimationClip generatedGenericClip = ResolveGeneratedGenericClipForRule(targetName);
 
         using (new EditorGUI.DisabledScope(true))
         {
             EditorGUILayout.ObjectField("Clip", generatedClip, typeof(AnimationClip), false);
+            if (generatedGenericClip != null)
+            {
+                EditorGUILayout.ObjectField("Generic", generatedGenericClip, typeof(AnimationClip), false);
+            }
         }
+    }
+
+    private AnimationClip ResolveGeneratedGenericClipForRule(string targetName)
+    {
+        if (string.IsNullOrWhiteSpace(targetName) || settings.processCacheEntries == null)
+        {
+            return null;
+        }
+
+        string normalizedTargetName = targetName.Trim();
+        foreach (FbxProcessCacheEntry cacheEntry in settings.processCacheEntries)
+        {
+            if (cacheEntry == null || string.IsNullOrEmpty(cacheEntry.fbxAssetPath))
+                continue;
+
+            string fbxName = Path.GetFileNameWithoutExtension(cacheEntry.fbxAssetPath);
+            if (!string.Equals(fbxName, normalizedTargetName, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            if (!string.IsNullOrEmpty(cacheEntry.generatedGenericClipAssetPath))
+            {
+                return AssetDatabase.LoadAssetAtPath<AnimationClip>(cacheEntry.generatedGenericClipAssetPath);
+            }
+        }
+
+        return null;
     }
 
     private AnimationClip ResolveGeneratedClipForRule(string targetName)
@@ -484,10 +582,12 @@ public partial class FBXAnimationExtractorWindow
         SerializedProperty framesToDeleteProp = ruleProp.FindPropertyRelative("framesToDelete");
         SerializedProperty shiftToZeroFrameProp = ruleProp.FindPropertyRelative("shiftToZeroFrame");
         SerializedProperty genericExtractProp = ruleProp.FindPropertyRelative("genericExtract");
+        SerializedProperty genericOutputModeProp = ruleProp.FindPropertyRelative("genericOutputMode");
         SerializedProperty genericExtractTargetsProp = ruleProp.FindPropertyRelative("genericExtractTargets");
         SerializedProperty ignoreScaleKeyProp = ruleProp.FindPropertyRelative("ignoreScaleKey");
         SerializedProperty fixScaleProp = ruleProp.FindPropertyRelative("fixScale");
         SerializedProperty fixScaleObjectsProp = ruleProp.FindPropertyRelative("fixScaleObjects");
+        SerializedProperty eventMarkersProp = ruleProp.FindPropertyRelative("eventMarkers");
         SerializedProperty animationEventsProp = ruleProp.FindPropertyRelative("animationEvents");
 
         EditorGUILayout.PropertyField(targetNameProp, new GUIContent("Target Name", L10n.T("FBX名と完全一致（大文字小文字は無視）", "Case-insensitive exact match with the FBX file name")));
@@ -514,6 +614,7 @@ public partial class FBXAnimationExtractorWindow
         if (genericExtractProp.boolValue)
         {
             EditorGUI.indentLevel++;
+            EditorGUILayout.PropertyField(genericOutputModeProp, new GUIContent("Output Mode", L10n.T("Merge=Humanoid clipにマージ / Separate=<fbxName>_generic.anim へ分離出力", "Merge = combine into the humanoid clip / Separate = emit a sibling <fbxName>_generic.anim")));
             DrawGenericExtractTargets(genericExtractTargetsProp);
             EditorGUILayout.PropertyField(ignoreScaleKeyProp, new GUIContent("Ignore Scale Key", L10n.T("抽出時にTransformのScaleキー(m_LocalScale)を除外する", "Exclude Transform Scale (m_LocalScale) keys during extraction")));
             EditorGUILayout.PropertyField(fixScaleProp, new GUIContent("Fix Scale"));
@@ -522,8 +623,85 @@ public partial class FBXAnimationExtractorWindow
         }
 
         EditorGUILayout.Space(2);
-        EditorGUILayout.LabelField("Animation Events", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField("Event Markers (FBX keyframe → AnimationEvent)", EditorStyles.boldLabel);
+        EditorGUILayout.HelpBox(
+            L10n.T(
+                "対象オブジェクトのキー時刻ごとに AnimationEvent が Humanoid clip に打たれます。値は無視・時刻のみ使用。GenericExtract と同じ targetObjectName 規約で検索。",
+                "Each keyframe time on the target object becomes an Animation Event on the humanoid clip. Values are ignored - only times are used. Matching follows the same rule as GenericExtract targets."),
+            MessageType.None);
+        DrawEventMarkers(eventMarkersProp);
+
+        EditorGUILayout.Space(2);
+        EditorGUILayout.LabelField("Animation Events (Manual)", EditorStyles.boldLabel);
+        EditorGUILayout.HelpBox(
+            L10n.T(
+                "[DEPRECATED] 手書きのAnimationEventsは非推奨です。Event Markers (FBX側マーカー)への移行を推奨します。",
+                "[DEPRECATED] Manually authored Animation Events are deprecated. Prefer Event Markers driven by FBX keyframes."),
+            MessageType.Warning);
         DrawAnimationEvents(animationEventsProp);
+    }
+
+    private void DrawEventMarkers(SerializedProperty eventMarkersProp)
+    {
+        EditorGUILayout.LabelField($"Markers: {eventMarkersProp.arraySize}", EditorStyles.miniBoldLabel);
+
+        int deleteIndex = -1;
+
+        for (int i = 0; i < eventMarkersProp.arraySize; i++)
+        {
+            SerializedProperty markerProp = eventMarkersProp.GetArrayElementAtIndex(i);
+            SerializedProperty targetObjectNameProp = markerProp.FindPropertyRelative("targetObjectName");
+            SerializedProperty functionNameProp = markerProp.FindPropertyRelative("functionName");
+            SerializedProperty floatParameterProp = markerProp.FindPropertyRelative("floatParameter");
+            SerializedProperty intParameterProp = markerProp.FindPropertyRelative("intParameter");
+            SerializedProperty stringParameterProp = markerProp.FindPropertyRelative("stringParameter");
+            SerializedProperty objectReferenceParameterProp = markerProp.FindPropertyRelative("objectReferenceParameter");
+
+            string title = string.IsNullOrWhiteSpace(targetObjectNameProp.stringValue)
+                ? $"Marker {i + 1}"
+                : $"{i + 1}. {targetObjectNameProp.stringValue.Trim()} → {functionNameProp.stringValue}";
+
+            EditorGUILayout.BeginVertical("box");
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField(title, EditorStyles.miniBoldLabel);
+            GUILayout.FlexibleSpace();
+            if (GUILayout.Button("Delete", GUILayout.Width(70)))
+            {
+                deleteIndex = i;
+            }
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.PropertyField(targetObjectNameProp, new GUIContent("Target Object Name / Path", L10n.T("FBX内マーカーオブジェクトの名前またはhierarchy path", "Name or hierarchy path of the FBX marker object")));
+            EditorGUILayout.PropertyField(functionNameProp, new GUIContent("Function Name", L10n.T("呼び出す関数名", "Function name to invoke")));
+            EditorGUILayout.PropertyField(floatParameterProp, new GUIContent("Float Parameter"));
+            EditorGUILayout.PropertyField(intParameterProp, new GUIContent("Int Parameter"));
+            EditorGUILayout.PropertyField(stringParameterProp, new GUIContent("String Parameter"));
+            EditorGUILayout.PropertyField(objectReferenceParameterProp, new GUIContent("Object Reference"));
+            EditorGUILayout.EndVertical();
+
+            if (deleteIndex >= 0)
+            {
+                break;
+            }
+        }
+
+        if (deleteIndex >= 0)
+        {
+            eventMarkersProp.DeleteArrayElementAtIndex(deleteIndex);
+        }
+
+        if (GUILayout.Button("Add Event Marker"))
+        {
+            int newIndex = eventMarkersProp.arraySize;
+            eventMarkersProp.InsertArrayElementAtIndex(newIndex);
+            SerializedProperty newMarkerProp = eventMarkersProp.GetArrayElementAtIndex(newIndex);
+            newMarkerProp.FindPropertyRelative("targetObjectName").stringValue = string.Empty;
+            newMarkerProp.FindPropertyRelative("functionName").stringValue = string.Empty;
+            newMarkerProp.FindPropertyRelative("floatParameter").floatValue = 0f;
+            newMarkerProp.FindPropertyRelative("intParameter").intValue = 0;
+            newMarkerProp.FindPropertyRelative("stringParameter").stringValue = string.Empty;
+            newMarkerProp.FindPropertyRelative("objectReferenceParameter").objectReferenceValue = null;
+        }
     }
 
     private void DrawAnimationEvents(SerializedProperty animationEventsProp)
@@ -692,10 +870,12 @@ public partial class FBXAnimationExtractorWindow
         ruleProp.FindPropertyRelative("framesToDelete").ClearArray();
         ruleProp.FindPropertyRelative("shiftToZeroFrame").boolValue = true;
         ruleProp.FindPropertyRelative("genericExtract").boolValue = false;
+        ruleProp.FindPropertyRelative("genericOutputMode").enumValueIndex = (int)GenericOutputMode.Merge;
         ruleProp.FindPropertyRelative("genericExtractTargets").ClearArray();
         ruleProp.FindPropertyRelative("ignoreScaleKey").boolValue = false;
         ruleProp.FindPropertyRelative("fixScale").boolValue = false;
         ruleProp.FindPropertyRelative("fixScaleObjects").ClearArray();
+        ruleProp.FindPropertyRelative("eventMarkers").ClearArray();
         ruleProp.FindPropertyRelative("animationEvents").ClearArray();
     }
 }

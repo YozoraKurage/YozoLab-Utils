@@ -60,15 +60,16 @@ public partial class FBXAnimationExtractorWindow
                 // FBXのインポート設定を変更
                 ConfigureModelImporter(fbxPath, matchingRule);
 
-                // アニメーションクリップを抽出・保存
-                bool extracted = ExtractAndSaveAnimationClip(fbxPath, outputPath, fbxName);
+                // アニメーションクリップを抽出・保存。Separate モード時は generic clip も別途生成。
+                string generatedGenericClipPath;
+                bool extracted = ExtractAndSaveAnimationClip(fbxPath, outputPath, fbxName, out generatedGenericClipPath);
                 if (!extracted)
                 {
                     continue;
                 }
 
                 string generatedClipPath = $"{outputPath}/{fbxName}.anim";
-                UpdateProcessCache(fbxPath, sourceDependencyHash, ruleSignature, generatedClipPath);
+                UpdateProcessCache(fbxPath, sourceDependencyHash, ruleSignature, generatedClipPath, generatedGenericClipPath);
                 processedCount++;
 
                 Debug.Log($"[FBX Animation Extractor] Processed: {fbxName}");
@@ -179,8 +180,10 @@ public partial class FBXAnimationExtractorWindow
         importer.SaveAndReimport();
     }
 
-    private bool ExtractAndSaveAnimationClip(string fbxPath, string outputPath, string fbxName)
+    private bool ExtractAndSaveAnimationClip(string fbxPath, string outputPath, string fbxName, out string generatedGenericClipPath)
     {
+        generatedGenericClipPath = string.Empty;
+
         // FBXからアニメーションクリップを取得
         UnityEngine.Object[] assets = AssetDatabase.LoadAllAssetsAtPath(fbxPath);
         AnimationClip sourceClip = assets
@@ -196,15 +199,20 @@ public partial class FBXAnimationExtractorWindow
         string outputFilePath = $"{outputPath}/{fbxName}.anim";
         AnimationClip existingClip = AssetDatabase.LoadAssetAtPath<AnimationClip>(outputFilePath);
 
+        string genericOutputFilePath = $"{outputPath}/{fbxName}_generic.anim";
+        AnimationClip existingGenericClip = AssetDatabase.LoadAssetAtPath<AnimationClip>(genericOutputFilePath);
+
         // 抽出処理はメモリ上の一時クリップで行う
         AnimationClip workingClip = new AnimationClip();
+        AnimationClip workingGenericClip = null;
         try
         {
             EditorUtility.CopySerialized(sourceClip, workingClip);
             workingClip.name = fbxName;
 
-            ApplyPostProcessRules(workingClip, fbxName, fbxPath);
+            workingGenericClip = ApplyPostProcessRules(workingClip, fbxName, fbxPath);
 
+            // --- Humanoid clip 保存 -------------------------------------------------
             if (existingClip != null)
             {
                 // 既存ファイルがある場合: メタデータを保存してから中身を置き換え(GUID保持)
@@ -232,10 +240,46 @@ public partial class FBXAnimationExtractorWindow
                 newClip.name = fbxName;
                 AssetDatabase.CreateAsset(newClip, outputFilePath);
             }
+
+            // --- Generic clip 保存 (Separate モード時のみ) --------------------------
+            if (workingGenericClip != null)
+            {
+                if (existingGenericClip != null)
+                {
+                    AnimationClipSettings existingGenericSettings = AnimationUtility.GetAnimationClipSettings(existingGenericClip);
+                    CopyAnimationCurves(workingGenericClip, existingGenericClip);
+
+                    float genericCurvesEnd = GetCurvesEndTime(workingGenericClip);
+                    if (genericCurvesEnd > 0f)
+                    {
+                        existingGenericSettings.startTime = 0f;
+                        existingGenericSettings.stopTime  = genericCurvesEnd;
+                    }
+                    AnimationUtility.SetAnimationClipSettings(existingGenericClip, existingGenericSettings);
+                    EditorUtility.SetDirty(existingGenericClip);
+                }
+                else
+                {
+                    AnimationClip newGenericClip = new AnimationClip();
+                    EditorUtility.CopySerialized(workingGenericClip, newGenericClip);
+                    newGenericClip.name = $"{fbxName}_generic";
+                    AssetDatabase.CreateAsset(newGenericClip, genericOutputFilePath);
+                }
+                generatedGenericClipPath = genericOutputFilePath;
+            }
+            else if (existingGenericClip != null)
+            {
+                // 以前 Separate モードで生成された _generic.anim を Merge モードへ戻したケース。
+                // 残骸を空アニメ化して中身を消す(GUIDは保持し、外部参照を壊さない)。
+                existingGenericClip.ClearCurves();
+                AnimationUtility.SetAnimationEvents(existingGenericClip, new AnimationEvent[0]);
+                EditorUtility.SetDirty(existingGenericClip);
+            }
         }
         finally
         {
             if (workingClip != null) DestroyImmediate(workingClip);
+            if (workingGenericClip != null) DestroyImmediate(workingGenericClip);
         }
 
         return true;
@@ -306,7 +350,7 @@ public partial class FBXAnimationExtractorWindow
             && string.Equals(cacheEntry.ruleSignature, ruleSignature, StringComparison.Ordinal);
     }
 
-    private void UpdateProcessCache(string fbxPath, string sourceDependencyHash, string ruleSignature, string generatedClipPath)
+    private void UpdateProcessCache(string fbxPath, string sourceDependencyHash, string ruleSignature, string generatedClipPath, string generatedGenericClipPath)
     {
         if (settings.processCacheEntries == null)
         {
@@ -324,6 +368,7 @@ public partial class FBXAnimationExtractorWindow
         cacheEntry.sourceDependencyHash = sourceDependencyHash;
         cacheEntry.ruleSignature = ruleSignature;
         cacheEntry.generatedClipAssetPath = generatedClipPath;
+        cacheEntry.generatedGenericClipAssetPath = generatedGenericClipPath ?? string.Empty;
         EditorUtility.SetDirty(settings);
     }
 
