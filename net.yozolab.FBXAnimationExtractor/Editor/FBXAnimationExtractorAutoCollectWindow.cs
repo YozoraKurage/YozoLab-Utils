@@ -79,6 +79,7 @@ public class FBXAnimationExtractorAutoCollectWindow : FBXAnimationExtractorWindo
 
         EditorUtility.SetDirty(settings);
         serializedSettings.Update();
+        settings.SaveSettings();
 
         Debug.Log($"[FBX Animation Extractor] Auto Collect: scanned {fbxNames.Count} FBX, added {added} new rule(s).");
     }

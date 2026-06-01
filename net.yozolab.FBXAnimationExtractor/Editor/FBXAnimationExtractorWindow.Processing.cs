@@ -11,7 +11,8 @@ using System.Collections.Generic;
 /// </summary>
 public partial class FBXAnimationExtractorWindow
 {
-    private void ProcessFBXFiles()
+    /// <param name="ignoreCache">true のとき差分キャッシュを無視し、全 FBX を強制的に再エクスポートする。</param>
+    private void ProcessFBXFiles(bool ignoreCache = false)
     {
         string targetPath = AssetDatabase.GetAssetPath(settings.targetDirectory);
         string outputPath = AssetDatabase.GetAssetPath(settings.outputDirectory);
@@ -29,7 +30,7 @@ public partial class FBXAnimationExtractorWindow
             return;
         }
 
-        Debug.Log($"[FBX Animation Extractor] Processing started: {fbxPaths.Length} FBX file(s)");
+        Debug.Log($"[FBX Animation Extractor] Processing started: {fbxPaths.Length} FBX file(s){(ignoreCache ? " (cache ignored: full re-export)" : string.Empty)}");
         int processedCount = 0;
         int skippedCount = 0;
 
@@ -47,7 +48,9 @@ public partial class FBXAnimationExtractorWindow
                     $"Processing: {fbxName} ({i + 1}/{fbxPaths.Length})",
                     (float)i / fbxPaths.Length);
 
-                if (ShouldSkipProcessing(fbxPath, fbxName, outputPath, matchingRule, out sourceDependencyHash, out ruleSignature))
+                // out 値（ハッシュ/署名）はキャッシュ更新に必要なため常に計算し、スキップ判定だけ ignoreCache で抑止する
+                bool canSkip = ShouldSkipProcessing(fbxPath, fbxName, outputPath, matchingRule, out sourceDependencyHash, out ruleSignature);
+                if (!ignoreCache && canSkip)
                 {
                     skippedCount++;
                     Debug.Log($"[FBX Animation Extractor] No changes, skipped: {fbxName}");
@@ -73,6 +76,7 @@ public partial class FBXAnimationExtractorWindow
 
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
+            settings.SaveSettings();
 
             Debug.Log($"[FBX Animation Extractor] All done: total={fbxPaths.Length}, processed={processedCount}, skipped={skippedCount}");
         }
@@ -406,6 +410,7 @@ public partial class FBXAnimationExtractorWindow
             }
 
             AssetDatabase.SaveAssets();
+            settings.SaveSettings();
             Debug.Log($"[FBX Animation Extractor] Refresh: cleared {count} clip(s) under \"{outputPath}\".");
         }
         finally

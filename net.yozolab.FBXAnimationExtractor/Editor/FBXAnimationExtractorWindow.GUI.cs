@@ -79,6 +79,29 @@ public partial class FBXAnimationExtractorWindow
             }
         }
 
+        using (new EditorGUI.DisabledScope(!isValid))
+        {
+            if (GUILayout.Button(new GUIContent("Re-export All",
+                    L10n.T("差分キャッシュを無視し、対象フォルダの全FBXを強制的に再エクスポートします",
+                           "Ignore the diff cache and force a full re-export of every FBX in the target folder")),
+                GUILayout.Height(34), GUILayout.Width(140)))
+            {
+                bool confirmed = EditorUtility.DisplayDialog(
+                    L10n.T("全再エクスポート", "Re-export All"),
+                    L10n.T(
+                        "キャッシュを無視して対象フォルダの全FBXを再エクスポートします。\nファイル数が多いと時間がかかります。実行しますか?",
+                        "Ignore the cache and re-export every FBX in the target folder.\nThis can take a while for large folders. Continue?"),
+                    L10n.T("実行", "OK"),
+                    L10n.T("キャンセル", "Cancel"));
+
+                if (confirmed)
+                {
+                    serializedSettings.ApplyModifiedProperties();
+                    ProcessFBXFiles(true);
+                }
+            }
+        }
+
         using (new EditorGUI.DisabledScope(!canRefresh))
         {
             if (GUILayout.Button(new GUIContent("Refresh",
