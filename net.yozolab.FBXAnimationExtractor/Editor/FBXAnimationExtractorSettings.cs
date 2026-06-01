@@ -4,10 +4,15 @@ using System;
 using System.Collections.Generic;
 
 /// <summary>
-/// ScriptableObject that stores FBX Animation Extractor settings.
+/// FBX Animation Extractor の設定。
+///
+/// VPM/UPM でパッケージを更新すると、パッケージ配下のファイルは丸ごと入れ替えられる。
+/// 以前はこの設定をパッケージ内の .asset に保存していたため、更新のたびにユーザーの設定が
+/// 空アセットで上書きされて消えていた。これを防ぐため、設定はパッケージ外の
+/// ProjectSettings/ に保存する ScriptableSingleton として保持する。
 /// </summary>
-[CreateAssetMenu(fileName = "FBXAnimationExtractorSettings", menuName = "YozoLab/FBX Animation Extractor Settings")]
-public class FBXAnimationExtractorSettings : ScriptableObject
+[FilePath("ProjectSettings/FBXAnimationExtractorSettings.asset", FilePathAttribute.Location.ProjectFolder)]
+public class FBXAnimationExtractorSettings : ScriptableSingleton<FBXAnimationExtractorSettings>
 {
     [Tooltip("Folder containing the FBX files to process")]
     public DefaultAsset targetDirectory;
@@ -20,6 +25,12 @@ public class FBXAnimationExtractorSettings : ScriptableObject
 
     [HideInInspector]
     public List<FbxProcessCacheEntry> processCacheEntries = new List<FbxProcessCacheEntry>();
+
+    /// <summary>ProjectSettings/ 配下のファイルへ即時保存する。</summary>
+    public void SaveSettings()
+    {
+        Save(true);
+    }
 }
 
 [Serializable]

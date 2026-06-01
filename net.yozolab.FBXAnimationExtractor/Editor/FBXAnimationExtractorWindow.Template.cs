@@ -70,6 +70,7 @@ public partial class FBXAnimationExtractorWindow
 
         EditorUtility.SetDirty(settings);
         serializedSettings.Update();
+        settings.SaveSettings();
         Debug.Log($"[FBX Animation Extractor] Template pasted to {applied} rule(s).");
     }
 
