@@ -626,8 +626,8 @@ public partial class FBXAnimationExtractorWindow
         EditorGUILayout.LabelField("Event Markers (FBX value pulse → AnimationEvent)", EditorStyles.boldLabel);
         EditorGUILayout.HelpBox(
             L10n.T(
-                "対象オブジェクトの local position を「イベント無し=0付近 / イベント有り>0.5」のパルスで打つと、0.5 を超えるフレームが AnimationEvent になります(連続区間ごとにピークフレームへ1個)。値の変化で表現するため resample/圧縮に強い。GenericExtract と同じ targetObjectName 規約で検索。",
-                "Pulse the target object's local position above 0.5 (0 = no event) on the frames that should fire. Each above-threshold run becomes one Animation Event at its peak frame. Encoding timing as a value change keeps it robust to import resampling/compression. Matching follows the same rule as GenericExtract targets."),
+                "対象オブジェクトの local position を「イベント無し=0付近 / イベント有り>0.5」で打つと、0.5 を超える各フレームに AnimationEvent が立ちます(しきい値を上回っている間は連続して発火)。値の変化で表現するため resample/圧縮に強い。GenericExtract と同じ targetObjectName 規約で検索。",
+                "Raise the target object's local position above 0.5 (0 = no event) on the frames that should fire. Every frame above the threshold gets an Animation Event (events keep firing while above 0.5). Encoding timing as a value change keeps it robust to import resampling/compression. Matching follows the same rule as GenericExtract targets."),
             MessageType.None);
         DrawEventMarkers(eventMarkersProp);
 

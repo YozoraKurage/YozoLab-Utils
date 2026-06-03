@@ -317,7 +317,7 @@ public partial class FBXAnimationExtractorWindow
     // ═══════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// FBX由来Eventの集計バッファ。functionName と紐付くイベント発火時刻(値パルスのピーク)を集める。
+    /// FBX由来Eventの集計バッファ。functionName と紐付くイベント発火時刻(threshold超フレーム)を集める。
     /// ProcessGenericReimportPass 内で binding ごとに追加する。
     /// </summary>
     private struct MarkerEventSource
@@ -831,9 +831,9 @@ public partial class FBXAnimationExtractorWindow
 
     /// <summary>
     /// 値パルス方式のマーカー検出。
-    /// curve をフレーム単位でサンプリングし、値が threshold(0.5) を超える連続区間ごとに 1 イベントを立てる。
-    /// イベント時刻は区間内のピーク(最大値)フレーム(同値なら最初のフレーム)。
-    /// 「イベント無し=0付近 / イベント有り>0.5 のパルス」を local position に打つ運用。
+    /// curve をフレーム単位でサンプリングし、値が threshold(0.5) を超える各フレームにイベントを立てる
+    /// (しきい値を上回っている間は連続して打つ)。
+    /// 「イベント無し=0付近 / イベント有り>0.5」を local position に打つ運用。
     /// 値の変化として埋め込むため KeyframeReduction でも残り、resample にも左右されない。
     /// </summary>
     private void CollectThresholdMarkerEvents(AnimationCurve curve, EventMarkerRule marker, float frameRate, List<MarkerEventSource> sink)
@@ -849,36 +849,13 @@ public partial class FBXAnimationExtractorWindow
         int startFrame = Mathf.FloorToInt(curve.keys[0].time * frameRate);
         int endFrame = Mathf.CeilToInt(curve.keys[curve.keys.Length - 1].time * frameRate);
 
-        bool inRun = false;
-        int peakFrame = 0;
-        float peakValue = 0f;
-
         for (int frame = startFrame; frame <= endFrame; frame++)
         {
             float time = frame / frameRate;
-            float value = curve.Evaluate(time);
-            bool above = value > threshold;
-
-            if (above)
+            if (curve.Evaluate(time) > threshold)
             {
-                if (!inRun || value > peakValue)
-                {
-                    peakFrame = frame;
-                    peakValue = value;
-                }
-                inRun = true;
+                sink.Add(new MarkerEventSource { marker = marker, time = time });
             }
-            else if (inRun)
-            {
-                sink.Add(new MarkerEventSource { marker = marker, time = peakFrame / frameRate });
-                inRun = false;
-            }
-        }
-
-        // 末尾が threshold 超のまま終端に達したケース
-        if (inRun)
-        {
-            sink.Add(new MarkerEventSource { marker = marker, time = peakFrame / frameRate });
         }
     }
 
