@@ -317,7 +317,7 @@ public partial class FBXAnimationExtractorWindow
     // ═══════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// FBX由来Eventの集計バッファ。functionName と紐付くキー時刻を集める。
+    /// FBX由来Eventの集計バッファ。functionName と紐付くイベント発火時刻(値パルスのピーク)を集める。
     /// ProcessGenericReimportPass 内で binding ごとに追加する。
     /// </summary>
     private struct MarkerEventSource
@@ -349,8 +349,9 @@ public partial class FBXAnimationExtractorWindow
 
         bool hasMarkers = rule.eventMarkers != null && rule.eventMarkers.Count > 0;
 
-        // (M) マーカー収集パス: 圧縮Off で値の変化しないキーも保持。prop curve は出力しない。
-        // KeyframeReduction はアノテーション専用キー(値が動かない)を削るため、マーカー側だけは Off 必須。
+        // (M) マーカー収集パス: prop curve は出力せず、値パルスの波形だけを取得する。
+        // 値の変化を threshold(0.5) 判定するので圧縮で疎キーが消えても問題ないが、
+        // パルス波形を忠実にサンプリングするため圧縮Off(error=0)で取り込む。
         if (hasMarkers)
         {
             ProcessGenericReimportPass(
@@ -432,7 +433,7 @@ public partial class FBXAnimationExtractorWindow
 
             if (compression == ModelImporterAnimationCompression.Off)
             {
-                // マーカーパス: アノテーションキー(値変化なし)を Unity に削られないよう error=0 で固定
+                // マーカーパス: 値パルスの波形を歪ませないよう error=0 で取り込む
                 importer.animationPositionError = 0f;
                 importer.animationRotationError = 0f;
                 importer.animationScaleError    = 0f;
@@ -458,20 +459,17 @@ public partial class FBXAnimationExtractorWindow
                     continue;
 
                 // --- (1) EventMarker 走査 (マーカー収集パスのみ) ------------------------------
-                EventMarkerRule matchedMarker = null;
-                if (collectMarkers)
+                // 値パルス方式: マーカーは local position に「イベント無し=0付近 / イベント有り>0.5」の
+                // パルスとして打たれる。値の変化をしきい値判定するので、resample/compression で
+                // 疎キーが消えても問題ない。scale(基準値1)/rotation(quaternion w=1)は基準値が0でないため、
+                // 基準値0の position チャンネルのみを判定対象にする。
+                if (collectMarkers && IsPositionProperty(binding.propertyName))
                 {
-                    matchedMarker = TryMatchEventMarker(binding.path, rule.eventMarkers);
+                    EventMarkerRule matchedMarker = TryMatchEventMarker(binding.path, rule.eventMarkers);
                     if (matchedMarker != null)
                     {
                         AnimationCurve markerCurve = AnimationUtility.GetEditorCurve(genericClip, binding);
-                        if (markerCurve != null && markerCurve.keys.Length > 0)
-                        {
-                            foreach (var key in markerCurve.keys)
-                            {
-                                markerEventSources.Add(new MarkerEventSource { marker = matchedMarker, time = key.time });
-                            }
-                        }
+                        CollectThresholdMarkerEvents(markerCurve, matchedMarker, genericClip.frameRate, markerEventSources);
                     }
                 }
 
@@ -555,7 +553,7 @@ public partial class FBXAnimationExtractorWindow
 
     /// <summary>
     /// 収集した MarkerEventSource を AnimationEvent として humanoid clip に注入する。
-    /// 同じ marker・同じ時刻が複数 binding(position/rotation/scale)から重複して入るため、
+    /// 同じ marker・同じ時刻が複数 binding(position x/y/z)から重複して入るため、
     /// (marker, time) 単位で重複排除してから打つ。
     /// shiftToZeroFrame / framesToDelete の調整も AnimationCurve と同じ規則で反映する。
     /// </summary>
@@ -822,6 +820,66 @@ public partial class FBXAnimationExtractorWindow
         return propertyName == "m_LocalScale.x"
             || propertyName == "m_LocalScale.y"
             || propertyName == "m_LocalScale.z";
+    }
+
+    private static bool IsPositionProperty(string propertyName)
+    {
+        return propertyName == "m_LocalPosition.x"
+            || propertyName == "m_LocalPosition.y"
+            || propertyName == "m_LocalPosition.z";
+    }
+
+    /// <summary>
+    /// 値パルス方式のマーカー検出。
+    /// curve をフレーム単位でサンプリングし、値が threshold(0.5) を超える連続区間ごとに 1 イベントを立てる。
+    /// イベント時刻は区間内のピーク(最大値)フレーム(同値なら最初のフレーム)。
+    /// 「イベント無し=0付近 / イベント有り>0.5 のパルス」を local position に打つ運用。
+    /// 値の変化として埋め込むため KeyframeReduction でも残り、resample にも左右されない。
+    /// </summary>
+    private void CollectThresholdMarkerEvents(AnimationCurve curve, EventMarkerRule marker, float frameRate, List<MarkerEventSource> sink)
+    {
+        const float threshold = 0.5f;
+
+        if (curve == null || curve.keys.Length == 0)
+            return;
+
+        if (frameRate <= 0f)
+            frameRate = 30f;
+
+        int startFrame = Mathf.FloorToInt(curve.keys[0].time * frameRate);
+        int endFrame = Mathf.CeilToInt(curve.keys[curve.keys.Length - 1].time * frameRate);
+
+        bool inRun = false;
+        int peakFrame = 0;
+        float peakValue = 0f;
+
+        for (int frame = startFrame; frame <= endFrame; frame++)
+        {
+            float time = frame / frameRate;
+            float value = curve.Evaluate(time);
+            bool above = value > threshold;
+
+            if (above)
+            {
+                if (!inRun || value > peakValue)
+                {
+                    peakFrame = frame;
+                    peakValue = value;
+                }
+                inRun = true;
+            }
+            else if (inRun)
+            {
+                sink.Add(new MarkerEventSource { marker = marker, time = peakFrame / frameRate });
+                inRun = false;
+            }
+        }
+
+        // 末尾が threshold 超のまま終端に達したケース
+        if (inRun)
+        {
+            sink.Add(new MarkerEventSource { marker = marker, time = peakFrame / frameRate });
+        }
     }
 
     private string GetPathLeafName(string path)

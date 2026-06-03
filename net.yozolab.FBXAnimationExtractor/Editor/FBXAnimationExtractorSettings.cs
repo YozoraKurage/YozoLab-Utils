@@ -95,7 +95,7 @@ public class AnimationPostProcessRule
     [Tooltip("Output mode for Generic Extract. Merge keeps the existing behavior; Separate writes non-humanoid curves to <fbxName>_generic.anim")]
     public GenericOutputMode genericOutputMode = GenericOutputMode.Merge;
 
-    [Tooltip("Event markers driven by FBX keyframes. Keys on the specified object become Animation Events at the same time on the humanoid clip")]
+    [Tooltip("Event markers driven by an FBX value pulse. Frames where the marker object's local position exceeds 0.5 (0 = no event) become Animation Events on the humanoid clip")]
     public List<EventMarkerRule> eventMarkers = new List<EventMarkerRule>();
 
     [Tooltip("[DEPRECATED] Manually authored Animation Events placed at a normalized time. Prefer eventMarkers driven by FBX keyframes")]
@@ -103,9 +103,13 @@ public class AnimationPostProcessRule
 }
 
 /// <summary>
-/// Event marker rule that converts FBX keyframes on a specific object
-/// into Animation Events on the generated humanoid clip.
-/// The target object's curve values are ignored - only key times are used.
+/// Event marker rule that converts a value pulse on a specific object's
+/// local position into Animation Events on the generated humanoid clip.
+/// Author the marker so its local position is ~0 when no event should fire
+/// and rises above 0.5 (e.g. a 0 -> 1 step/pulse) on the frames that should
+/// fire an event. Each contiguous above-threshold run produces one event at
+/// its peak frame. Encoding the timing as a value change keeps it robust to
+/// Unity's import resampling / keyframe reduction.
 /// </summary>
 [Serializable]
 public class EventMarkerRule
