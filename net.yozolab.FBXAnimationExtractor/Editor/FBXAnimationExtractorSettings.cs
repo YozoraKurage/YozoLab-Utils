@@ -107,9 +107,9 @@ public class AnimationPostProcessRule
 /// local position into Animation Events on the generated humanoid clip.
 /// Author the marker so its local position is ~0 when no event should fire
 /// and rises above 0.5 (e.g. a 0 -> 1 step/pulse) on the frames that should
-/// fire an event. Each contiguous above-threshold run produces one event at
-/// its peak frame. Encoding the timing as a value change keeps it robust to
-/// Unity's import resampling / keyframe reduction.
+/// fire an event. Every frame whose value stays above the threshold produces
+/// an event (events keep firing while above 0.5). Encoding the timing as a
+/// value change keeps it robust to Unity's import resampling / keyframe reduction.
 /// </summary>
 [Serializable]
 public class EventMarkerRule
