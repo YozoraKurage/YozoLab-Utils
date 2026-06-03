@@ -623,11 +623,11 @@ public partial class FBXAnimationExtractorWindow
         }
 
         EditorGUILayout.Space(2);
-        EditorGUILayout.LabelField("Event Markers (FBX keyframe → AnimationEvent)", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField("Event Markers (FBX value pulse → AnimationEvent)", EditorStyles.boldLabel);
         EditorGUILayout.HelpBox(
             L10n.T(
-                "対象オブジェクトのキー時刻ごとに AnimationEvent が Humanoid clip に打たれます。値は無視・時刻のみ使用。GenericExtract と同じ targetObjectName 規約で検索。",
-                "Each keyframe time on the target object becomes an Animation Event on the humanoid clip. Values are ignored - only times are used. Matching follows the same rule as GenericExtract targets."),
+                "対象オブジェクトの local position を「イベント無し=0付近 / イベント有り>0.5」のパルスで打つと、0.5 を超えるフレームが AnimationEvent になります(連続区間ごとにピークフレームへ1個)。値の変化で表現するため resample/圧縮に強い。GenericExtract と同じ targetObjectName 規約で検索。",
+                "Pulse the target object's local position above 0.5 (0 = no event) on the frames that should fire. Each above-threshold run becomes one Animation Event at its peak frame. Encoding timing as a value change keeps it robust to import resampling/compression. Matching follows the same rule as GenericExtract targets."),
             MessageType.None);
         DrawEventMarkers(eventMarkersProp);
 
