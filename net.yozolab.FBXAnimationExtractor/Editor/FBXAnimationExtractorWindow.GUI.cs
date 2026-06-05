@@ -12,7 +12,10 @@ public partial class FBXAnimationExtractorWindow
 {
     private void OnGUI()
     {
-        if (serializedSettings == null)
+        // シーン再生/停止を挟むと ScriptableSingleton が破棄・再生成され、
+        // 既存の SerializedObject / SerializedProperty はターゲット破棄済みで無効になる。
+        // serializedSettings 自体は null にならないため、targetObject の破棄を検知して再ロードする。
+        if (serializedSettings == null || serializedSettings.targetObject == null || settings == null)
         {
             LoadOrCreateSettings();
         }
