@@ -65,6 +65,9 @@ public class AnimationPostProcessRule
     [Tooltip("Target animation name (case-insensitive exact match with FBX file name)")]
     public string targetName;
 
+    [Tooltip("Per-rule output folder. When set, clips matched by this rule are written here instead of the global Output Directory")]
+    public DefaultAsset outputDirectoryOverride;
+
     [Tooltip("Enable Use Other Avatar Definition")]
     public bool useOtherAvatarDefinition = false;
 
@@ -97,9 +100,6 @@ public class AnimationPostProcessRule
 
     [Tooltip("Event markers driven by an FBX value pulse. Frames where the marker object's local position exceeds 0.5 (0 = no event) become Animation Events on the humanoid clip")]
     public List<EventMarkerRule> eventMarkers = new List<EventMarkerRule>();
-
-    [Tooltip("[DEPRECATED] Manually authored Animation Events placed at a normalized time. Prefer eventMarkers driven by FBX keyframes")]
-    public List<AnimationEventRule> animationEvents = new List<AnimationEventRule>();
 }
 
 /// <summary>
@@ -147,30 +147,4 @@ public class GenericExtractTargetRule
 
     [Tooltip("Destination path for remapping (e.g. Root/Armature)")]
     public string repathTo;
-}
-
-/// <summary>
-/// Animation Event placed on the generated clip at a normalized time position.
-/// </summary>
-[Serializable]
-public class AnimationEventRule
-{
-    [Tooltip("Function name invoked by the Animation Event")]
-    public string functionName;
-
-    [Tooltip("Position within the clip (0 = start, 1 = end). Default 0.9 = 90%")]
-    [Range(0f, 1f)]
-    public float normalizedTime = 0.9f;
-
-    [Tooltip("Float parameter passed to the function")]
-    public float floatParameter;
-
-    [Tooltip("Int parameter passed to the function")]
-    public int intParameter;
-
-    [Tooltip("String parameter passed to the function")]
-    public string stringParameter;
-
-    [Tooltip("Object reference parameter passed to the function")]
-    public UnityEngine.Object objectReferenceParameter;
 }

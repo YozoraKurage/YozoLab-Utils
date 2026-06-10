@@ -22,6 +22,7 @@ public partial class FBXAnimationExtractorWindow
         ruleTemplate = new RuleDetailTemplate
         {
             sourceTargetName = string.IsNullOrWhiteSpace(src.targetName) ? "(No Target Name)" : src.targetName.Trim(),
+            outputDirectoryOverride = src.outputDirectoryOverride,
             useOtherAvatarDefinition = src.useOtherAvatarDefinition,
             avatarDefinition = src.avatarDefinition,
             framesToDelete = src.framesToDelete == null ? new List<int>() : new List<int>(src.framesToDelete),
@@ -33,7 +34,6 @@ public partial class FBXAnimationExtractorWindow
             fixScale = src.fixScale,
             fixScaleObjects = src.fixScaleObjects == null ? new List<string>() : new List<string>(src.fixScaleObjects),
             eventMarkers = CopyEventMarkers(src.eventMarkers),
-            animationEvents = CopyEventRules(src.animationEvents),
         };
         Debug.Log($"[FBX Animation Extractor] Template copied from \"{ruleTemplate.sourceTargetName}\".");
     }
@@ -53,6 +53,7 @@ public partial class FBXAnimationExtractorWindow
             if (dst == null) continue;
 
             // Target Name は保持
+            dst.outputDirectoryOverride = ruleTemplate.outputDirectoryOverride;
             dst.useOtherAvatarDefinition = ruleTemplate.useOtherAvatarDefinition;
             dst.avatarDefinition = ruleTemplate.avatarDefinition;
             dst.framesToDelete = ruleTemplate.framesToDelete == null
@@ -68,7 +69,6 @@ public partial class FBXAnimationExtractorWindow
                 ? new List<string>()
                 : new List<string>(ruleTemplate.fixScaleObjects);
             dst.eventMarkers = CopyEventMarkers(ruleTemplate.eventMarkers);
-            dst.animationEvents = CopyEventRules(ruleTemplate.animationEvents);
             applied++;
         }
 
@@ -90,26 +90,6 @@ public partial class FBXAnimationExtractorWindow
                 targetObjectName = t.targetObjectName,
                 enableRepath = t.enableRepath,
                 repathTo = t.repathTo,
-            });
-        }
-        return result;
-    }
-
-    private static List<AnimationEventRule> CopyEventRules(List<AnimationEventRule> src)
-    {
-        var result = new List<AnimationEventRule>();
-        if (src == null) return result;
-        foreach (AnimationEventRule e in src)
-        {
-            if (e == null) { result.Add(null); continue; }
-            result.Add(new AnimationEventRule
-            {
-                functionName = e.functionName,
-                normalizedTime = e.normalizedTime,
-                floatParameter = e.floatParameter,
-                intParameter = e.intParameter,
-                stringParameter = e.stringParameter,
-                objectReferenceParameter = e.objectReferenceParameter,
             });
         }
         return result;
@@ -141,6 +121,7 @@ public partial class FBXAnimationExtractorWindow
     protected sealed class RuleDetailTemplate
     {
         public string sourceTargetName;
+        public DefaultAsset outputDirectoryOverride;
         public bool useOtherAvatarDefinition;
         public Avatar avatarDefinition;
         public List<int> framesToDelete;
@@ -152,6 +133,5 @@ public partial class FBXAnimationExtractorWindow
         public bool fixScale;
         public List<string> fixScaleObjects;
         public List<EventMarkerRule> eventMarkers;
-        public List<AnimationEventRule> animationEvents;
     }
 }

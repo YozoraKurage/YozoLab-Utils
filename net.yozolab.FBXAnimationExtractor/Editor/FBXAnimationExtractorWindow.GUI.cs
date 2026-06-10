@@ -526,12 +526,7 @@ public partial class FBXAnimationExtractorWindow
             }
         }
 
-        if (outputDirectoryProp == null || outputDirectoryProp.objectReferenceValue == null)
-        {
-            return string.Empty;
-        }
-
-        string outputPath = AssetDatabase.GetAssetPath(outputDirectoryProp.objectReferenceValue);
+        string outputPath = GetRuleOutputFolder(FindMatchingRule(normalizedTargetName));
         if (string.IsNullOrEmpty(outputPath))
         {
             return string.Empty;
@@ -580,6 +575,7 @@ public partial class FBXAnimationExtractorWindow
     private void DrawRuleEditor(SerializedProperty ruleProp)
     {
         SerializedProperty targetNameProp = ruleProp.FindPropertyRelative("targetName");
+        SerializedProperty outputDirectoryOverrideProp = ruleProp.FindPropertyRelative("outputDirectoryOverride");
         SerializedProperty useOtherAvatarDefinitionProp = ruleProp.FindPropertyRelative("useOtherAvatarDefinition");
         SerializedProperty avatarDefinitionProp = ruleProp.FindPropertyRelative("avatarDefinition");
         SerializedProperty framesToDeleteProp = ruleProp.FindPropertyRelative("framesToDelete");
@@ -591,9 +587,23 @@ public partial class FBXAnimationExtractorWindow
         SerializedProperty fixScaleProp = ruleProp.FindPropertyRelative("fixScale");
         SerializedProperty fixScaleObjectsProp = ruleProp.FindPropertyRelative("fixScaleObjects");
         SerializedProperty eventMarkersProp = ruleProp.FindPropertyRelative("eventMarkers");
-        SerializedProperty animationEventsProp = ruleProp.FindPropertyRelative("animationEvents");
 
         EditorGUILayout.PropertyField(targetNameProp, new GUIContent("Target Name", L10n.T("FBX名と完全一致（大文字小文字は無視）", "Case-insensitive exact match with the FBX file name")));
+
+        EditorGUILayout.Space(2);
+        EditorGUILayout.LabelField("Output", EditorStyles.boldLabel);
+        EditorGUILayout.PropertyField(outputDirectoryOverrideProp, new GUIContent("Output Directory (Override)", L10n.T("このRule専用の出力先フォルダ。未設定なら上部のOutput Directoryを使用します", "Per-rule output folder. Leave empty to use the global Output Directory above")));
+        if (outputDirectoryOverrideProp.objectReferenceValue != null)
+        {
+            string overridePath = AssetDatabase.GetAssetPath(outputDirectoryOverrideProp.objectReferenceValue);
+            if (string.IsNullOrEmpty(overridePath) || !AssetDatabase.IsValidFolder(overridePath))
+            {
+                EditorGUILayout.HelpBox(
+                    L10n.T("Output Directory (Override) にはフォルダを指定してください。グローバルのOutput Directoryにフォールバックします。",
+                           "Output Directory (Override) must be a folder. Falling back to the global Output Directory."),
+                    MessageType.Warning);
+            }
+        }
 
         EditorGUILayout.Space(2);
         EditorGUILayout.LabelField("Avatar Import", EditorStyles.boldLabel);
@@ -633,15 +643,6 @@ public partial class FBXAnimationExtractorWindow
                 "Raise the target object's local position above 0.5 (0 = no event) on the frames that should fire. Every frame above the threshold gets an Animation Event (events keep firing while above 0.5). Encoding timing as a value change keeps it robust to import resampling/compression. Matching follows the same rule as GenericExtract targets."),
             MessageType.None);
         DrawEventMarkers(eventMarkersProp);
-
-        EditorGUILayout.Space(2);
-        EditorGUILayout.LabelField("Animation Events (Manual)", EditorStyles.boldLabel);
-        EditorGUILayout.HelpBox(
-            L10n.T(
-                "[DEPRECATED] 手書きのAnimationEventsは非推奨です。Event Markers (FBX側マーカー)への移行を推奨します。",
-                "[DEPRECATED] Manually authored Animation Events are deprecated. Prefer Event Markers driven by FBX keyframes."),
-            MessageType.Warning);
-        DrawAnimationEvents(animationEventsProp);
     }
 
     private void DrawEventMarkers(SerializedProperty eventMarkersProp)
@@ -704,71 +705,6 @@ public partial class FBXAnimationExtractorWindow
             newMarkerProp.FindPropertyRelative("intParameter").intValue = 0;
             newMarkerProp.FindPropertyRelative("stringParameter").stringValue = string.Empty;
             newMarkerProp.FindPropertyRelative("objectReferenceParameter").objectReferenceValue = null;
-        }
-    }
-
-    private void DrawAnimationEvents(SerializedProperty animationEventsProp)
-    {
-        EditorGUILayout.LabelField($"Events: {animationEventsProp.arraySize}", EditorStyles.miniBoldLabel);
-
-        int deleteIndex = -1;
-
-        for (int i = 0; i < animationEventsProp.arraySize; i++)
-        {
-            SerializedProperty eventProp = animationEventsProp.GetArrayElementAtIndex(i);
-            SerializedProperty functionNameProp = eventProp.FindPropertyRelative("functionName");
-            SerializedProperty normalizedTimeProp = eventProp.FindPropertyRelative("normalizedTime");
-            SerializedProperty floatParameterProp = eventProp.FindPropertyRelative("floatParameter");
-            SerializedProperty intParameterProp = eventProp.FindPropertyRelative("intParameter");
-            SerializedProperty stringParameterProp = eventProp.FindPropertyRelative("stringParameter");
-            SerializedProperty objectReferenceParameterProp = eventProp.FindPropertyRelative("objectReferenceParameter");
-
-            string title = string.IsNullOrWhiteSpace(functionNameProp.stringValue)
-                ? $"Event {i + 1}"
-                : $"{i + 1}. {functionNameProp.stringValue.Trim()}";
-
-            EditorGUILayout.BeginVertical("box");
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField(title, EditorStyles.miniBoldLabel);
-            GUILayout.FlexibleSpace();
-            if (GUILayout.Button("Delete", GUILayout.Width(70)))
-            {
-                deleteIndex = i;
-            }
-            EditorGUILayout.EndHorizontal();
-
-            EditorGUILayout.PropertyField(functionNameProp, new GUIContent("Function Name", L10n.T("呼び出す関数名", "Function name to invoke")));
-            normalizedTimeProp.floatValue = EditorGUILayout.Slider(
-                new GUIContent("Normalized Time", L10n.T("クリップ長に対する正規化位置 (0=先頭, 1=末尾)。デフォルト0.9=90%", "Position normalized to clip length (0=start, 1=end). Default 0.9 = 90%")),
-                normalizedTimeProp.floatValue, 0f, 1f);
-            EditorGUILayout.PropertyField(floatParameterProp, new GUIContent("Float Parameter"));
-            EditorGUILayout.PropertyField(intParameterProp, new GUIContent("Int Parameter"));
-            EditorGUILayout.PropertyField(stringParameterProp, new GUIContent("String Parameter"));
-            EditorGUILayout.PropertyField(objectReferenceParameterProp, new GUIContent("Object Reference"));
-            EditorGUILayout.EndVertical();
-
-            if (deleteIndex >= 0)
-            {
-                break;
-            }
-        }
-
-        if (deleteIndex >= 0)
-        {
-            animationEventsProp.DeleteArrayElementAtIndex(deleteIndex);
-        }
-
-        if (GUILayout.Button("Add Animation Event"))
-        {
-            int newIndex = animationEventsProp.arraySize;
-            animationEventsProp.InsertArrayElementAtIndex(newIndex);
-            SerializedProperty newEventProp = animationEventsProp.GetArrayElementAtIndex(newIndex);
-            newEventProp.FindPropertyRelative("functionName").stringValue = string.Empty;
-            newEventProp.FindPropertyRelative("normalizedTime").floatValue = 0.9f;
-            newEventProp.FindPropertyRelative("floatParameter").floatValue = 0f;
-            newEventProp.FindPropertyRelative("intParameter").intValue = 0;
-            newEventProp.FindPropertyRelative("stringParameter").stringValue = string.Empty;
-            newEventProp.FindPropertyRelative("objectReferenceParameter").objectReferenceValue = null;
         }
     }
 
@@ -868,6 +804,7 @@ public partial class FBXAnimationExtractorWindow
     private void InitializeRule(SerializedProperty ruleProp)
     {
         ruleProp.FindPropertyRelative("targetName").stringValue = string.Empty;
+        ruleProp.FindPropertyRelative("outputDirectoryOverride").objectReferenceValue = null;
         ruleProp.FindPropertyRelative("useOtherAvatarDefinition").boolValue = false;
         ruleProp.FindPropertyRelative("avatarDefinition").objectReferenceValue = null;
         ruleProp.FindPropertyRelative("framesToDelete").ClearArray();
@@ -879,6 +816,5 @@ public partial class FBXAnimationExtractorWindow
         ruleProp.FindPropertyRelative("fixScale").boolValue = false;
         ruleProp.FindPropertyRelative("fixScaleObjects").ClearArray();
         ruleProp.FindPropertyRelative("eventMarkers").ClearArray();
-        ruleProp.FindPropertyRelative("animationEvents").ClearArray();
     }
 }
