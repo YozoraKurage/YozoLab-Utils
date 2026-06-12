@@ -85,13 +85,29 @@ namespace YozoLab.MeshBaker
             int totalIslands = 0;
             foreach (BakeMaterialGroup group in groups)
             {
-                Texture mainTexture = GetMainTexture(group.material, mainProperty);
-                Vector2 textureSize = mainTexture != null
-                    ? new Vector2(mainTexture.width, mainTexture.height)
+                // テクセル密度の基準テクスチャ。メインが無いマテリアル（単色＋ノーマルのみ等）でも
+                // 他のアトラス対象マップがあるなら、その中で最大のものを基準にして解像度を確保する
+                Texture densityReference = GetMainTexture(group.material, mainProperty);
+                if (densityReference == null)
+                {
+                    foreach (string property in properties)
+                    {
+                        Texture candidate = GetMainTexture(group.material, property);
+                        if (candidate == null) continue;
+                        if (densityReference == null ||
+                            (long)candidate.width * candidate.height >
+                            (long)densityReference.width * densityReference.height)
+                        {
+                            densityReference = candidate;
+                        }
+                    }
+                }
+                Vector2 textureSize = densityReference != null
+                    ? new Vector2(densityReference.width, densityReference.height)
                     : new Vector2(64, 64);
                 // テクスチャ解像度の上書き（非破壊）をテクセル密度に反映する
                 int longestEdge = Mathf.RoundToInt(Mathf.Max(textureSize.x, textureSize.y));
-                float resolutionScale = assembly.GetResolutionScale(mainTexture, longestEdge);
+                float resolutionScale = assembly.GetResolutionScale(densityReference, longestEdge);
 
                 var groupIslands = new List<Island>();
                 foreach (BakePart part in group.parts)

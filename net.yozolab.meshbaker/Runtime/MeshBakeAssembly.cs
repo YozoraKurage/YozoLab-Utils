@@ -199,5 +199,67 @@ namespace YozoLab.MeshBaker
             if (!mipAwarePadding) return atlasPadding;
             return Mathf.Clamp(Mathf.RoundToInt(atlasPadding * (actualAtlasSize / 2048f)), 2, 64);
         }
+
+        /// <summary>
+        /// ベイクに使う出力グループを解決する。
+        /// 配列のrendererGroupsと、子のMeshBakeGroupコンポーネントの両方を統合する。
+        /// MeshBakeGroupは明示リストに加えて、includeChildRenderers有効時は
+        /// 配下のRendererを自動収集する（より深い階層の別グループが優先）。
+        /// 同じRendererが複数のグループに重複して含まれる場合は先に現れたグループが優先され、
+        /// 空のグループは除外される。
+        /// </summary>
+        public List<BakeRendererGroup> GetEffectiveGroups()
+        {
+            var result = new List<BakeRendererGroup>();
+            var claimed = new HashSet<Renderer>();
+
+            // 配列ベースのグループ（従来）
+            if (rendererGroups != null)
+            {
+                foreach (BakeRendererGroup source in rendererGroups)
+                {
+                    if (source?.renderers == null) continue;
+                    var group = new BakeRendererGroup { name = source.name };
+                    foreach (Renderer renderer in source.renderers)
+                    {
+                        if (renderer == null || !claimed.Add(renderer)) continue;
+                        group.renderers.Add(renderer);
+                    }
+                    if (group.renderers.Count > 0) result.Add(group);
+                }
+            }
+
+            // 子のMeshBakeGroupコンポーネント。
+            // 全グループの明示リストを先に確定させてから自動収集する（明示指定が常に優先）。
+            MeshBakeGroup[] componentGroups = GetComponentsInChildren<MeshBakeGroup>(true);
+            var resolved = new List<(MeshBakeGroup component, BakeRendererGroup group)>();
+            foreach (MeshBakeGroup component in componentGroups)
+            {
+                var group = new BakeRendererGroup { name = component.EffectiveName };
+                foreach (Renderer renderer in component.renderers)
+                {
+                    if (renderer == null || !claimed.Add(renderer)) continue;
+                    group.renderers.Add(renderer);
+                }
+                resolved.Add((component, group));
+            }
+            foreach ((MeshBakeGroup component, BakeRendererGroup group) in resolved)
+            {
+                if (component.includeChildRenderers)
+                {
+                    foreach (Renderer renderer in component.GetComponentsInChildren<Renderer>(true))
+                    {
+                        if (!(renderer is SkinnedMeshRenderer) && !(renderer is MeshRenderer)) continue;
+                        // ネストしたグループ配下のRendererは近い方のグループに割り当てる
+                        if (renderer.GetComponentInParent<MeshBakeGroup>(true) != component) continue;
+                        if (!claimed.Add(renderer)) continue;
+                        group.renderers.Add(renderer);
+                    }
+                }
+                if (group.renderers.Count > 0) result.Add(group);
+            }
+
+            return result;
+        }
     }
 }

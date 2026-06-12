@@ -41,6 +41,8 @@ namespace YozoLab.MeshBaker
                 if (iterator.propertyPath == "rendererGroups")
                 {
                     DrawRendererGroups(iterator);
+                    DrawChildGroupSummary(assembly);
+                    DrawAutoAnalyzeDropArea(assembly);
                     continue;
                 }
                 // Autodesk Interactiveモードでは収集プロパティは自動なので手動指定欄は隠す
@@ -85,9 +87,8 @@ namespace YozoLab.MeshBaker
 
             EditorGUILayout.Space(12);
 
-            bool hasRenderers = assembly.rendererGroups != null &&
-                                assembly.rendererGroups.Any(g => g != null && g.renderers != null &&
-                                    g.renderers.Any(r => r != null && StaticMeshBaker.GetSharedMesh(r) != null));
+            bool hasRenderers = assembly.GetEffectiveGroups()
+                .Any(g => g.renderers.Any(r => StaticMeshBaker.GetSharedMesh(r) != null));
             using (new EditorGUI.DisabledScope(!hasRenderers))
             {
                 if (GUILayout.Button("静的メッシュにベイク", GUILayout.Height(32)))
@@ -97,7 +98,9 @@ namespace YozoLab.MeshBaker
             }
             if (!hasRenderers)
             {
-                EditorGUILayout.HelpBox("Renderer Groupsにベイク対象のRenderer（SkinnedMeshRenderer/MeshRenderer）を設定してください。", MessageType.Info);
+                EditorGUILayout.HelpBox(
+                    "Renderer Groupsまたは子のMesh Bake Groupに、ベイク対象のRenderer" +
+                    "（SkinnedMeshRenderer/MeshRenderer）を設定してください。", MessageType.Info);
             }
         }
 
@@ -177,10 +180,90 @@ namespace YozoLab.MeshBaker
             }
         }
 
+        /// <summary>子のMeshBakeGroupコンポーネントの一覧を表示する</summary>
+        private void DrawChildGroupSummary(MeshBakeAssembly assembly)
+        {
+            MeshBakeGroup[] childGroups = assembly.GetComponentsInChildren<MeshBakeGroup>(true);
+            if (childGroups.Length == 0) return;
+            EditorGUILayout.HelpBox(
+                $"子のMesh Bake Group ({childGroups.Length}): " +
+                string.Join(", ", childGroups.Select(g => g.EffectiveName)) +
+                "\n（上のRenderer Groupsと併用できます。同じRendererは先に現れたグループが優先されます）",
+                MessageType.None);
+        }
+
+        /// <summary>
+        /// ドロップされたオブジェクト配下のRendererを自動解析し、
+        /// 最適なグループ分け（マテリアル構成・頂点数・空間的なまとまり）で
+        /// 子のMeshBakeGroupとして生成するドロップ領域。
+        /// </summary>
+        private void DrawAutoAnalyzeDropArea(MeshBakeAssembly assembly)
+        {
+            Rect dropRect = GUILayoutUtility.GetRect(0, 44, GUILayout.ExpandWidth(true));
+            GUI.Box(dropRect,
+                "ここにオブジェクトをドロップで自動解析してグループ分け\n" +
+                "（子としてMesh Bake Groupを生成します。オブジェクト自体は移動しません）",
+                EditorStyles.helpBox);
+
+            Event evt = Event.current;
+            if (evt.type != EventType.DragUpdated && evt.type != EventType.DragPerform) return;
+            if (!dropRect.Contains(evt.mousePosition)) return;
+
+            DragAndDrop.visualMode = DragAndDropVisualMode.Copy;
+            if (evt.type != EventType.DragPerform) return;
+
+            DragAndDrop.AcceptDrag();
+            evt.Use();
+
+            var collected = new List<Renderer>();
+            foreach (UnityEngine.Object obj in DragAndDrop.objectReferences)
+            {
+                GameObject go = obj as GameObject;
+                if (go == null && obj is Component component) go = component.gameObject;
+                if (go != null) CollectRenderers(go, collected);
+            }
+
+            // 既にどこかのグループに属しているRendererは対象から外す
+            var claimed = new HashSet<Renderer>(
+                assembly.GetEffectiveGroups().SelectMany(g => g.renderers));
+            List<Renderer> targets = collected.Where(r => !claimed.Contains(r)).ToList();
+            if (targets.Count == 0)
+            {
+                EditorUtility.DisplayDialog("Mesh Baker",
+                    "グループ化できる新しいRendererが見つかりませんでした。", "OK");
+                return;
+            }
+
+            List<RendererGroupAnalyzer.Proposal> proposals = RendererGroupAnalyzer.Analyze(
+                targets,
+                splitByMaterialSet: !assembly.mergeMaterials,
+                RendererGroupAnalyzer.DefaultVertexBudget);
+
+            var summary = new System.Text.StringBuilder();
+            foreach (RendererGroupAnalyzer.Proposal proposal in proposals)
+            {
+                var groupObject = new GameObject(proposal.name);
+                Undo.RegisterCreatedObjectUndo(groupObject, "Auto Group Renderers");
+                groupObject.transform.SetParent(assembly.transform, false);
+
+                MeshBakeGroup group = groupObject.AddComponent<MeshBakeGroup>();
+                group.includeChildRenderers = false; // 自動生成グループは明示リストで管理する
+                group.renderers.AddRange(proposal.renderers);
+                EditorUtility.SetDirty(group);
+
+                summary.AppendLine(
+                    $"- {proposal.name}: {proposal.renderers.Count} Renderer / {proposal.vertexCount:N0} 頂点");
+            }
+
+            EditorUtility.DisplayDialog("Mesh Baker",
+                $"{targets.Count}個のRendererを解析し、{proposals.Count}グループを作成しました。\n\n" +
+                summary, "OK");
+        }
+
         /// <summary>
         /// GameObjectをドラッグ＆ドロップすると、その配下のRendererを再帰的に収集して追加するドロップ領域。
         /// </summary>
-        private void DrawDropArea(SerializedProperty renderersProp)
+        internal static void DrawDropArea(SerializedProperty renderersProp)
         {
             Rect dropRect = GUILayoutUtility.GetRect(0, 40, GUILayout.ExpandWidth(true));
             GUI.Box(dropRect,
@@ -223,7 +306,7 @@ namespace YozoLab.MeshBaker
         }
 
         /// <summary>GameObject配下のベイク可能なRendererを再帰的に収集する</summary>
-        private static void CollectRenderers(GameObject root, List<Renderer> into)
+        internal static void CollectRenderers(GameObject root, List<Renderer> into)
         {
             foreach (Renderer renderer in root.GetComponentsInChildren<Renderer>(true))
             {
@@ -402,14 +485,13 @@ namespace YozoLab.MeshBaker
             string mainProperty = MaterialModeProfiles.GetCollectProperties(
                 assembly.materialMode, assembly.textureProperties)[0];
 
-            // 使用中のユニークなマテリアルを収集
+            // 使用中のユニークなマテリアルを収集（配列グループ・子のMesh Bake Group両方から）
             var materials = new List<Material>();
-            IEnumerable<Renderer> allRenderers = assembly.rendererGroups
-                .Where(g => g != null && g.renderers != null)
+            IEnumerable<Renderer> allRenderers = assembly.GetEffectiveGroups()
                 .SelectMany(g => g.renderers);
 
             foreach (Renderer renderer in allRenderers
-                         .Where(r => r != null && StaticMeshBaker.GetSharedMesh(r) != null))
+                         .Where(r => StaticMeshBaker.GetSharedMesh(r) != null))
             {
                 foreach (Material material in renderer.sharedMaterials)
                 {

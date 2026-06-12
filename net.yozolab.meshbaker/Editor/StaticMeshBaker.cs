@@ -27,7 +27,7 @@ namespace YozoLab.MeshBaker
         internal const int ExtraUVChannels = 6;
 
         public Material material;
-        /// <summary>所属する出力グループ（rendererGroupsのインデックス）</summary>
+        /// <summary>所属する出力グループ（GetEffectiveGroupsで解決されたグループのインデックス）</summary>
         public int groupIndex;
         public Vector3[] positions;
         public Vector3[] normals;
@@ -58,10 +58,13 @@ namespace YozoLab.MeshBaker
         public static BakeReport Bake(MeshBakeAssembly assembly)
         {
             var report = new BakeReport();
-            List<BakePart> parts = ExtractParts(assembly, report);
+            List<BakeRendererGroup> effectiveGroups = assembly.GetEffectiveGroups();
+            List<BakePart> parts = ExtractParts(assembly, effectiveGroups, report);
             if (parts.Count == 0)
             {
-                throw new InvalidOperationException("ベイク対象が見つかりませんでした。Renderer GroupsにRenderer（SkinnedMeshRenderer/MeshRenderer）を設定してください。");
+                throw new InvalidOperationException(
+                    "ベイク対象が見つかりませんでした。Renderer Groupsまたは子のMesh Bake Groupに" +
+                    "Renderer（SkinnedMeshRenderer/MeshRenderer）を設定してください。");
             }
 
             var distinctMaterials = new List<Material>();
@@ -165,7 +168,7 @@ namespace YozoLab.MeshBaker
 
             // ---- 出力グループごとにMesh/プレハブを出力する ----
             var combineStats = new CombineStats();
-            for (int groupIndex = 0; groupIndex < assembly.rendererGroups.Count; groupIndex++)
+            for (int groupIndex = 0; groupIndex < effectiveGroups.Count; groupIndex++)
             {
                 var submeshes = new List<List<BakePart>>();
                 var materials = new List<Material>();
@@ -217,7 +220,7 @@ namespace YozoLab.MeshBaker
                 report.vertexCount += combined.vertexCount;
                 report.submeshCount += submeshes.Count;
 
-                string suffix = GetGroupSuffix(assembly, groupIndex);
+                string suffix = GetGroupSuffix(effectiveGroups, groupIndex);
                 string meshPath = $"{directory}/{baseName}{suffix}_mesh.asset";
                 Mesh savedMesh = SaveMeshAsset(combined, meshPath);
                 report.meshPaths.Add(meshPath);
@@ -256,10 +259,10 @@ namespace YozoLab.MeshBaker
         }
 
         /// <summary>成果物アセット名のグループサフィックス。単一の無名グループなら付けない（従来互換）</summary>
-        private static string GetGroupSuffix(MeshBakeAssembly assembly, int groupIndex)
+        private static string GetGroupSuffix(List<BakeRendererGroup> groups, int groupIndex)
         {
-            BakeRendererGroup group = assembly.rendererGroups[groupIndex];
-            if (assembly.rendererGroups.Count == 1 && string.IsNullOrEmpty(group.name)) return "";
+            BakeRendererGroup group = groups[groupIndex];
+            if (groups.Count == 1 && string.IsNullOrEmpty(group.name)) return "";
             return "_" + (string.IsNullOrEmpty(group.name) ? $"Group{groupIndex + 1}" : group.name);
         }
 
@@ -267,13 +270,14 @@ namespace YozoLab.MeshBaker
         // ベイクと抽出
         // ---------------------------------------------------------------
 
-        private static List<BakePart> ExtractParts(MeshBakeAssembly assembly, BakeReport report)
+        private static List<BakePart> ExtractParts(
+            MeshBakeAssembly assembly, List<BakeRendererGroup> groups, BakeReport report)
         {
             var parts = new List<BakePart>();
             Transform root = assembly.transform;
 
-            for (int groupIndex = 0; groupIndex < assembly.rendererGroups.Count; groupIndex++)
-            foreach (Renderer renderer in assembly.rendererGroups[groupIndex].renderers)
+            for (int groupIndex = 0; groupIndex < groups.Count; groupIndex++)
+            foreach (Renderer renderer in groups[groupIndex].renderers)
             {
                 Mesh source = GetSharedMesh(renderer);
                 if (renderer == null || source == null)

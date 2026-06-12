@@ -39,7 +39,8 @@ namespace YozoLab.MeshBaker
                 {
                     copies[i] = CreateRegionCopy(
                         materials[i], mainProperty, uvBounds[i], atlasSize,
-                        fallbackToColor: true, resolutionScale: resolutionScales[i]);
+                        fallbackToColor: true, resolutionScale: resolutionScales[i],
+                        sizeReferenceProperties: properties);
                 }
 
                 var mainAtlas = new Texture2D(1, 1, TextureFormat.RGBA32, false);
@@ -113,10 +114,13 @@ namespace YozoLab.MeshBaker
         /// <summary>
         /// マテリアルの指定プロパティのテクスチャから、UV範囲boundsを切り出した読み取り可能コピーを作る。
         /// テクスチャがない場合はマテリアル色の単色テクスチャを返す。
+        /// その場合でも他のアトラス対象マップ（ノーマル等）があれば、その解像度を確保できる
+        /// サイズの単色を作り、レイアウト上の領域が潰れないようにする。
         /// </summary>
         private static Texture2D CreateRegionCopy(
             Material material, string property, Rect bounds, int atlasSize,
-            bool fallbackToColor, float resolutionScale = 1f)
+            bool fallbackToColor, float resolutionScale = 1f,
+            IReadOnlyList<string> sizeReferenceProperties = null)
         {
             Texture texture = (material != null && material.HasProperty(property))
                 ? material.GetTexture(property)
@@ -127,9 +131,22 @@ namespace YozoLab.MeshBaker
                 Color color = (fallbackToColor && material != null && material.HasProperty("_Color"))
                     ? material.color
                     : Color.white;
-                var solid = new Texture2D(4, 4, TextureFormat.RGBA32, false);
-                var pixels = new Color[16];
-                for (int i = 0; i < 16; i++) pixels[i] = color;
+
+                int width = 4;
+                int height = 4;
+                Texture sizeReference = FindLargestTexture(material, sizeReferenceProperties);
+                if (sizeReference != null)
+                {
+                    float scale = Mathf.Clamp(resolutionScale, 0.01f, 1f);
+                    width = Mathf.Clamp(
+                        Mathf.RoundToInt(sizeReference.width * bounds.width * scale), 4, atlasSize);
+                    height = Mathf.Clamp(
+                        Mathf.RoundToInt(sizeReference.height * bounds.height * scale), 4, atlasSize);
+                }
+
+                var solid = new Texture2D(width, height, TextureFormat.RGBA32, false);
+                var pixels = new Color[width * height];
+                for (int i = 0; i < pixels.Length; i++) pixels[i] = color;
                 solid.SetPixels(pixels);
                 solid.Apply();
                 return solid;
@@ -140,6 +157,24 @@ namespace YozoLab.MeshBaker
             int height = Mathf.Clamp(Mathf.RoundToInt(texture.height * bounds.height * scale), 4, atlasSize);
             return CopyTextureRegion(texture, bounds, width, height,
                 IsLinearProperty(property), IsNormalProperty(property));
+        }
+
+        /// <summary>指定プロパティ群の中で最大のテクスチャを返す（無ければnull）</summary>
+        private static Texture FindLargestTexture(Material material, IReadOnlyList<string> properties)
+        {
+            if (material == null || properties == null) return null;
+            Texture largest = null;
+            foreach (string property in properties)
+            {
+                Texture candidate = material.HasProperty(property) ? material.GetTexture(property) : null;
+                if (candidate == null) continue;
+                if (largest == null ||
+                    (long)candidate.width * candidate.height > (long)largest.width * largest.height)
+                {
+                    largest = candidate;
+                }
+            }
+            return largest;
         }
 
         /// <summary>
