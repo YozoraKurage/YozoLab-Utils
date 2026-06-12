@@ -28,6 +28,12 @@ namespace YozoLab.MeshBaker
             /// <summary>スケール1のときの相対サイズ</summary>
             public Vector2 baseSize;
 
+            /// <summary>
+            /// サイズの上限（[0,1]空間）。スケール探索で拡大してもこれを超えない。
+            /// 元テクスチャの原寸を超えるアップスケール（情報量ゼロの引き伸ばし）の抑制に使う。
+            /// </summary>
+            public Vector2 maxSize = new Vector2(float.PositiveInfinity, float.PositiveInfinity);
+
             // パッキング作業用と確定結果
             public Vector2 size;
             public Vector2 pos;
@@ -62,14 +68,15 @@ namespace YozoLab.MeshBaker
             for (float budget = 0.5f; budget > 0.02f; budget -= 0.05f)
             {
                 float scale = Mathf.Sqrt(budget / Mathf.Max(areaSum, 1e-9f));
-                if (!TryPackAtScale(items, padding, scale)) continue;
+                if (!TryPackAtScale(items, padding, scale, out bool anyScalable)) continue;
 
                 foreach (Item item in items) item.SaveBest();
                 float best = scale;
-                for (int step = 0; step < 64; step++)
+                // 全アイテムが上限（maxSize/枠）に達したらそれ以上の拡大は無意味なので打ち切る
+                for (int step = 0; step < 64 && anyScalable; step++)
                 {
                     float trial = best * 1.02f;
-                    if (!TryPackAtScale(items, padding, trial)) break;
+                    if (!TryPackAtScale(items, padding, trial, out anyScalable)) break;
                     foreach (Item item in items) item.SaveBest();
                     best = trial;
                 }
@@ -79,15 +86,25 @@ namespace YozoLab.MeshBaker
             return -1f;
         }
 
-        private static bool TryPackAtScale(IReadOnlyList<Item> items, float padding, float scale)
+        /// <param name="anyScalable">上限に達していない（さらに拡大の余地がある）矩形が1つでもあるか</param>
+        private static bool TryPackAtScale(
+            IReadOnlyList<Item> items, float padding, float scale, out bool anyScalable)
         {
+            anyScalable = false;
             float maxLength = 1f - padding * 2f - 0.001f;
             foreach (Item item in items)
             {
                 Vector2 size = item.baseSize * scale;
+                // maxSize（原寸密度など）を超えないようにアスペクト比を保って縮める
+                float capFactor = Mathf.Min(1f, Mathf.Min(
+                    item.maxSize.x / Mathf.Max(size.x, 1e-9f),
+                    item.maxSize.y / Mathf.Max(size.y, 1e-9f)));
+                if (capFactor < 1f) size *= capFactor;
                 // 1つでも枠を超える矩形があると全体が破綻するため、その矩形だけ縮める
                 float longest = Mathf.Max(size.x, size.y);
-                if (longest > maxLength) size *= maxLength / longest;
+                bool frameClamped = longest > maxLength;
+                if (frameClamped) size *= maxLength / longest;
+                if (capFactor >= 1f && !frameClamped) anyScalable = true;
                 item.size = size;
                 item.rotated = false;
             }

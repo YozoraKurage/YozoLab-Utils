@@ -23,6 +23,9 @@ namespace YozoLab.MeshBaker
     /// <summary>1つのSkinnedMeshRendererの1サブメッシュ分のベイク済みデータ</summary>
     internal class BakePart
     {
+        /// <summary>引き継ぐ追加UVチャンネル数（UV3〜UV8 = メッシュチャンネル2〜7）</summary>
+        internal const int ExtraUVChannels = 6;
+
         public Material material;
         /// <summary>所属する出力グループ（rendererGroupsのインデックス）</summary>
         public int groupIndex;
@@ -32,6 +35,8 @@ namespace YozoLab.MeshBaker
         public Vector2[] uv;
         /// <summary>ライトマップ用UV2（PreserveAndRepackモード時のみ抽出。元メッシュに無い場合null）</summary>
         public Vector2[] uv2;
+        /// <summary>UV3〜UV8（インデックス0=UV3）。元メッシュに無いチャンネルはnull。2D成分のみ引き継ぐ。</summary>
+        public Vector2[][] extraUVs = new Vector2[ExtraUVChannels][];
         public Color32[] colors;
         public int[] indices;
     }
@@ -59,8 +64,12 @@ namespace YozoLab.MeshBaker
                 throw new InvalidOperationException("ベイク対象が見つかりませんでした。Renderer GroupsにRenderer（SkinnedMeshRenderer/MeshRenderer）を設定してください。");
             }
 
-            List<BakeMaterialGroup> materialGroups = GroupByMaterial(parts);
-            report.sourceMaterialCount = materialGroups.Count;
+            var distinctMaterials = new List<Material>();
+            foreach (BakePart part in parts)
+            {
+                if (!distinctMaterials.Contains(part.material)) distinctMaterials.Add(part.material);
+            }
+            report.sourceMaterialCount = distinctMaterials.Count;
 
             // ---- マテリアル統合（全出力グループで共有のアトラス/マテリアルを作る） ----
             // マテリアルモードに応じてアトラス対象のテクスチャプロパティを決定する。
@@ -73,23 +82,40 @@ namespace YozoLab.MeshBaker
             for (int i = 1; i < candidateProperties.Length; i++)
             {
                 string prop = candidateProperties[i];
-                bool present = materialGroups.Any(g =>
-                    g.material != null && g.material.HasProperty(prop) && g.material.GetTexture(prop) != null);
+                bool present = distinctMaterials.Any(m =>
+                    m.HasProperty(prop) && m.GetTexture(prop) != null);
                 if (present) effectiveList.Add(prop);
             }
             string[] effectiveProperties = effectiveList.ToArray();
 
+            // Tiling/Offsetの焼き込みはパート単位で行う（同一テクスチャ・別STのマテリアルを
+            // 後段のテクスチャ構成グループ化で正しく統合できるようにするため）
+            if (assembly.mergeMaterials && assembly.bakeTextureST)
+            {
+                BakeTextureSTPerPart(parts, mainProperty);
+            }
+
+            // 統合時はマテリアル参照ではなくテクスチャ構成でグループ化し、
+            // 同じテクスチャ一式を参照するマテリアル同士でアトラス領域を共有する
+            List<BakeMaterialGroup> materialGroups =
+                GroupParts(parts, assembly.mergeMaterials, effectiveProperties);
+            if (assembly.mergeMaterials && materialGroups.Count < distinctMaterials.Count)
+            {
+                report.infos.Add($"同一テクスチャ構成のマテリアルを統合: " +
+                                 $"{distinctMaterials.Count}マテリアル → {materialGroups.Count}アトラス領域");
+            }
+
             MaterialAtlasBuilder.Result atlasResult = null;
             if (assembly.mergeMaterials)
             {
-                PrepareUVsForAtlas(assembly, materialGroups, mainProperty, report);
+                PrepareUVsForAtlas(assembly, materialGroups, report);
 
                 if (assembly.packingMode == AtlasPackingMode.UVIslands)
                 {
                     // UVアイランド単位の詰め直し（UV書き換えも内部で行われる）
                     atlasResult = UVIslandAtlasPacker.Pack(
                         assembly, materialGroups, effectiveProperties,
-                        assembly.atlasSize, assembly.atlasPadding, report.warnings, report.infos);
+                        assembly.atlasSize, report.warnings, report.infos);
                 }
                 else
                 {
@@ -105,7 +131,8 @@ namespace YozoLab.MeshBaker
                         materialGroups.Select(g => g.material).ToList(),
                         materialGroups.Select(g => g.uvBounds).ToList(),
                         resolutionScales,
-                        effectiveProperties, assembly.atlasSize, assembly.atlasPadding,
+                        effectiveProperties, assembly.atlasSize,
+                        assembly.GetEffectiveAtlasPadding(assembly.atlasSize),
                         report.warnings);
 
                     for (int i = 0; i < materialGroups.Count; i++)
@@ -137,6 +164,7 @@ namespace YozoLab.MeshBaker
             }
 
             // ---- 出力グループごとにMesh/プレハブを出力する ----
+            var combineStats = new CombineStats();
             for (int groupIndex = 0; groupIndex < assembly.rendererGroups.Count; groupIndex++)
             {
                 var submeshes = new List<List<BakePart>>();
@@ -175,11 +203,17 @@ namespace YozoLab.MeshBaker
                     LightmapUVPacker.PreserveAndRepack(
                         submeshes.SelectMany(s => s).ToList(), report.warnings);
                 }
-                Mesh combined = BuildCombinedMesh(submeshes);
+
+                // ノーマルマップを使わない出力では接線を省略できる
+                bool keepTangents = !assembly.stripUnusedVertexAttributes ||
+                                    materials.Any(UsesNormalMap);
+                Mesh combined = BuildCombinedMesh(
+                    submeshes, keepTangents, assembly.stripUnusedVertexAttributes, combineStats);
                 if (assembly.lightmapUVMode == LightmapUVMode.GenerateAll)
                 {
                     Unwrapping.GenerateSecondaryUVSet(combined);
                 }
+                MeshUtility.Optimize(combined); // 頂点キャッシュ・フェッチ局所性の最適化
                 report.vertexCount += combined.vertexCount;
                 report.submeshCount += submeshes.Count;
 
@@ -198,6 +232,23 @@ namespace YozoLab.MeshBaker
             if (report.meshPaths.Count == 0)
             {
                 throw new InvalidOperationException("出力できるグループがありませんでした。");
+            }
+
+            if (combineStats.weldedTo < combineStats.weldedFrom)
+            {
+                report.infos.Add($"頂点溶接: {combineStats.weldedFrom} → {combineStats.weldedTo} 頂点");
+            }
+            if (combineStats.degenerateTriangles > 0)
+            {
+                report.infos.Add($"退化三角形を{combineStats.degenerateTriangles}個除去しました。");
+            }
+            if (combineStats.strippedTangents)
+            {
+                report.infos.Add("ノーマルマップ未使用のため接線(Tangent)を省略しました。");
+            }
+            if (combineStats.strippedColors)
+            {
+                report.infos.Add("頂点カラーが全て白のため省略しました。");
             }
 
             AssetDatabase.SaveAssets();
@@ -265,6 +316,14 @@ namespace YozoLab.MeshBaker
                 Vector2[] sourceUV2 = assembly.lightmapUVMode == LightmapUVMode.PreserveAndRepack
                     ? source.uv2
                     : Array.Empty<Vector2>();
+                // UV3〜UV8はシェーダーのカスタムデータとして使われている可能性があるため常に引き継ぐ
+                var sourceExtraUVs = new Vector2[BakePart.ExtraUVChannels][];
+                var channelBuffer = new List<Vector2>();
+                for (int ch = 0; ch < BakePart.ExtraUVChannels; ch++)
+                {
+                    source.GetUVs(ch + 2, channelBuffer);
+                    sourceExtraUVs[ch] = channelBuffer.Count > 0 ? channelBuffer.ToArray() : null;
+                }
                 Color32[] sourceColors = source.colors32;
                 Material[] materials = renderer.sharedMaterials;
 
@@ -279,7 +338,7 @@ namespace YozoLab.MeshBaker
 
                     BakePart part = ExtractSubmesh(
                         source.GetTriangles(s), bakedPositions, bakedNormals, bakedTangents,
-                        sourceUV, sourceUV2, sourceColors, toRoot);
+                        sourceUV, sourceUV2, sourceExtraUVs, sourceColors, toRoot);
                     part.material = material;
                     part.groupIndex = groupIndex;
                     parts.Add(part);
@@ -305,7 +364,7 @@ namespace YozoLab.MeshBaker
 
         private static BakePart ExtractSubmesh(
             int[] triangles, Vector3[] positions, Vector3[] normals, Vector4[] tangents,
-            Vector2[] uv, Vector2[] uv2, Color32[] colors, Matrix4x4 toRoot)
+            Vector2[] uv, Vector2[] uv2, Vector2[][] extraUVs, Color32[] colors, Matrix4x4 toRoot)
         {
             var map = new Dictionary<int, int>();
             var part = new BakePart { indices = new int[triangles.Length] };
@@ -314,6 +373,11 @@ namespace YozoLab.MeshBaker
             var outTangents = new List<Vector4>();
             var outUV = new List<Vector2>();
             var outUV2 = uv2.Length > 0 ? new List<Vector2>() : null;
+            var outExtraUVs = new List<Vector2>[BakePart.ExtraUVChannels];
+            for (int ch = 0; ch < BakePart.ExtraUVChannels; ch++)
+            {
+                if (extraUVs[ch] != null) outExtraUVs[ch] = new List<Vector2>();
+            }
             var outColors = colors.Length > 0 ? new List<Color32>() : null;
 
             for (int i = 0; i < triangles.Length; i++)
@@ -339,6 +403,10 @@ namespace YozoLab.MeshBaker
                     }
                     outUV.Add(uv.Length > 0 ? uv[sourceIndex] : Vector2.zero);
                     outUV2?.Add(uv2[sourceIndex]);
+                    for (int ch = 0; ch < BakePart.ExtraUVChannels; ch++)
+                    {
+                        outExtraUVs[ch]?.Add(extraUVs[ch][sourceIndex]);
+                    }
                     outColors?.Add(colors[sourceIndex]);
                 }
                 part.indices[i] = newIndex;
@@ -349,25 +417,93 @@ namespace YozoLab.MeshBaker
             part.tangents = outTangents.ToArray();
             part.uv = outUV.ToArray();
             part.uv2 = outUV2?.ToArray();
+            for (int ch = 0; ch < BakePart.ExtraUVChannels; ch++)
+            {
+                part.extraUVs[ch] = outExtraUVs[ch]?.ToArray();
+            }
             part.colors = outColors?.ToArray();
             return part;
         }
 
-        private static List<BakeMaterialGroup> GroupByMaterial(List<BakePart> parts)
+        /// <summary>
+        /// パートをアトラス化の単位にグループ分けする。
+        /// マテリアル統合時はテクスチャ構成（アトラス対象プロパティのテクスチャ一式）でグループ化し、
+        /// 同じテクスチャを参照するだけの別マテリアルが同じ絵をアトラスへ二重に焼き込まないようにする。
+        /// 統合しない場合は出力サブメッシュが元マテリアルを参照するため、マテリアル参照でグループ化する。
+        /// </summary>
+        private static List<BakeMaterialGroup> GroupParts(
+            List<BakePart> parts, bool byTextureSet, IReadOnlyList<string> properties)
         {
             var groups = new List<BakeMaterialGroup>();
-            var byMaterial = new Dictionary<Material, BakeMaterialGroup>();
+            var byKey = new Dictionary<string, BakeMaterialGroup>();
             foreach (BakePart part in parts)
             {
-                if (!byMaterial.TryGetValue(part.material, out BakeMaterialGroup group))
+                string key = byTextureSet
+                    ? TextureSetKey(part.material, properties)
+                    : "mat:" + part.material.GetInstanceID();
+                if (!byKey.TryGetValue(key, out BakeMaterialGroup group))
                 {
                     group = new BakeMaterialGroup { material = part.material };
-                    byMaterial.Add(part.material, group);
+                    byKey.Add(key, group);
                     groups.Add(group);
                 }
                 group.parts.Add(part);
             }
             return groups;
+        }
+
+        private static string TextureSetKey(Material material, IReadOnlyList<string> properties)
+        {
+            var key = new System.Text.StringBuilder();
+            foreach (string property in properties)
+            {
+                Texture texture = material.HasProperty(property) ? material.GetTexture(property) : null;
+                key.Append(texture != null ? texture.GetInstanceID() : 0).Append(';');
+            }
+            // メインテクスチャを持たないマテリアルは_Colorの単色で塗られるため、色もキーに含める
+            Texture main = material.HasProperty(properties[0]) ? material.GetTexture(properties[0]) : null;
+            if (main == null)
+            {
+                Color color = material.HasProperty("_Color") ? material.color : Color.white;
+                key.Append("c:").Append(color.r).Append(',').Append(color.g)
+                   .Append(',').Append(color.b).Append(',').Append(color.a);
+            }
+            return key.ToString();
+        }
+
+        /// <summary>
+        /// マテリアルのTiling/Offsetを各パートのUVへ焼き込む。
+        /// グループ化の前にパート単位で行うことで、同一テクスチャ・別STのマテリアル同士も
+        /// 焼き込み後は同じテクスチャ空間を指し、1つのアトラス領域を共有できる。
+        /// </summary>
+        private static void BakeTextureSTPerPart(List<BakePart> parts, string mainProperty)
+        {
+            foreach (BakePart part in parts)
+            {
+                if (!part.material.HasProperty(mainProperty)) continue;
+                Vector2 scale = part.material.GetTextureScale(mainProperty);
+                Vector2 offset = part.material.GetTextureOffset(mainProperty);
+                if (scale == Vector2.one && offset == Vector2.zero) continue;
+                for (int i = 0; i < part.uv.Length; i++)
+                {
+                    part.uv[i] = Vector2.Scale(part.uv[i], scale) + offset;
+                }
+            }
+        }
+
+        /// <summary>マテリアルがノーマルマップ系のテクスチャを実際に持つか（接線の要否判定）</summary>
+        private static bool UsesNormalMap(Material material)
+        {
+            if (material == null) return false;
+            foreach (string property in material.GetTexturePropertyNames())
+            {
+                if (MaterialAtlasBuilder.IsNormalProperty(property) &&
+                    material.GetTexture(property) != null)
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         // ---------------------------------------------------------------
@@ -376,30 +512,15 @@ namespace YozoLab.MeshBaker
 
         /// <summary>
         /// アトラス化に向けて各グループのUVを整える。
-        /// Tiling/Offsetの焼き込み → 整数オフセットの除去 → 使用UV範囲の計算を行う。
+        /// 整数オフセットの除去 → 使用UV範囲の計算を行う
+        /// （Tiling/Offsetの焼き込みはグループ化前にBakeTextureSTPerPartで実施済み）。
         /// 使用範囲が[0,1]を超える場合はタイリングごと切り出される（解像度低下に注意）。
         /// </summary>
         private static void PrepareUVsForAtlas(
-            MeshBakeAssembly assembly, List<BakeMaterialGroup> groups, string mainProperty, BakeReport report)
+            MeshBakeAssembly assembly, List<BakeMaterialGroup> groups, BakeReport report)
         {
             foreach (BakeMaterialGroup group in groups)
             {
-                if (assembly.bakeTextureST && group.material.HasProperty(mainProperty))
-                {
-                    Vector2 scale = group.material.GetTextureScale(mainProperty);
-                    Vector2 offset = group.material.GetTextureOffset(mainProperty);
-                    if (scale != Vector2.one || offset != Vector2.zero)
-                    {
-                        foreach (BakePart part in group.parts)
-                        {
-                            for (int i = 0; i < part.uv.Length; i++)
-                            {
-                                part.uv[i] = Vector2.Scale(part.uv[i], scale) + offset;
-                            }
-                        }
-                    }
-                }
-
                 // 使用UV範囲を求め、整数分のオフセットを取り除く
                 var min = new Vector2(float.MaxValue, float.MaxValue);
                 var max = new Vector2(float.MinValue, float.MinValue);
@@ -467,8 +588,23 @@ namespace YozoLab.MeshBaker
         // メッシュ結合
         // ---------------------------------------------------------------
 
-        /// <summary>サブメッシュごとのBakePartリストから1つのメッシュを構築する</summary>
-        private static Mesh BuildCombinedMesh(List<List<BakePart>> submeshes)
+        /// <summary>メッシュ結合時の最適化の統計（全グループ累計）</summary>
+        private class CombineStats
+        {
+            public int weldedFrom;
+            public int weldedTo;
+            public int degenerateTriangles;
+            public bool strippedTangents;
+            public bool strippedColors;
+        }
+
+        /// <summary>
+        /// サブメッシュごとのBakePartリストから1つのメッシュを構築する。
+        /// 全属性が一致する頂点の溶接（サブメッシュ境界で複製された頂点の除去）、
+        /// 退化三角形の除去、不要な頂点属性の省略も行う。
+        /// </summary>
+        private static Mesh BuildCombinedMesh(
+            List<List<BakePart>> submeshes, bool keepTangents, bool stripUnused, CombineStats stats)
         {
             int submeshCount = submeshes.Count;
             var positions = new List<Vector3>();
@@ -479,6 +615,15 @@ namespace YozoLab.MeshBaker
             var colors = new List<Color32>();
             bool anyColors = submeshes.Any(s => s.Any(p => p.colors != null));
             bool anyUV2 = submeshes.Any(s => s.Any(p => p.uv2 != null && p.uv2.Length > 0));
+            var extraUV = new List<Vector2>[BakePart.ExtraUVChannels];
+            for (int ch = 0; ch < BakePart.ExtraUVChannels; ch++)
+            {
+                int channel = ch;
+                if (submeshes.Any(s => s.Any(p => p.extraUVs[channel] != null)))
+                {
+                    extraUV[ch] = new List<Vector2>();
+                }
+            }
             var submeshIndices = new List<int>[submeshCount];
             for (int i = 0; i < submeshCount; i++) submeshIndices[i] = new List<int>();
 
@@ -497,6 +642,12 @@ namespace YozoLab.MeshBaker
                         if (part.uv2 != null && part.uv2.Length == part.positions.Length) uv2.AddRange(part.uv2);
                         else for (int i = 0; i < part.positions.Length; i++) uv2.Add(Vector2.zero);
                     }
+                    for (int ch = 0; ch < BakePart.ExtraUVChannels; ch++)
+                    {
+                        if (extraUV[ch] == null) continue;
+                        if (part.extraUVs[ch] != null) extraUV[ch].AddRange(part.extraUVs[ch]);
+                        else for (int i = 0; i < part.positions.Length; i++) extraUV[ch].Add(Vector2.zero);
+                    }
                     if (anyColors)
                     {
                         if (part.colors != null) colors.AddRange(part.colors);
@@ -506,6 +657,22 @@ namespace YozoLab.MeshBaker
                 }
             }
 
+            // 全頂点が白の頂点カラーは省略する（チャンネルなしと描画上等価）
+            if (stripUnused && anyColors &&
+                colors.All(c => c.r == 255 && c.g == 255 && c.b == 255 && c.a == 255))
+            {
+                anyColors = false;
+                stats.strippedColors = true;
+            }
+            if (!keepTangents) stats.strippedTangents = true;
+
+            // 完全一致頂点の溶接。省略する属性は比較から外して溶接の機会を増やす
+            stats.weldedFrom += positions.Count;
+            int[] remap = WeldVertices(
+                positions, normals, keepTangents ? tangents : null, uv,
+                anyUV2 ? uv2 : null, anyColors ? colors : null, extraUV);
+            stats.weldedTo += positions.Count;
+
             var mesh = new Mesh
             {
                 indexFormat = positions.Count > 65535
@@ -514,18 +681,148 @@ namespace YozoLab.MeshBaker
             };
             mesh.SetVertices(positions);
             mesh.SetNormals(normals);
-            mesh.SetTangents(tangents);
+            if (keepTangents) mesh.SetTangents(tangents);
             mesh.SetUVs(0, uv);
             if (anyUV2) mesh.SetUVs(1, uv2); // チャンネル1 = Mesh.uv2（ライトマップUV）
+            for (int ch = 0; ch < BakePart.ExtraUVChannels; ch++)
+            {
+                if (extraUV[ch] != null) mesh.SetUVs(ch + 2, extraUV[ch]);
+            }
             if (anyColors) mesh.SetColors(colors);
 
             mesh.subMeshCount = submeshCount;
-            for (int i = 0; i < submeshCount; i++)
+            for (int s = 0; s < submeshCount; s++)
             {
-                mesh.SetTriangles(submeshIndices[i], i);
+                List<int> indices = submeshIndices[s];
+                var remapped = new List<int>(indices.Count);
+                for (int i = 0; i < indices.Count; i += 3)
+                {
+                    int a = remap[indices[i]];
+                    int b = remap[indices[i + 1]];
+                    int c = remap[indices[i + 2]];
+                    // 溶接で潰れた退化三角形（ゼロスケールのベイク結果など）は捨てる
+                    if (a == b || b == c || c == a)
+                    {
+                        stats.degenerateTriangles++;
+                        continue;
+                    }
+                    remapped.Add(a);
+                    remapped.Add(b);
+                    remapped.Add(c);
+                }
+                mesh.SetTriangles(remapped, s);
             }
             mesh.RecalculateBounds();
             return mesh;
+        }
+
+        /// <summary>
+        /// 全属性が完全一致（ビット等価）する頂点を溶接し、各リストを先頭詰めで圧縮して
+        /// 旧インデックス→新インデックスの対応表を返す。
+        /// 完全一致のみを対象とするため、ハードエッジ（法線分割）やUVシームは保持される。
+        /// </summary>
+        private static int[] WeldVertices(
+            List<Vector3> positions, List<Vector3> normals, List<Vector4> tangents,
+            List<Vector2> uv, List<Vector2> uv2, List<Color32> colors, List<Vector2>[] extraUV)
+        {
+            var comparer = new VertexComparer(positions, normals, tangents, uv, uv2, colors, extraUV);
+            var firstIndex = new Dictionary<int, int>(positions.Count, comparer);
+            var remap = new int[positions.Count];
+            var keep = new List<int>(positions.Count);
+            for (int i = 0; i < positions.Count; i++)
+            {
+                if (firstIndex.TryGetValue(i, out int compact))
+                {
+                    remap[i] = compact;
+                    continue;
+                }
+                compact = keep.Count;
+                firstIndex.Add(i, compact);
+                keep.Add(i);
+                remap[i] = compact;
+            }
+            if (keep.Count == positions.Count) return remap; // 重複なし
+
+            CompactList(positions, keep);
+            CompactList(normals, keep);
+            CompactList(tangents, keep);
+            CompactList(uv, keep);
+            CompactList(uv2, keep);
+            CompactList(colors, keep);
+            foreach (List<Vector2> channel in extraUV) CompactList(channel, keep);
+            return remap;
+        }
+
+        /// <summary>keepに列挙された旧インデックスの要素だけを先頭詰めで残す（keepは昇順）</summary>
+        private static void CompactList<T>(List<T> list, List<int> keep)
+        {
+            if (list == null || list.Count == 0) return;
+            for (int i = 0; i < keep.Count; i++) list[i] = list[keep[i]];
+            list.RemoveRange(keep.Count, list.Count - keep.Count);
+        }
+
+        /// <summary>頂点インデックスを全属性のビット等価で比較するComparer（溶接用）。null属性は比較しない。</summary>
+        private class VertexComparer : IEqualityComparer<int>
+        {
+            private readonly List<Vector3> positions;
+            private readonly List<Vector3> normals;
+            private readonly List<Vector4> tangents;
+            private readonly List<Vector2> uv;
+            private readonly List<Vector2> uv2;
+            private readonly List<Color32> colors;
+            private readonly List<Vector2>[] extraUV;
+
+            public VertexComparer(
+                List<Vector3> positions, List<Vector3> normals, List<Vector4> tangents,
+                List<Vector2> uv, List<Vector2> uv2, List<Color32> colors, List<Vector2>[] extraUV)
+            {
+                this.positions = positions;
+                this.normals = normals;
+                this.tangents = tangents;
+                this.uv = uv;
+                this.uv2 = uv2;
+                this.colors = colors;
+                this.extraUV = extraUV;
+            }
+
+            public bool Equals(int a, int b)
+            {
+                if (!Same(positions[a], positions[b])) return false;
+                if (!Same(normals[a], normals[b])) return false;
+                if (tangents != null && !Same(tangents[a], tangents[b])) return false;
+                if (!Same(uv[a], uv[b])) return false;
+                if (uv2 != null && !Same(uv2[a], uv2[b])) return false;
+                if (colors != null && !Same(colors[a], colors[b])) return false;
+                foreach (List<Vector2> channel in extraUV)
+                {
+                    if (channel != null && !Same(channel[a], channel[b])) return false;
+                }
+                return true;
+            }
+
+            public int GetHashCode(int i)
+            {
+                // 位置とUVだけでハッシュし、残りはEqualsで厳密比較する
+                unchecked
+                {
+                    Vector3 p = positions[i];
+                    Vector2 t = uv[i];
+                    int h = p.x.GetHashCode();
+                    h = (h * 397) ^ p.y.GetHashCode();
+                    h = (h * 397) ^ p.z.GetHashCode();
+                    h = (h * 397) ^ t.x.GetHashCode();
+                    h = (h * 397) ^ t.y.GetHashCode();
+                    return h;
+                }
+            }
+
+            // Vector同士の==演算子は近似比較のため、ハッシュと整合するビット等価で比較する
+            private static bool Same(Vector2 a, Vector2 b) => a.x == b.x && a.y == b.y;
+            private static bool Same(Vector3 a, Vector3 b) => a.x == b.x && a.y == b.y && a.z == b.z;
+            private static bool Same(Vector4 a, Vector4 b) =>
+                a.x == b.x && a.y == b.y && a.z == b.z && a.w == b.w;
+            private static bool Same(Color32 a, Color32 b) =>
+                a.r == b.r && a.g == b.g && a.b == b.b && a.a == b.a;
         }
 
         // ---------------------------------------------------------------
@@ -554,8 +851,10 @@ namespace YozoLab.MeshBaker
             foreach (KeyValuePair<string, Texture2D> entry in atlasResult.atlases)
             {
                 string texturePath = $"{directory}/{baseName}{entry.Key}.png";
+                // 自動縮小でアトラスがassembly.atlasSizeより小さいことがあるため、実サイズを使う
                 Texture2D savedTexture = SaveTextureAsset(
-                    entry.Value, texturePath, assembly.atlasSize,
+                    entry.Value, texturePath,
+                    Mathf.Max(entry.Value.width, entry.Value.height),
                     MaterialAtlasBuilder.IsNormalProperty(entry.Key),
                     MaterialAtlasBuilder.IsLinearProperty(entry.Key));
                 if (merged.HasProperty(entry.Key))

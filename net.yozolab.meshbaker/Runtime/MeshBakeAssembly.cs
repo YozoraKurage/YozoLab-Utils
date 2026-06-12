@@ -117,6 +117,14 @@ namespace YozoLab.MeshBaker
         [Tooltip("アトラス内の各テクスチャ間の余白(px)")]
         public int atlasPadding = 4;
 
+        [Tooltip("アトラスサイズに応じてPaddingを自動調整する（atlasPaddingを2048px基準として比例スケール）。" +
+                 "大きいアトラスでもミップマップの低位レベルで滲みにくくなります。")]
+        public bool mipAwarePadding = true;
+
+        [Tooltip("全テクスチャが目標密度のまま収まる場合、アトラスをより小さいサイズへ自動縮小します" +
+                 "（VRAM節約。テクセル密度はほぼ低下しません）。UV Islandsパッキング時のみ有効です。")]
+        public bool autoShrinkAtlas = true;
+
         [Tooltip("アトラス化するテクスチャプロパティ。先頭がレイアウトの基準になります。")]
         public List<string> textureProperties = new List<string> { "_MainTex" };
 
@@ -138,6 +146,17 @@ namespace YozoLab.MeshBaker
                  "重複分のテクスチャが複製されなくなり、その分テクセル密度が向上します。" +
                  "（UV Islandsパッキング時のみ有効）")]
         public bool mergeOverlappingUVIslands = true;
+
+        [Tooltip("ワールド表面積あたりのテクセル密度をアイランド間で均一化します。" +
+                 "過剰に高密度なアイランドの領域を回収して全体に再配分します" +
+                 "（各アイランドが元テクスチャの原寸密度を超えることはありません）。" +
+                 "UV Islandsパッキング時のみ有効です。")]
+        public bool normalizeTexelDensity = false;
+
+        [Header("メッシュ最適化")]
+        [Tooltip("不要な頂点属性を省略します: ノーマルマップを使わない出力では接線(Tangent)を、" +
+                 "全頂点が白の場合は頂点カラーを出力しません（見た目は変わらずメモリを節約）。")]
+        public bool stripUnusedVertexAttributes = true;
 
         [Tooltip("ライトマップ用UV2の扱い。\n" +
                  "None: UV2を出力しません。\n" +
@@ -169,6 +188,16 @@ namespace YozoLab.MeshBaker
             int target = GetTargetResolution(texture);
             if (target <= 0 || originalLongestEdge <= 0) return 1f;
             return Mathf.Clamp(target / (float)originalLongestEdge, 0.01f, 1f);
+        }
+
+        /// <summary>
+        /// 実際に使うアトラスPadding(px)。mipAwarePadding有効時はatlasPaddingを
+        /// 2048px基準としてアトラスサイズに比例させる（UV空間比を一定に保つ）。
+        /// </summary>
+        public int GetEffectiveAtlasPadding(int actualAtlasSize)
+        {
+            if (!mipAwarePadding) return atlasPadding;
+            return Mathf.Clamp(Mathf.RoundToInt(atlasPadding * (actualAtlasSize / 2048f)), 2, 64);
         }
     }
 }

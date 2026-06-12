@@ -33,6 +33,11 @@ namespace YozoLab.MeshBaker
             public Vector2 srcMin = new Vector2(float.MaxValue, float.MaxValue);
             public Vector2 srcMax = new Vector2(float.MinValue, float.MinValue);
 
+            /// <summary>ワールド（アセンブリローカル）空間での三角形面積の合計（密度正規化用）</summary>
+            public float worldArea;
+            /// <summary>ソースUV空間での三角形面積の合計（密度正規化用）</summary>
+            public float uvArea;
+
             public float BBoxArea => Mathf.Max(srcMax.x - srcMin.x, 0f) * Mathf.Max(srcMax.y - srcMin.y, 0f);
         }
 
@@ -47,8 +52,12 @@ namespace YozoLab.MeshBaker
             public Vector2 srcMin = new Vector2(float.MaxValue, float.MaxValue);
             public Vector2 srcMax = new Vector2(float.MinValue, float.MinValue);
 
-            /// <summary>元テクスチャ上での占有ピクセルサイズ（テクセル密度の基準）</summary>
+            /// <summary>目標とする占有ピクセルサイズ（密度正規化が有効なら正規化後の値）</summary>
             public Vector2 basePxSize;
+            /// <summary>元テクスチャ上での原寸ピクセルサイズ（これを超えるアップスケールはしない）</summary>
+            public Vector2 capPxSize;
+            public float worldArea;
+            public float uvArea;
 
             public Vector2 SrcSize => Vector2.Max(srcMax - srcMin, new Vector2(1e-6f, 1e-6f));
 
@@ -57,6 +66,8 @@ namespace YozoLab.MeshBaker
                 islands.Add(island);
                 srcMin = Vector2.Min(srcMin, island.srcMin);
                 srcMax = Vector2.Max(srcMax, island.srcMax);
+                worldArea += island.worldArea;
+                uvArea += island.uvArea;
             }
         }
 
@@ -67,7 +78,7 @@ namespace YozoLab.MeshBaker
         internal static MaterialAtlasBuilder.Result Pack(
             MeshBakeAssembly assembly,
             List<BakeMaterialGroup> groups, IReadOnlyList<string> properties,
-            int atlasSize, int paddingPx, List<string> warnings, List<string> infos)
+            int atlasSize, List<string> warnings, List<string> infos)
         {
             string mainProperty = properties[0];
             var units = new List<PackUnit>();
@@ -85,7 +96,9 @@ namespace YozoLab.MeshBaker
                 var groupIslands = new List<Island>();
                 foreach (BakePart part in group.parts)
                 {
-                    groupIslands.AddRange(DetectIslands(part));
+                    List<Island> islands = DetectIslands(part);
+                    if (assembly.normalizeTexelDensity) AccumulateIslandAreas(part, islands);
+                    groupIslands.AddRange(islands);
                 }
                 totalIslands += groupIslands.Count;
 
@@ -95,7 +108,8 @@ namespace YozoLab.MeshBaker
                     unit.basePxSize = Vector2.Max(
                         Vector2.Scale(unit.SrcSize, textureSize) * resolutionScale,
                         new Vector2(2f, 2f));
-                    unit.baseSize = unit.basePxSize / atlasSize;
+                    // 原寸（解像度上書き後）を超えるアップスケールはしない
+                    unit.capPxSize = unit.basePxSize;
                     units.Add(unit);
                 }
             }
@@ -109,28 +123,160 @@ namespace YozoLab.MeshBaker
                           "アトラス領域を共有しました。");
             }
 
-            float padding = Mathf.Max(paddingPx, 1) / (float)atlasSize;
-            float scale = NfdhRectPacker.PackWithScaleSearch(units, padding);
-            if (scale <= 0f)
+            if (assembly.normalizeTexelDensity)
+            {
+                ApplyDensityNormalization(units);
+            }
+
+            int finalSize = atlasSize;
+            if (NfdhPackAt(units, finalSize, assembly) <= 0f)
             {
                 throw new InvalidOperationException(
                     "UVアイランドをアトラスに収められませんでした。アトラスサイズを大きくするか、Paddingを小さくしてください。");
             }
-            if (scale < 0.7f)
+
+            // 目標密度のまま収まるなら、より小さいアトラスへ縮小して無駄を省く
+            if (assembly.autoShrinkAtlas)
             {
-                warnings.Add($"アトラス収容のため全体のテクセル密度が約{scale:P0}に縮小されました。" +
+                while (finalSize > 128 && AllAtTargetDensity(units, finalSize))
+                {
+                    int half = finalSize / 2;
+                    if (NfdhPackAt(units, half, assembly) > 0f && AllAtTargetDensity(units, half))
+                    {
+                        finalSize = half;
+                        continue;
+                    }
+                    break;
+                }
+                // 直前の縮小試行で失敗したレイアウトが残っている場合に備えて、採用サイズで確定パックする
+                NfdhPackAt(units, finalSize, assembly);
+                if (finalSize != atlasSize)
+                {
+                    infos.Add($"アトラスを{atlasSize}px→{finalSize}pxに自動縮小しました（テクセル密度の低下ほぼなし）。");
+                }
+            }
+
+            float minDensity = MinAchievedDensity(units, finalSize);
+            if (minDensity < 0.7f)
+            {
+                warnings.Add($"アトラス収容のため一部のテクセル密度が約{minDensity:P0}まで縮小されました。" +
                              "解像度を保ちたい場合はアトラスサイズを大きくしてください。");
             }
 
             RemapUVs(units);
 
+            int effectivePaddingPx = assembly.GetEffectiveAtlasPadding(finalSize);
             var result = new MaterialAtlasBuilder.Result();
             foreach (string property in properties)
             {
                 result.atlases[property] = RenderAtlas(
-                    units, property, property == mainProperty, atlasSize, paddingPx);
+                    units, property, property == mainProperty, finalSize, effectivePaddingPx);
             }
             return result;
+        }
+
+        /// <summary>指定アトラスサイズでの相対サイズ・上限・余白を設定してパックする</summary>
+        private static float NfdhPackAt(List<PackUnit> units, int atlasSize, MeshBakeAssembly assembly)
+        {
+            int paddingPx = assembly.GetEffectiveAtlasPadding(atlasSize);
+            float padding = Mathf.Max(paddingPx, 1) / (float)atlasSize;
+            foreach (PackUnit unit in units)
+            {
+                unit.baseSize = unit.basePxSize / atlasSize;
+                unit.maxSize = unit.capPxSize / atlasSize;
+            }
+            return NfdhRectPacker.PackWithScaleSearch(units, padding);
+        }
+
+        /// <summary>全ユニットが目標ピクセルサイズ（basePxSize）にほぼ達しているか（自動縮小の判定）</summary>
+        private static bool AllAtTargetDensity(List<PackUnit> units, int atlasSize)
+        {
+            const float tolerance = 0.98f;
+            foreach (PackUnit unit in units)
+            {
+                if (AchievedDensity(unit, atlasSize) < tolerance) return false;
+            }
+            return true;
+        }
+
+        private static float MinAchievedDensity(List<PackUnit> units, int atlasSize)
+        {
+            float min = float.MaxValue;
+            foreach (PackUnit unit in units)
+            {
+                min = Mathf.Min(min, AchievedDensity(unit, atlasSize));
+            }
+            return min;
+        }
+
+        /// <summary>目標ピクセルサイズに対する実配置サイズの比（90度回転を考慮して長辺同士で比較）</summary>
+        private static float AchievedDensity(PackUnit unit, int atlasSize)
+        {
+            float placedLongest = Mathf.Max(unit.size.x, unit.size.y) * atlasSize;
+            float targetLongest = Mathf.Max(unit.basePxSize.x, unit.basePxSize.y);
+            return placedLongest / Mathf.Max(targetLongest, 1e-6f);
+        }
+
+        /// <summary>
+        /// テクセル密度の正規化: 各ユニットの目標ピクセルサイズを
+        /// ワールド表面積に比例した密度（UVサイズ × sqrt(ワールド面積/UV面積)）へ置き換える。
+        /// 全体の合計面積は元と同等に保ち、原寸（capPxSize）は超えない。
+        /// </summary>
+        private static void ApplyDensityNormalization(List<PackUnit> units)
+        {
+            var normSizes = new Vector2[units.Count];
+            double originalArea = 0;
+            double normalizedArea = 0;
+            for (int i = 0; i < units.Count; i++)
+            {
+                PackUnit unit = units[i];
+                if (unit.worldArea <= 1e-12f || unit.uvArea <= 1e-12f) continue; // 退化は原寸のまま
+                normSizes[i] = unit.SrcSize * Mathf.Sqrt(unit.worldArea / unit.uvArea);
+                originalArea += (double)unit.basePxSize.x * unit.basePxSize.y;
+                normalizedArea += (double)normSizes[i].x * normSizes[i].y;
+            }
+            if (normalizedArea <= 0) return;
+
+            // 合計ピクセル面積を保存するスケール（均一密度のときのピクセル/ワールド比）
+            float c = Mathf.Sqrt((float)(originalArea / normalizedArea));
+            for (int i = 0; i < units.Count; i++)
+            {
+                if (normSizes[i] == Vector2.zero) continue;
+                PackUnit unit = units[i];
+                Vector2 px = normSizes[i] * c;
+                // 原寸を超える分は原寸に抑える（アスペクト比は共通なので一様係数でよい）
+                float cap = Mathf.Min(1f, Mathf.Min(
+                    unit.capPxSize.x / Mathf.Max(px.x, 1e-6f),
+                    unit.capPxSize.y / Mathf.Max(px.y, 1e-6f)));
+                unit.basePxSize = Vector2.Max(px * cap, new Vector2(2f, 2f));
+            }
+        }
+
+        /// <summary>パートの三角形を走査して、各アイランドのワールド面積とUV面積を集計する</summary>
+        private static void AccumulateIslandAreas(BakePart part, List<Island> islands)
+        {
+            var vertexToIsland = new Island[part.uv.Length];
+            foreach (Island island in islands)
+            {
+                foreach (int v in island.vertices) vertexToIsland[v] = island;
+            }
+
+            for (int i = 0; i < part.indices.Length; i += 3)
+            {
+                int a = part.indices[i];
+                int b = part.indices[i + 1];
+                int c = part.indices[i + 2];
+                Island island = vertexToIsland[a]; // 三角形の3頂点は同一アイランドに属する
+                if (island == null) continue;
+
+                island.worldArea += Vector3.Cross(
+                    part.positions[b] - part.positions[a],
+                    part.positions[c] - part.positions[a]).magnitude * 0.5f;
+
+                Vector2 e1 = part.uv[b] - part.uv[a];
+                Vector2 e2 = part.uv[c] - part.uv[a];
+                island.uvArea += Mathf.Abs(e1.x * e2.y - e1.y * e2.x) * 0.5f;
+            }
         }
 
         // ---------------------------------------------------------------

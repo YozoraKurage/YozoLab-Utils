@@ -110,6 +110,10 @@ namespace YozoLab.MeshBaker
                 mesh.normals = part.normals;
                 mesh.tangents = part.tangents;
                 mesh.uv = part.uv;
+                for (int ch = 0; ch < BakePart.ExtraUVChannels; ch++)
+                {
+                    if (part.extraUVs[ch] != null) mesh.SetUVs(ch + 2, part.extraUVs[ch]);
+                }
                 if (part.colors != null) mesh.colors32 = part.colors;
                 mesh.triangles = part.indices;
 
@@ -119,6 +123,13 @@ namespace YozoLab.MeshBaker
                 part.normals = mesh.normals;
                 part.tangents = mesh.tangents;
                 part.uv = mesh.uv;
+                var channelBuffer = new List<Vector2>();
+                for (int ch = 0; ch < BakePart.ExtraUVChannels; ch++)
+                {
+                    if (part.extraUVs[ch] == null) continue;
+                    mesh.GetUVs(ch + 2, channelBuffer);
+                    part.extraUVs[ch] = channelBuffer.ToArray();
+                }
                 if (part.colors != null) part.colors = mesh.colors32;
                 part.uv2 = mesh.uv2;
                 part.indices = mesh.triangles;
