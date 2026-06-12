@@ -12,11 +12,23 @@ namespace YozoLab.MeshBaker
         /// <summary>統合マテリアルに強制するシェーダー名（Shader.Find用。前方一致でバリアントを許容）</summary>
         public string shaderName;
 
+        /// <summary>
+        /// 同系シェーダーの判定トークン（部分一致）。nullならshaderNameの前方一致で判定する。
+        /// lilToonのようにバリアントが「Hidden/lilToon〜」配下にあるシェーダー向け。
+        /// </summary>
+        public string shaderMatchToken;
+
         /// <summary>アトラス対象のテクスチャプロパティ（先頭がメイン＝レイアウトの基準）</summary>
         public string[] properties;
 
         /// <summary>テクスチャプロパティ → マップを有効化するシェーダーキーワード</summary>
         public Dictionary<string, string> keywords;
+
+        /// <summary>
+        /// テクスチャプロパティ → マップを有効化するfloatトグルプロパティ（1が設定される）。
+        /// lilToonのようにキーワードではなくプロパティで機能を切り替えるシェーダー向け。無ければnull。
+        /// </summary>
+        public Dictionary<string, string> toggles;
 
         /// <summary>発光マップのプロパティ（GI寄与設定の対象。無ければnull）</summary>
         public string emissionProperty;
@@ -101,6 +113,50 @@ namespace YozoLab.MeshBaker
             emissionProperty = Emission,
         };
 
+        /// <summary>
+        /// lilToon（https://github.com/lilxyzw/lilToon）。
+        /// UV0でサンプリングされる主要マップのみアトラス化する。
+        /// MatCap本体（ビュー空間サンプリング）やUVモードを選べる2nd/3rdレイヤーは対象外。
+        /// マップの有効化はキーワードではなくfloatトグル（_Use〜）で行う。
+        /// 透明系バリアントは「Hidden/lilToon〜」配下にあるため部分一致で判定する。
+        /// </summary>
+        private static readonly MaterialModeProfile LilToonProfile = new MaterialModeProfile
+        {
+            shaderName = "lilToon",
+            shaderMatchToken = "lilToon",
+            properties = new[]
+            {
+                "_MainTex", "_AlphaMask",
+                "_BumpMap", "_Bump2ndMap",
+                "_ShadowColorTex", "_Shadow2ndColorTex", "_Shadow3rdColorTex",
+                "_ShadowBorderMask", "_ShadowBlurMask", "_ShadowStrengthMask",
+                "_SmoothnessTex", "_MetallicGlossMap", "_ReflectionColorTex",
+                "_RimColorTex",
+                "_MatCapBlendMask", "_MatCap2ndBlendMask",
+                "_EmissionMap", "_EmissionBlendMask",
+                "_Emission2ndMap", "_Emission2ndBlendMask",
+                "_OutlineTex", "_OutlineWidthMask",
+                "_AudioLinkMask",
+            },
+            keywords = new Dictionary<string, string>(),
+            toggles = new Dictionary<string, string>
+            {
+                { "_BumpMap", "_UseBumpMap" },
+                { "_Bump2ndMap", "_UseBump2ndMap" },
+                { "_ShadowColorTex", "_UseShadow" },
+                { "_SmoothnessTex", "_UseReflection" },
+                { "_MetallicGlossMap", "_UseReflection" },
+                { "_ReflectionColorTex", "_UseReflection" },
+                { "_RimColorTex", "_UseRim" },
+                { "_MatCapBlendMask", "_UseMatCap" },
+                { "_MatCap2ndBlendMask", "_UseMatCap2nd" },
+                { "_EmissionMap", "_UseEmission" },
+                { "_Emission2ndMap", "_UseEmission2nd" },
+                { "_AudioLinkMask", "_UseAudioLink" },
+            },
+            emissionProperty = "_EmissionMap",
+        };
+
         private static readonly string[] DefaultProperties = { Albedo };
 
         /// <summary>モードに対応するプロファイル。Custom（手動指定）はnull。</summary>
@@ -112,6 +168,7 @@ namespace YozoLab.MeshBaker
                 case MaterialMode.AutodeskInteractive: return AutodeskInteractiveProfile;
                 case MaterialMode.Filamented: return FilamentedProfile;
                 case MaterialMode.Mochie: return MochieProfile;
+                case MaterialMode.LilToon: return LilToonProfile;
                 default: return null;
             }
         }

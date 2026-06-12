@@ -49,6 +49,8 @@ namespace YozoLab.MeshBaker
         Filamented,
         /// <summary>Mochie（Mochie/Standard）シェーダーのテクスチャを自動収集する</summary>
         Mochie,
+        /// <summary>lilToonシェーダーのテクスチャを自動収集する</summary>
+        LilToon,
     }
 
     /// <summary>アトラス化の方式</summary>
@@ -109,7 +111,7 @@ namespace YozoLab.MeshBaker
         [Tooltip("全マテリアルをテクスチャアトラス化して1つのマテリアルに統合する")]
         public bool mergeMaterials = true;
 
-        [Tooltip("マテリアルの扱い方。UnityStandard（標準）/ AutodeskInteractive / Filamented / Mochie を選ぶと、" +
+        [Tooltip("マテリアルの扱い方。UnityStandard（標準）/ AutodeskInteractive / Filamented / Mochie / LilToon を選ぶと、" +
                  "そのシェーダーのテクスチャプロパティを自動で収集し、対応するシェーダーのマテリアルとして統合します。" +
                  "Customでは Texture Properties の手動指定を使います。")]
         public MaterialMode materialMode = MaterialMode.UnityStandard;

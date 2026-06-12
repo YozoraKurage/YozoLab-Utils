@@ -887,13 +887,24 @@ namespace YozoLab.MeshBaker
             return merged;
         }
 
-        /// <summary>割り当てたマップに対応するシェーダーキーワードを有効化する（発光はGI寄与も設定）</summary>
+        /// <summary>
+        /// 割り当てたマップに対応するシェーダーキーワード／floatトグルを有効化する
+        /// （発光はGI寄与も設定）
+        /// </summary>
         private static void EnableProfileMap(
             Material material, MaterialModeProfile profile, string textureProperty)
         {
             if (profile.keywords.TryGetValue(textureProperty, out string keyword))
             {
                 material.EnableKeyword(keyword);
+            }
+
+            // lilToonなど、キーワードではなくfloatプロパティで機能を切り替えるシェーダー向け
+            if (profile.toggles != null &&
+                profile.toggles.TryGetValue(textureProperty, out string toggle) &&
+                material.HasProperty(toggle))
+            {
+                material.SetFloat(toggle, 1f);
             }
 
             if (textureProperty == profile.emissionProperty)
@@ -916,10 +927,14 @@ namespace YozoLab.MeshBaker
         private static void EnsureProfileShader(
             Material material, MaterialModeProfile profile, BakeReport report)
         {
-            if (material.shader != null &&
-                material.shader.name.StartsWith(profile.shaderName, StringComparison.Ordinal))
+            if (material.shader != null)
             {
-                return; // 既に対象シェーダー系
+                // shaderMatchTokenがあれば部分一致（lilToonの「Hidden/lilToon〜」バリアント等）、
+                // なければシェーダー名の前方一致で同系判定する
+                bool isFamily = profile.shaderMatchToken != null
+                    ? material.shader.name.IndexOf(profile.shaderMatchToken, StringComparison.Ordinal) >= 0
+                    : material.shader.name.StartsWith(profile.shaderName, StringComparison.Ordinal);
+                if (isFamily) return; // 既に対象シェーダー系
             }
 
             Shader shader = Shader.Find(profile.shaderName);
