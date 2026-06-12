@@ -368,6 +368,10 @@ namespace YozoLab.MeshBaker
                     $"Mesh ({report.meshPaths.Count}グループ):\n- " + string.Join("\n- ", report.meshPaths) +
                     (report.materialPath != null ? $"\nMaterial: {report.materialPath}" : "") +
                     (report.prefabPaths.Count > 0 ? $"\nPrefab:\n- " + string.Join("\n- ", report.prefabPaths) : "");
+                if (report.infos.Count > 0)
+                {
+                    summary += "\n\n最適化:\n- " + string.Join("\n- ", report.infos);
+                }
                 if (report.warnings.Count > 0)
                 {
                     summary += "\n\n警告:\n- " + string.Join("\n- ", report.warnings);

@@ -16,6 +16,8 @@ namespace YozoLab.MeshBaker
         public int sourceMaterialCount;
         public int submeshCount;
         public readonly List<string> warnings = new List<string>();
+        /// <summary>警告ではない補足情報（最適化の実施内容など）</summary>
+        public readonly List<string> infos = new List<string>();
     }
 
     /// <summary>1つのSkinnedMeshRendererの1サブメッシュ分のベイク済みデータ</summary>
@@ -28,6 +30,8 @@ namespace YozoLab.MeshBaker
         public Vector3[] normals;
         public Vector4[] tangents;
         public Vector2[] uv;
+        /// <summary>ライトマップ用UV2（PreserveAndRepackモード時のみ抽出。元メッシュに無い場合null）</summary>
+        public Vector2[] uv2;
         public Color32[] colors;
         public int[] indices;
     }
@@ -85,7 +89,7 @@ namespace YozoLab.MeshBaker
                     // UVアイランド単位の詰め直し（UV書き換えも内部で行われる）
                     atlasResult = UVIslandAtlasPacker.Pack(
                         assembly, materialGroups, effectiveProperties,
-                        assembly.atlasSize, assembly.atlasPadding, report.warnings);
+                        assembly.atlasSize, assembly.atlasPadding, report.warnings, report.infos);
                 }
                 else
                 {
@@ -165,8 +169,14 @@ namespace YozoLab.MeshBaker
                     continue;
                 }
 
+                if (assembly.lightmapUVMode == LightmapUVMode.PreserveAndRepack)
+                {
+                    // 既存UV2の保持と再パック（頂点分割が起きうるため結合前に行う）
+                    LightmapUVPacker.PreserveAndRepack(
+                        submeshes.SelectMany(s => s).ToList(), report.warnings);
+                }
                 Mesh combined = BuildCombinedMesh(submeshes);
-                if (assembly.generateLightmapUVs)
+                if (assembly.lightmapUVMode == LightmapUVMode.GenerateAll)
                 {
                     Unwrapping.GenerateSecondaryUVSet(combined);
                 }
@@ -251,6 +261,10 @@ namespace YozoLab.MeshBaker
                 }
 
                 Vector2[] sourceUV = source.uv;
+                // 既存UV2の保持が要るモードのときだけ抽出する（手動展開・インポータの自動展開どちらも対象）
+                Vector2[] sourceUV2 = assembly.lightmapUVMode == LightmapUVMode.PreserveAndRepack
+                    ? source.uv2
+                    : Array.Empty<Vector2>();
                 Color32[] sourceColors = source.colors32;
                 Material[] materials = renderer.sharedMaterials;
 
@@ -265,7 +279,7 @@ namespace YozoLab.MeshBaker
 
                     BakePart part = ExtractSubmesh(
                         source.GetTriangles(s), bakedPositions, bakedNormals, bakedTangents,
-                        sourceUV, sourceColors, toRoot);
+                        sourceUV, sourceUV2, sourceColors, toRoot);
                     part.material = material;
                     part.groupIndex = groupIndex;
                     parts.Add(part);
@@ -291,7 +305,7 @@ namespace YozoLab.MeshBaker
 
         private static BakePart ExtractSubmesh(
             int[] triangles, Vector3[] positions, Vector3[] normals, Vector4[] tangents,
-            Vector2[] uv, Color32[] colors, Matrix4x4 toRoot)
+            Vector2[] uv, Vector2[] uv2, Color32[] colors, Matrix4x4 toRoot)
         {
             var map = new Dictionary<int, int>();
             var part = new BakePart { indices = new int[triangles.Length] };
@@ -299,6 +313,7 @@ namespace YozoLab.MeshBaker
             var outNormals = new List<Vector3>();
             var outTangents = new List<Vector4>();
             var outUV = new List<Vector2>();
+            var outUV2 = uv2.Length > 0 ? new List<Vector2>() : null;
             var outColors = colors.Length > 0 ? new List<Color32>() : null;
 
             for (int i = 0; i < triangles.Length; i++)
@@ -323,6 +338,7 @@ namespace YozoLab.MeshBaker
                         outTangents.Add(new Vector4(1, 0, 0, -1));
                     }
                     outUV.Add(uv.Length > 0 ? uv[sourceIndex] : Vector2.zero);
+                    outUV2?.Add(uv2[sourceIndex]);
                     outColors?.Add(colors[sourceIndex]);
                 }
                 part.indices[i] = newIndex;
@@ -332,6 +348,7 @@ namespace YozoLab.MeshBaker
             part.normals = outNormals.ToArray();
             part.tangents = outTangents.ToArray();
             part.uv = outUV.ToArray();
+            part.uv2 = outUV2?.ToArray();
             part.colors = outColors?.ToArray();
             return part;
         }
@@ -458,8 +475,10 @@ namespace YozoLab.MeshBaker
             var normals = new List<Vector3>();
             var tangents = new List<Vector4>();
             var uv = new List<Vector2>();
+            var uv2 = new List<Vector2>();
             var colors = new List<Color32>();
             bool anyColors = submeshes.Any(s => s.Any(p => p.colors != null));
+            bool anyUV2 = submeshes.Any(s => s.Any(p => p.uv2 != null && p.uv2.Length > 0));
             var submeshIndices = new List<int>[submeshCount];
             for (int i = 0; i < submeshCount; i++) submeshIndices[i] = new List<int>();
 
@@ -473,6 +492,11 @@ namespace YozoLab.MeshBaker
                     normals.AddRange(part.normals);
                     tangents.AddRange(part.tangents);
                     uv.AddRange(part.uv);
+                    if (anyUV2)
+                    {
+                        if (part.uv2 != null && part.uv2.Length == part.positions.Length) uv2.AddRange(part.uv2);
+                        else for (int i = 0; i < part.positions.Length; i++) uv2.Add(Vector2.zero);
+                    }
                     if (anyColors)
                     {
                         if (part.colors != null) colors.AddRange(part.colors);
@@ -492,6 +516,7 @@ namespace YozoLab.MeshBaker
             mesh.SetNormals(normals);
             mesh.SetTangents(tangents);
             mesh.SetUVs(0, uv);
+            if (anyUV2) mesh.SetUVs(1, uv2); // チャンネル1 = Mesh.uv2（ライトマップUV）
             if (anyColors) mesh.SetColors(colors);
 
             mesh.subMeshCount = submeshCount;

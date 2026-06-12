@@ -54,6 +54,20 @@ namespace YozoLab.MeshBaker
         MaterialRects,
     }
 
+    /// <summary>ライトマップ用UV2の扱い</summary>
+    public enum LightmapUVMode
+    {
+        /// <summary>UV2を出力しない</summary>
+        None,
+        /// <summary>結合後のメッシュ全体へ常に自動展開で生成する</summary>
+        GenerateAll,
+        /// <summary>
+        /// 既存のUV2（手動展開・モデルインポータの自動展開どちらも）を保持し、
+        /// UV2を持たないメッシュだけを自動展開した上で、全体を1枚のレイアウトに再パックする
+        /// </summary>
+        PreserveAndRepack,
+    }
+
     /// <summary>
     /// 複数のRenderer（SkinnedMeshRenderer/MeshRenderer）を1つの静的メッシュにベイクするための設定コンポーネント。
     /// 設定はこのGameObjectにシリアライズされて保存され、ベイク自体は非破壊
@@ -119,8 +133,19 @@ namespace YozoLab.MeshBaker
         [Tooltip("マテリアルのTiling/OffsetをUVに焼き込む")]
         public bool bakeTextureST = true;
 
-        [Tooltip("ライトマップ用のUV2を生成する")]
-        public bool generateLightmapUVs = false;
+        [Tooltip("ソースUV上で重なり合うUVアイランド（ミラー/スタックなど意図的な重複や、" +
+                 "複製メッシュの同一UV）を検知して、アトラスの同じ領域を共有させます。" +
+                 "重複分のテクスチャが複製されなくなり、その分テクセル密度が向上します。" +
+                 "（UV Islandsパッキング時のみ有効）")]
+        public bool mergeOverlappingUVIslands = true;
+
+        [Tooltip("ライトマップ用UV2の扱い。\n" +
+                 "None: UV2を出力しません。\n" +
+                 "GenerateAll: 結合後のメッシュ全体へ常に自動展開で生成します。\n" +
+                 "PreserveAndRepack: 既存のUV2（手動展開・インポータの自動展開）を保持し、" +
+                 "UV2を持たないメッシュだけを自動展開した上で、" +
+                 "ワールド表面積に応じたテクセル密度で全体を1枚のレイアウトに再パックします。")]
+        public LightmapUVMode lightmapUVMode = LightmapUVMode.None;
 
         public string EffectiveOutputName =>
             string.IsNullOrEmpty(outputName) ? gameObject.name : outputName;

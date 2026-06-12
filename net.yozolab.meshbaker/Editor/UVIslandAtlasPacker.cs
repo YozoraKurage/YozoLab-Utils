@@ -8,37 +8,56 @@ namespace YozoLab.MeshBaker
     /// <summary>
     /// UVアイランド単位のアトラス化。
     ///
-    /// アルゴリズムは TexTransCore (https://github.com/ReinaS-64892/TexTransCore) および
-    /// TexTransTool (https://github.com/ReinaS-64892/TexTransTool) を参照して実装している
-    /// (いずれも MIT License, Copyright (c) 2023 Reina_Sakiria):
-    /// - UVアイランド分解: 同一UV座標の頂点をUnion-Findで結合する方式 (IslandUtility.UVtoIsland)
-    /// - パッキング: NFDH Plus FC — 縦長アイランドを90度回転して高さ降順に整列し、
-    ///   棚(シェルフ)の床側は左から、天井側は右から詰めるFloor-Ceiling法 (NFDHPlasFC)
-    /// - 充填率最適化: 全体を面積比0.5相当へ縮小してから、収まらなくなる直前まで
-    ///   拡大を繰り返す探索 (IslandRelocationManager.RelocateLoop)
+    /// アイランド分解は TexTransCore (https://github.com/ReinaS-64892/TexTransCore) の
+    /// IslandUtility.UVtoIsland を参照して実装している
+    /// (MIT License, Copyright (c) 2023 Reina_Sakiria):
+    /// 同一UV座標の頂点をUnion-Findで結合する方式。
+    /// パッキング本体（NFDH Plus FC + 充填率の拡大探索）は NfdhRectPacker に共通化されている。
+    ///
+    /// さらに、同一マテリアル内でソースUV上重なり合うアイランド
+    /// （ミラーリングやスタックなど意図的に重複させたUV、複製メッシュの同一UV）を検知して
+    /// 1つのパッキング単位にまとめ、アトラス領域を共有させる。
+    /// 重複分のテクスチャがアトラスに複製されなくなるため、その分ほかのアイランドへ
+    /// テクセル密度を再配分できる。
     /// </summary>
     internal static class UVIslandAtlasPacker
     {
+        /// <summary>重なり面積が小さい方のアイランドのこの割合以上なら同一ユニットにまとめる</summary>
+        private const float OverlapMergeThreshold = 0.5f;
+
+        /// <summary>1つのBakePart内で連結したUVアイランド（検出単位）</summary>
         private class Island
         {
-            public BakeMaterialGroup group;
             public BakePart part;
             public readonly List<int> vertices = new List<int>();
+            public Vector2 srcMin = new Vector2(float.MaxValue, float.MaxValue);
+            public Vector2 srcMax = new Vector2(float.MinValue, float.MinValue);
+
+            public float BBoxArea => Mathf.Max(srcMax.x - srcMin.x, 0f) * Mathf.Max(srcMax.y - srcMin.y, 0f);
+        }
+
+        /// <summary>
+        /// パッキング単位。ソースUV上で重なるアイランド群は1つのユニットにまとまり、
+        /// 相対位置を保ったままアトラスの同じ領域を共有する。
+        /// </summary>
+        private class PackUnit : NfdhRectPacker.Item
+        {
+            public BakeMaterialGroup group;
+            public readonly List<Island> islands = new List<Island>();
             public Vector2 srcMin = new Vector2(float.MaxValue, float.MaxValue);
             public Vector2 srcMax = new Vector2(float.MinValue, float.MinValue);
 
             /// <summary>元テクスチャ上での占有ピクセルサイズ（テクセル密度の基準）</summary>
             public Vector2 basePxSize;
 
-            // パッキング作業用と確定結果
-            public Vector2 size;
-            public Vector2 pos;
-            public bool rotated;
-            public Vector2 bestSize;
-            public Vector2 bestPos;
-            public bool bestRotated;
-
             public Vector2 SrcSize => Vector2.Max(srcMax - srcMin, new Vector2(1e-6f, 1e-6f));
+
+            public void Add(Island island)
+            {
+                islands.Add(island);
+                srcMin = Vector2.Min(srcMin, island.srcMin);
+                srcMax = Vector2.Max(srcMax, island.srcMax);
+            }
         }
 
         /// <summary>
@@ -48,10 +67,11 @@ namespace YozoLab.MeshBaker
         internal static MaterialAtlasBuilder.Result Pack(
             MeshBakeAssembly assembly,
             List<BakeMaterialGroup> groups, IReadOnlyList<string> properties,
-            int atlasSize, int paddingPx, List<string> warnings)
+            int atlasSize, int paddingPx, List<string> warnings, List<string> infos)
         {
             string mainProperty = properties[0];
-            var islands = new List<Island>();
+            var units = new List<PackUnit>();
+            int totalIslands = 0;
             foreach (BakeMaterialGroup group in groups)
             {
                 Texture mainTexture = GetMainTexture(group.material, mainProperty);
@@ -61,25 +81,36 @@ namespace YozoLab.MeshBaker
                 // テクスチャ解像度の上書き（非破壊）をテクセル密度に反映する
                 int longestEdge = Mathf.RoundToInt(Mathf.Max(textureSize.x, textureSize.y));
                 float resolutionScale = assembly.GetResolutionScale(mainTexture, longestEdge);
+
+                var groupIslands = new List<Island>();
                 foreach (BakePart part in group.parts)
                 {
-                    foreach (Island island in DetectIslands(part))
-                    {
-                        island.group = group;
-                        island.basePxSize = Vector2.Max(
-                            Vector2.Scale(island.SrcSize, textureSize) * resolutionScale,
-                            new Vector2(2f, 2f));
-                        islands.Add(island);
-                    }
+                    groupIslands.AddRange(DetectIslands(part));
+                }
+                totalIslands += groupIslands.Count;
+
+                foreach (PackUnit unit in BuildPackUnits(groupIslands, assembly.mergeOverlappingUVIslands))
+                {
+                    unit.group = group;
+                    unit.basePxSize = Vector2.Max(
+                        Vector2.Scale(unit.SrcSize, textureSize) * resolutionScale,
+                        new Vector2(2f, 2f));
+                    unit.baseSize = unit.basePxSize / atlasSize;
+                    units.Add(unit);
                 }
             }
-            if (islands.Count == 0)
+            if (units.Count == 0)
             {
                 throw new InvalidOperationException("UVアイランドが見つかりませんでした。");
             }
+            if (totalIslands > units.Count)
+            {
+                infos.Add($"UV重複の最適化: 重なり合う{totalIslands}アイランドを{units.Count}ユニットに統合し、" +
+                          "アトラス領域を共有しました。");
+            }
 
             float padding = Mathf.Max(paddingPx, 1) / (float)atlasSize;
-            float scale = RelocateLoop(islands, atlasSize, padding);
+            float scale = NfdhRectPacker.PackWithScaleSearch(units, padding);
             if (scale <= 0f)
             {
                 throw new InvalidOperationException(
@@ -91,13 +122,13 @@ namespace YozoLab.MeshBaker
                              "解像度を保ちたい場合はアトラスサイズを大きくしてください。");
             }
 
-            RemapUVs(islands);
+            RemapUVs(units);
 
             var result = new MaterialAtlasBuilder.Result();
             foreach (string property in properties)
             {
                 result.atlases[property] = RenderAtlas(
-                    islands, property, property == mainProperty, atlasSize, paddingPx);
+                    units, property, property == mainProperty, atlasSize, paddingPx);
             }
             return result;
         }
@@ -168,178 +199,106 @@ namespace YozoLab.MeshBaker
         }
 
         // ---------------------------------------------------------------
-        // パッキング（NFDH Plus Floor-Ceiling + 拡大探索）
+        // 重複アイランドの統合（同一マテリアル内のスタック/ミラー/複製の検知）
         // ---------------------------------------------------------------
 
-        /// <summary>面積比0.5相当から開始し、収まらなくなる直前までテクセル密度を拡大する</summary>
-        private static float RelocateLoop(List<Island> islands, int atlasSize, float padding)
+        /// <summary>
+        /// ソースUV上で十分に重なり合うアイランド同士をUnion-Findで連結し、
+        /// パッキング単位（PackUnit）にまとめる。
+        /// 重なったアイランドは同じテクスチャ領域をサンプリングしているため、
+        /// アトラス上で1つの領域を共有しても描画結果は変わらない。
+        /// </summary>
+        private static List<PackUnit> BuildPackUnits(List<Island> islands, bool mergeOverlapping)
         {
-            float areaSum = islands.Sum(i =>
-                (i.basePxSize.x / atlasSize) * (i.basePxSize.y / atlasSize));
+            var parent = new int[islands.Count];
+            for (int i = 0; i < islands.Count; i++) parent[i] = i;
 
-            for (float budget = 0.5f; budget > 0.02f; budget -= 0.05f)
+            int Find(int x)
             {
-                float scale = Mathf.Sqrt(budget / Mathf.Max(areaSum, 1e-9f));
-                if (!TryPackAtScale(islands, atlasSize, padding, scale)) continue;
-
-                SaveLayout(islands);
-                float best = scale;
-                for (int step = 0; step < 64; step++)
+                while (parent[x] != x)
                 {
-                    float trial = best * 1.02f;
-                    if (!TryPackAtScale(islands, atlasSize, padding, trial)) break;
-                    SaveLayout(islands);
-                    best = trial;
+                    parent[x] = parent[parent[x]];
+                    x = parent[x];
                 }
-                RestoreLayout(islands);
-                return best;
+                return x;
             }
-            return -1f;
+
+            if (mergeOverlapping)
+            {
+                for (int a = 0; a < islands.Count; a++)
+                {
+                    for (int b = a + 1; b < islands.Count; b++)
+                    {
+                        if (Find(a) == Find(b)) continue;
+                        if (ShouldMerge(islands[a], islands[b]))
+                        {
+                            parent[Find(b)] = Find(a);
+                        }
+                    }
+                }
+            }
+
+            var byRoot = new Dictionary<int, PackUnit>();
+            var units = new List<PackUnit>();
+            for (int i = 0; i < islands.Count; i++)
+            {
+                int root = Find(i);
+                if (!byRoot.TryGetValue(root, out PackUnit unit))
+                {
+                    unit = new PackUnit();
+                    byRoot.Add(root, unit);
+                    units.Add(unit);
+                }
+                unit.Add(islands[i]);
+            }
+            return units;
         }
 
-        private static bool TryPackAtScale(List<Island> islands, int atlasSize, float padding, float scale)
+        /// <summary>
+        /// バウンディングボックスの重なりが、小さい方の面積の一定割合以上なら統合する。
+        /// 完全一致のスタックや包含は1.0となり確実に統合され、
+        /// 隣接アイランドのわずかな接触は統合されない。
+        /// </summary>
+        private static bool ShouldMerge(Island a, Island b)
         {
-            float maxLength = 1f - padding * 2f - 0.001f;
-            foreach (Island island in islands)
-            {
-                Vector2 size = island.basePxSize / atlasSize * scale;
-                // 1つでも枠を超えるアイランドがあると全体が破綻するため、そのアイランドだけ縮める
-                float longest = Mathf.Max(size.x, size.y);
-                if (longest > maxLength) size *= maxLength / longest;
-                island.size = size;
-                island.rotated = false;
-            }
-            return TryPack(islands, padding);
-        }
+            float w = Mathf.Min(a.srcMax.x, b.srcMax.x) - Mathf.Max(a.srcMin.x, b.srcMin.x);
+            float h = Mathf.Min(a.srcMax.y, b.srcMax.y) - Mathf.Max(a.srcMin.y, b.srcMin.y);
+            if (w <= 0f || h <= 0f) return false;
 
-        private static void SaveLayout(List<Island> islands)
-        {
-            foreach (Island island in islands)
-            {
-                island.bestSize = island.size;
-                island.bestPos = island.pos;
-                island.bestRotated = island.rotated;
-            }
-        }
-
-        private static void RestoreLayout(List<Island> islands)
-        {
-            foreach (Island island in islands)
-            {
-                island.size = island.bestSize;
-                island.pos = island.bestPos;
-                island.rotated = island.bestRotated;
-            }
-        }
-
-        /// <summary>NFDH+FC: 高さ降順で、各棚の床(左から)と天井(右から)に詰める</summary>
-        private static bool TryPack(List<Island> islands, float padding)
-        {
-            // 縦長のアイランドは90度回転して横長に揃える
-            foreach (Island island in islands)
-            {
-                if (island.size.y > island.size.x)
-                {
-                    island.size = new Vector2(island.size.y, island.size.x);
-                    island.rotated = true;
-                }
-            }
-
-            List<Island> order = islands.OrderByDescending(i => i.size.y).ToList();
-            var shelves = new List<Shelf>();
-
-            foreach (Island island in order)
-            {
-                bool placed = false;
-                foreach (Shelf shelf in shelves)
-                {
-                    if (shelf.TryPlace(island, padding)) { placed = true; break; }
-                }
-                if (placed) continue;
-
-                float floor = shelves.Count == 0 ? padding : shelves[shelves.Count - 1].Ceil + padding;
-                var newShelf = new Shelf(floor, island.size.y);
-                if (!newShelf.TryPlace(island, padding)) return false; // 幅1を超えるアイランド
-                shelves.Add(newShelf);
-            }
-
-            return shelves.Count == 0 || shelves[shelves.Count - 1].Ceil + padding <= 1f;
-        }
-
-        private class Shelf
-        {
-            public readonly float Floor;
-            public readonly float Height;
-            public float Ceil => Floor + Height;
-            private readonly List<Island> lower = new List<Island>();
-            private readonly List<Island> upper = new List<Island>();
-
-            public Shelf(float floor, float height)
-            {
-                Floor = floor;
-                Height = height;
-            }
-
-            public bool TryPlace(Island island, float padding)
-            {
-                if (island.size.y > Height + 1e-6f) return false;
-
-                // 床側: 左から詰める。天井側の島と縦に干渉しない範囲まで。
-                float xMin = lower.Count == 0 ? 0f : lower[lower.Count - 1].pos.x + lower[lower.Count - 1].size.x;
-                float xMax = 1f;
-                foreach (Island u in upper)
-                {
-                    if (island.size.y + u.size.y + padding * 2f > Height) xMax = Mathf.Min(xMax, u.pos.x);
-                }
-                if (xMax - xMin >= island.size.x + padding * 2f)
-                {
-                    island.pos = new Vector2(xMin + padding, Floor);
-                    lower.Add(island);
-                    return true;
-                }
-
-                // 天井側: 右から詰める。床側の島と縦に干渉しない範囲まで。
-                float uMax = upper.Count == 0 ? 1f : upper[upper.Count - 1].pos.x;
-                float uMin = 0f;
-                foreach (Island l in lower)
-                {
-                    if (island.size.y + l.size.y + padding * 2f > Height) uMin = Mathf.Max(uMin, l.pos.x + l.size.x);
-                }
-                if (uMax - uMin >= island.size.x + padding * 2f)
-                {
-                    island.pos = new Vector2(uMax - island.size.x - padding, Ceil - island.size.y);
-                    upper.Add(island);
-                    return true;
-                }
-
-                return false;
-            }
+            float minArea = Mathf.Min(a.BBoxArea, b.BBoxArea);
+            if (minArea <= 1e-12f) return true; // 点・線状の退化アイランドは重なっていれば吸収する
+            return w * h / minArea >= OverlapMergeThreshold;
         }
 
         // ---------------------------------------------------------------
         // UV書き換えとアトラス描画
         // ---------------------------------------------------------------
 
-        private static void RemapUVs(List<Island> islands)
+        private static void RemapUVs(List<PackUnit> units)
         {
-            foreach (Island island in islands)
+            foreach (PackUnit unit in units)
             {
-                Vector2 srcSize = island.SrcSize;
-                foreach (int v in island.vertices)
+                Vector2 srcSize = unit.SrcSize;
+                foreach (Island island in unit.islands)
                 {
-                    Vector2 uv = island.part.uv[v];
-                    float fu = (uv.x - island.srcMin.x) / srcSize.x;
-                    float fv = (uv.y - island.srcMin.y) / srcSize.y;
-                    island.part.uv[v] = island.rotated
-                        // 90度回転: 転置ピクセルコピーと整合する写像
-                        ? island.pos + new Vector2((1f - fv) * island.size.x, fu * island.size.y)
-                        : island.pos + new Vector2(fu * island.size.x, fv * island.size.y);
+                    foreach (int v in island.vertices)
+                    {
+                        Vector2 uv = island.part.uv[v];
+                        // ユニットのバウンディングボックス基準で写像することで、
+                        // 統合されたアイランド同士の相対位置（重なり）が保たれる
+                        float fu = (uv.x - unit.srcMin.x) / srcSize.x;
+                        float fv = (uv.y - unit.srcMin.y) / srcSize.y;
+                        island.part.uv[v] = unit.rotated
+                            // 90度回転: 転置ピクセルコピーと整合する写像
+                            ? unit.pos + new Vector2((1f - fv) * unit.size.x, fu * unit.size.y)
+                            : unit.pos + new Vector2(fu * unit.size.x, fv * unit.size.y);
+                    }
                 }
             }
         }
 
         private static Texture2D RenderAtlas(
-            List<Island> islands, string property, bool isMainProperty, int atlasSize, int paddingPx)
+            List<PackUnit> units, string property, bool isMainProperty, int atlasSize, int paddingPx)
         {
             bool isNormal = MaterialAtlasBuilder.IsNormalProperty(property);
             bool linear = MaterialAtlasBuilder.IsLinearProperty(property);
@@ -352,18 +311,18 @@ namespace YozoLab.MeshBaker
 
             int bleed = Mathf.Max(1, paddingPx / 2);
 
-            foreach (Island island in islands)
+            foreach (PackUnit unit in units)
             {
-                Material material = island.group.material;
+                Material material = unit.group.material;
                 Texture texture = (material != null && material.HasProperty(property))
                     ? material.GetTexture(property)
                     : null;
 
                 // アトラス上の描画先（にじみ対策で外周bleedピクセル分広げる）
-                int dstX = Mathf.RoundToInt(island.pos.x * atlasSize) - bleed;
-                int dstY = Mathf.RoundToInt(island.pos.y * atlasSize) - bleed;
-                int dstW = Mathf.Max(1, Mathf.RoundToInt(island.size.x * atlasSize)) + bleed * 2;
-                int dstH = Mathf.Max(1, Mathf.RoundToInt(island.size.y * atlasSize)) + bleed * 2;
+                int dstX = Mathf.RoundToInt(unit.pos.x * atlasSize) - bleed;
+                int dstY = Mathf.RoundToInt(unit.pos.y * atlasSize) - bleed;
+                int dstW = Mathf.Max(1, Mathf.RoundToInt(unit.size.x * atlasSize)) + bleed * 2;
+                int dstH = Mathf.Max(1, Mathf.RoundToInt(unit.size.y * atlasSize)) + bleed * 2;
 
                 if (texture == null)
                 {
@@ -374,26 +333,26 @@ namespace YozoLab.MeshBaker
                 }
 
                 // ソース側の切り出し範囲（dst拡張と同じ比率で広げる）
-                Vector2 srcSize = island.SrcSize;
+                Vector2 srcSize = unit.SrcSize;
                 int innerW = dstW - bleed * 2;
                 int innerH = dstH - bleed * 2;
                 float bleedFracX = bleed / (float)innerW;
                 float bleedFracY = bleed / (float)innerH;
                 // 回転時はdstのX軸がソースのV軸に対応する
-                float expandU = (island.rotated ? bleedFracY : bleedFracX) * srcSize.x;
-                float expandV = (island.rotated ? bleedFracX : bleedFracY) * srcSize.y;
+                float expandU = (unit.rotated ? bleedFracY : bleedFracX) * srcSize.x;
+                float expandV = (unit.rotated ? bleedFracX : bleedFracY) * srcSize.y;
                 var srcRect = new Rect(
-                    island.srcMin.x - expandU, island.srcMin.y - expandV,
+                    unit.srcMin.x - expandU, unit.srcMin.y - expandV,
                     srcSize.x + expandU * 2f, srcSize.y + expandV * 2f);
 
                 // 回転時は転置するため、コピーは幅と高さを入れ替えて取得する
-                int copyW = island.rotated ? dstH : dstW;
-                int copyH = island.rotated ? dstW : dstH;
+                int copyW = unit.rotated ? dstH : dstW;
+                int copyH = unit.rotated ? dstW : dstH;
                 Texture2D copy = MaterialAtlasBuilder.CopyTextureRegion(texture, srcRect, copyW, copyH, linear, isNormal);
                 try
                 {
                     Color32[] pixels = copy.GetPixels32();
-                    if (island.rotated) pixels = Transpose(pixels, copyW, copyH);
+                    if (unit.rotated) pixels = Transpose(pixels, copyW, copyH);
                     WriteRegionClipped(atlas, dstX, dstY, dstW, dstH, pixels);
                 }
                 finally
