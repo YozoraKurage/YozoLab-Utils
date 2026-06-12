@@ -60,9 +60,6 @@ public partial class FBXAnimationExtractorWindow
         // FBXキー由来のEventをHumanoid clipへ注入(時間shift/delete を反映)
         ApplyMarkerEvents(clip, markerEventSources, matchingRule, frameRate, timeOffset);
 
-        // 手書きAnimationEventsの注入(後方互換・非推奨)
-        ApplyAnimationEvents(clip, matchingRule.animationEvents);
-
         EditorUtility.SetDirty(clip);
         if (separateGenericClip != null)
         {
@@ -96,43 +93,6 @@ public partial class FBXAnimationExtractorWindow
 
             AnimationUtility.SetEditorCurve(clip, binding, curve);
         }
-    }
-
-    private void ApplyAnimationEvents(AnimationClip clip, List<AnimationEventRule> eventRules)
-    {
-        if (eventRules == null || eventRules.Count == 0)
-            return;
-
-        float clipLength = clip.length;
-        if (clipLength <= 0f)
-        {
-            Debug.LogWarning($"[FBX Animation Extractor] Cannot place Animation Events on '{clip.name}' (clip length is 0).");
-            return;
-        }
-
-        List<AnimationEvent> events = new List<AnimationEvent>(AnimationUtility.GetAnimationEvents(clip));
-
-        foreach (AnimationEventRule rule in eventRules)
-        {
-            if (rule == null || string.IsNullOrWhiteSpace(rule.functionName))
-                continue;
-
-            float normalized = Mathf.Clamp01(rule.normalizedTime);
-            AnimationEvent animationEvent = new AnimationEvent
-            {
-                functionName = rule.functionName.Trim(),
-                time = clipLength * normalized,
-                floatParameter = rule.floatParameter,
-                intParameter = rule.intParameter,
-                stringParameter = rule.stringParameter ?? string.Empty,
-                objectReferenceParameter = rule.objectReferenceParameter,
-                messageOptions = SendMessageOptions.DontRequireReceiver,
-            };
-            events.Add(animationEvent);
-        }
-
-        events.Sort((a, b) => a.time.CompareTo(b.time));
-        AnimationUtility.SetAnimationEvents(clip, events.ToArray());
     }
 
     private AnimationPostProcessRule FindMatchingRule(string name)
@@ -171,6 +131,7 @@ public partial class FBXAnimationExtractorWindow
 
         StringBuilder signatureBuilder = new StringBuilder();
         signatureBuilder.Append(rule.targetName?.Trim() ?? string.Empty);
+        signatureBuilder.Append("|outputOverride:").Append(GetObjectReferenceSignature(rule.outputDirectoryOverride));
         signatureBuilder.Append("|avatarEnabled:").Append(rule.useOtherAvatarDefinition);
         signatureBuilder.Append("|avatar:").Append(GetAvatarSignature(rule));
         signatureBuilder.Append("|shiftToZeroFrame:").Append(rule.shiftToZeroFrame);
@@ -202,31 +163,6 @@ public partial class FBXAnimationExtractorWindow
                     signatureBuilder.Append(",");
                 }
                 signatureBuilder.Append(rule.fixScaleObjects[i]?.Trim() ?? string.Empty);
-            }
-        }
-
-        signatureBuilder.Append("|animationEvents:");
-        if (rule.animationEvents != null)
-        {
-            for (int i = 0; i < rule.animationEvents.Count; i++)
-            {
-                if (i > 0)
-                {
-                    signatureBuilder.Append(";");
-                }
-
-                AnimationEventRule eventRule = rule.animationEvents[i];
-                if (eventRule == null)
-                {
-                    continue;
-                }
-
-                signatureBuilder.Append(eventRule.functionName?.Trim() ?? string.Empty);
-                signatureBuilder.Append(">").Append(eventRule.normalizedTime.ToString("R"));
-                signatureBuilder.Append(">").Append(eventRule.floatParameter.ToString("R"));
-                signatureBuilder.Append(">").Append(eventRule.intParameter);
-                signatureBuilder.Append(">").Append(eventRule.stringParameter?.Trim() ?? string.Empty);
-                signatureBuilder.Append(">").Append(GetObjectReferenceSignature(eventRule.objectReferenceParameter));
             }
         }
 
