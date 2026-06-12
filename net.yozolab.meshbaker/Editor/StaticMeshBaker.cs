@@ -50,20 +50,20 @@ namespace YozoLab.MeshBaker
     }
 
     /// <summary>
-    /// MeshBakeAssemblyの設定に従って、複数のSkinnedMeshRendererを
+    /// MeshBakeGroupの設定に従って、複数のSkinnedMeshRendererを
     /// 現在のポーズで1つの静的メッシュにベイクし、別アセットとして出力する。
     /// </summary>
     public static class StaticMeshBaker
     {
-        public static BakeReport Bake(MeshBakeAssembly assembly)
+        public static BakeReport Bake(MeshBakeGroup bakeGroup)
         {
             var report = new BakeReport();
-            List<BakeRendererGroup> effectiveGroups = assembly.GetEffectiveGroups();
-            List<BakePart> parts = ExtractParts(assembly, effectiveGroups, report);
+            List<BakeRendererGroup> effectiveGroups = bakeGroup.GetEffectiveGroups();
+            List<BakePart> parts = ExtractParts(bakeGroup, effectiveGroups, report);
             if (parts.Count == 0)
             {
                 throw new InvalidOperationException(
-                    "ベイク対象が見つかりませんでした。Renderer Groupsまたは子のMesh Bake Groupに" +
+                    "ベイク対象が見つかりませんでした。Renderer Groupsまたは子のMesh Bake Itemに" +
                     "Renderer（SkinnedMeshRenderer/MeshRenderer）を設定してください。");
             }
 
@@ -75,7 +75,7 @@ namespace YozoLab.MeshBaker
             report.sourceMaterialCount = distinctMaterials.Count;
 
             // 統合マテリアルは1つしか作られないため、不透明と透明の混在は描画結果が変わる
-            if (assembly.mergeMaterials)
+            if (bakeGroup.mergeMaterials)
             {
                 bool anyTransparent = distinctMaterials.Any(m => m.renderQueue > 2500);
                 bool anyOpaque = distinctMaterials.Any(m => m.renderQueue <= 2500);
@@ -84,7 +84,7 @@ namespace YozoLab.MeshBaker
                     report.warnings.Add(
                         "不透明マテリアルと透明系マテリアル（RenderQueue > 2500）が混在しています。" +
                         "統合マテリアルは1つのため、描画モードはベースマテリアルの設定に統一されます。" +
-                        "表示が変わる場合は、透明系のオブジェクトを別のMesh Bake Assemblyに分けてください。");
+                        "表示が変わる場合は、透明系のオブジェクトを別のMesh Bake Groupに分けてください。");
                 }
             }
 
@@ -93,7 +93,7 @@ namespace YozoLab.MeshBaker
             // 先頭（メイン）は常に含め、それ以外はどれかのマテリアルが実際に持つものだけに絞る
             // （未使用のマップで空アトラス/誤キーワードが生まれるのを防ぐ）。
             string[] candidateProperties =
-                MaterialModeProfiles.GetCollectProperties(assembly.materialMode, assembly.textureProperties);
+                MaterialModeProfiles.GetCollectProperties(bakeGroup.materialMode, bakeGroup.textureProperties);
             string mainProperty = candidateProperties[0];
             var effectiveList = new List<string> { mainProperty };
             for (int i = 1; i < candidateProperties.Length; i++)
@@ -107,7 +107,7 @@ namespace YozoLab.MeshBaker
 
             // Tiling/Offsetの焼き込みはパート単位で行う（同一テクスチャ・別STのマテリアルを
             // 後段のテクスチャ構成グループ化で正しく統合できるようにするため）
-            if (assembly.mergeMaterials && assembly.bakeTextureST)
+            if (bakeGroup.mergeMaterials && bakeGroup.bakeTextureST)
             {
                 BakeTextureSTPerPart(parts, mainProperty);
             }
@@ -115,24 +115,24 @@ namespace YozoLab.MeshBaker
             // 統合時はマテリアル参照ではなくテクスチャ構成でグループ化し、
             // 同じテクスチャ一式を参照するマテリアル同士でアトラス領域を共有する
             List<BakeMaterialGroup> materialGroups =
-                GroupParts(parts, assembly.mergeMaterials, effectiveProperties);
-            if (assembly.mergeMaterials && materialGroups.Count < distinctMaterials.Count)
+                GroupParts(parts, bakeGroup.mergeMaterials, effectiveProperties);
+            if (bakeGroup.mergeMaterials && materialGroups.Count < distinctMaterials.Count)
             {
                 report.infos.Add($"同一テクスチャ構成のマテリアルを統合: " +
                                  $"{distinctMaterials.Count}マテリアル → {materialGroups.Count}アトラス領域");
             }
 
             MaterialAtlasBuilder.Result atlasResult = null;
-            if (assembly.mergeMaterials)
+            if (bakeGroup.mergeMaterials)
             {
-                PrepareUVsForAtlas(assembly, materialGroups, report);
+                PrepareUVsForAtlas(bakeGroup, materialGroups, report);
 
-                if (assembly.packingMode == AtlasPackingMode.UVIslands)
+                if (bakeGroup.packingMode == AtlasPackingMode.UVIslands)
                 {
                     // UVアイランド単位の詰め直し（UV書き換えも内部で行われる）
                     atlasResult = UVIslandAtlasPacker.Pack(
-                        assembly, materialGroups, effectiveProperties,
-                        assembly.atlasSize, report.warnings, report.infos);
+                        bakeGroup, materialGroups, effectiveProperties,
+                        bakeGroup.atlasSize, report.warnings, report.infos);
                 }
                 else
                 {
@@ -141,15 +141,15 @@ namespace YozoLab.MeshBaker
                         Texture tex = g.material != null && g.material.HasProperty(mainProperty)
                             ? g.material.GetTexture(mainProperty) : null;
                         int longest = tex != null ? Mathf.Max(tex.width, tex.height) : 0;
-                        return assembly.GetResolutionScale(tex, longest);
+                        return bakeGroup.GetResolutionScale(tex, longest);
                     }).ToList();
 
                     atlasResult = MaterialAtlasBuilder.Build(
                         materialGroups.Select(g => g.material).ToList(),
                         materialGroups.Select(g => g.uvBounds).ToList(),
                         resolutionScales,
-                        effectiveProperties, assembly.atlasSize,
-                        assembly.GetEffectiveAtlasPadding(assembly.atlasSize),
+                        effectiveProperties, bakeGroup.atlasSize,
+                        bakeGroup.GetEffectiveAtlasPadding(bakeGroup.atlasSize),
                         report.warnings);
 
                     for (int i = 0; i < materialGroups.Count; i++)
@@ -159,18 +159,18 @@ namespace YozoLab.MeshBaker
                 }
             }
 
-            string directory = assembly.outputDirectory.TrimEnd('/');
+            string directory = bakeGroup.outputDirectory.TrimEnd('/');
             EnsureFolder(directory);
-            string baseName = assembly.EffectiveOutputName;
+            string baseName = bakeGroup.EffectiveOutputName;
 
             Material[] sharedMaterials = null;
-            if (assembly.mergeMaterials)
+            if (bakeGroup.mergeMaterials)
             {
                 // 統合マテリアルのベース: 明示指定があればそれを、なければ先頭マテリアルを使う
-                Material baseMaterial = assembly.mergeBaseMaterial != null
-                    ? assembly.mergeBaseMaterial
+                Material baseMaterial = bakeGroup.mergeBaseMaterial != null
+                    ? bakeGroup.mergeBaseMaterial
                     : materialGroups[0].material;
-                Material merged = BuildMergedMaterial(assembly, baseMaterial, atlasResult, directory, baseName, report);
+                Material merged = BuildMergedMaterial(bakeGroup, baseMaterial, atlasResult, directory, baseName, report);
                 report.materialPath = $"{directory}/{baseName}_mat.mat";
                 sharedMaterials = new[] { SaveMaterialAsset(merged, report.materialPath) };
 
@@ -187,7 +187,7 @@ namespace YozoLab.MeshBaker
                 var submeshes = new List<List<BakePart>>();
                 var materials = new List<Material>();
 
-                if (assembly.mergeMaterials)
+                if (bakeGroup.mergeMaterials)
                 {
                     List<BakePart> groupParts = parts.Where(p => p.groupIndex == groupIndex).ToList();
                     if (groupParts.Count > 0)
@@ -214,7 +214,7 @@ namespace YozoLab.MeshBaker
                     continue;
                 }
 
-                if (assembly.lightmapUVMode == LightmapUVMode.PreserveAndRepack)
+                if (bakeGroup.lightmapUVMode == LightmapUVMode.PreserveAndRepack)
                 {
                     // 既存UV2の保持と再パック（頂点分割が起きうるため結合前に行う）
                     LightmapUVPacker.PreserveAndRepack(
@@ -222,11 +222,11 @@ namespace YozoLab.MeshBaker
                 }
 
                 // ノーマルマップを使わない出力では接線を省略できる
-                bool keepTangents = !assembly.stripUnusedVertexAttributes ||
+                bool keepTangents = !bakeGroup.stripUnusedVertexAttributes ||
                                     materials.Any(UsesNormalMap);
                 Mesh combined = BuildCombinedMesh(
-                    submeshes, keepTangents, assembly.stripUnusedVertexAttributes, combineStats);
-                if (assembly.lightmapUVMode == LightmapUVMode.GenerateAll)
+                    submeshes, keepTangents, bakeGroup.stripUnusedVertexAttributes, combineStats);
+                if (bakeGroup.lightmapUVMode == LightmapUVMode.GenerateAll)
                 {
                     Unwrapping.GenerateSecondaryUVSet(combined);
                 }
@@ -239,10 +239,10 @@ namespace YozoLab.MeshBaker
                 Mesh savedMesh = SaveMeshAsset(combined, meshPath);
                 report.meshPaths.Add(meshPath);
 
-                if (assembly.createSceneObject)
+                if (bakeGroup.createSceneObject)
                 {
                     report.prefabPaths.Add(UpdateScenePrefab(
-                        assembly, savedMesh, materials.ToArray(), directory, $"{baseName}{suffix}_Baked"));
+                        bakeGroup, savedMesh, materials.ToArray(), directory, $"{baseName}{suffix}_Baked"));
                 }
             }
 
@@ -285,10 +285,10 @@ namespace YozoLab.MeshBaker
         // ---------------------------------------------------------------
 
         private static List<BakePart> ExtractParts(
-            MeshBakeAssembly assembly, List<BakeRendererGroup> groups, BakeReport report)
+            MeshBakeGroup bakeGroup, List<BakeRendererGroup> groups, BakeReport report)
         {
             var parts = new List<BakePart>();
-            Transform root = assembly.transform;
+            Transform root = bakeGroup.transform;
 
             for (int groupIndex = 0; groupIndex < groups.Count; groupIndex++)
             foreach (Renderer renderer in groups[groupIndex].renderers)
@@ -300,7 +300,7 @@ namespace YozoLab.MeshBaker
                     continue;
                 }
 
-                // 位置/法線/接線とアセンブリローカルへの変換行列を、レンダラー種別ごとに求める
+                // 位置/法線/接線とルートローカルへの変換行列を、レンダラー種別ごとに求める
                 Vector3[] bakedPositions;
                 Vector3[] bakedNormals;
                 Vector4[] bakedTangents;
@@ -315,14 +315,14 @@ namespace YozoLab.MeshBaker
                     bakedNormals = tempBaked.normals;
                     bakedTangents = tempBaked.tangents;
                     // BakeMeshの結果はレンダラーのローカル空間（スケール適用済み）なので、
-                    // 回転と平行移動だけでアセンブリのローカル空間へ変換する
+                    // 回転と平行移動だけでルートのローカル空間へ変換する
                     toRoot = root.worldToLocalMatrix *
                              Matrix4x4.TRS(renderer.transform.position, renderer.transform.rotation, Vector3.one);
                 }
                 else
                 {
                     // 通常のMeshRenderer: メッシュはローカル空間のまま。
-                    // レンダラーのlocalToWorld（スケール込み）でアセンブリローカルへ変換する。
+                    // レンダラーのlocalToWorld（スケール込み）でルートローカルへ変換する。
                     bakedPositions = source.vertices;
                     bakedNormals = source.normals;
                     bakedTangents = source.tangents;
@@ -331,7 +331,7 @@ namespace YozoLab.MeshBaker
 
                 Vector2[] sourceUV = source.uv;
                 // 既存UV2の保持が要るモードのときだけ抽出する（手動展開・インポータの自動展開どちらも対象）
-                Vector2[] sourceUV2 = assembly.lightmapUVMode == LightmapUVMode.PreserveAndRepack
+                Vector2[] sourceUV2 = bakeGroup.lightmapUVMode == LightmapUVMode.PreserveAndRepack
                     ? source.uv2
                     : Array.Empty<Vector2>();
                 // UV3〜UV8はシェーダーのカスタムデータとして使われている可能性があるため常に引き継ぐ
@@ -535,7 +535,7 @@ namespace YozoLab.MeshBaker
         /// 使用範囲が[0,1]を超える場合はタイリングごと切り出される（解像度低下に注意）。
         /// </summary>
         private static void PrepareUVsForAtlas(
-            MeshBakeAssembly assembly, List<BakeMaterialGroup> groups, BakeReport report)
+            MeshBakeGroup bakeGroup, List<BakeMaterialGroup> groups, BakeReport report)
         {
             foreach (BakeMaterialGroup group in groups)
             {
@@ -569,7 +569,7 @@ namespace YozoLab.MeshBaker
                         "タイリングごとアトラスに焼き込むため、解像度が大きく低下します。");
                 }
 
-                if (assembly.optimizeUVBounds)
+                if (bakeGroup.optimizeUVBounds)
                 {
                     // バイリニア滲み対策に少しだけ広げて切り出す
                     Vector2 margin = size * 0.005f + new Vector2(0.002f, 0.002f);
@@ -850,26 +850,26 @@ namespace YozoLab.MeshBaker
         /// <summary>
         /// アトラス結果を1つの統合マテリアルにまとめる。
         /// 各テクスチャプロパティのアトラスを同名プロパティへ割り当てる。
-        /// AutodeskInteractiveモードでは、確実にAutodesk Interactiveシェーダーのマテリアルとして出力し、
-        /// 割り当てたマップに対応するUse*トグルを有効化する。
+        /// プロファイルを持つモード（UnityStandard / AutodeskInteractive / Filamented / Mochie）では、
+        /// 対応するシェーダーのマテリアルとして出力し、割り当てたマップのキーワードを有効化する。
         /// </summary>
         private static Material BuildMergedMaterial(
-            MeshBakeAssembly assembly, Material baseMaterial,
+            MeshBakeGroup bakeGroup, Material baseMaterial,
             MaterialAtlasBuilder.Result atlasResult, string directory, string baseName, BakeReport report)
         {
             // ベースマテリアルを複製してシェーダー・スカラー系のプロパティを引き継ぐ
             var merged = new Material(baseMaterial);
 
-            bool aiMode = assembly.materialMode == MaterialMode.AutodeskInteractive;
-            if (aiMode)
+            MaterialModeProfile profile = MaterialModeProfiles.GetProfile(bakeGroup.materialMode);
+            if (profile != null)
             {
-                EnsureAutodeskInteractiveShader(merged, report);
+                EnsureProfileShader(merged, profile, report);
             }
 
             foreach (KeyValuePair<string, Texture2D> entry in atlasResult.atlases)
             {
                 string texturePath = $"{directory}/{baseName}{entry.Key}.png";
-                // 自動縮小でアトラスがassembly.atlasSizeより小さいことがあるため、実サイズを使う
+                // 自動縮小でアトラスがbakeGroup.atlasSizeより小さいことがあるため、実サイズを使う
                 Texture2D savedTexture = SaveTextureAsset(
                     entry.Value, texturePath,
                     Mathf.Max(entry.Value.width, entry.Value.height),
@@ -882,20 +882,21 @@ namespace YozoLab.MeshBaker
                     merged.SetTextureOffset(entry.Key, Vector2.zero);
                 }
 
-                if (aiMode) EnableAutodeskInteractiveMap(merged, entry.Key);
+                if (profile != null) EnableProfileMap(merged, profile, entry.Key);
             }
             return merged;
         }
 
         /// <summary>割り当てたマップに対応するシェーダーキーワードを有効化する（発光はGI寄与も設定）</summary>
-        private static void EnableAutodeskInteractiveMap(Material material, string textureProperty)
+        private static void EnableProfileMap(
+            Material material, MaterialModeProfile profile, string textureProperty)
         {
-            if (MaterialModeProfiles.AutodeskInteractiveKeywords.TryGetValue(textureProperty, out string keyword))
+            if (profile.keywords.TryGetValue(textureProperty, out string keyword))
             {
                 material.EnableKeyword(keyword);
             }
 
-            if (textureProperty == MaterialModeProfiles.AI_Emission)
+            if (textureProperty == profile.emissionProperty)
             {
                 // 発光マップをライトベイク（GI）に寄与させる
                 if (material.HasProperty("_EmissionColor") &&
@@ -907,25 +908,30 @@ namespace YozoLab.MeshBaker
             }
         }
 
-        /// <summary>統合マテリアルがAutodesk Interactiveシェーダーになるようにする（バリアントは維持）</summary>
-        private static void EnsureAutodeskInteractiveShader(Material material, BakeReport report)
+        /// <summary>
+        /// 統合マテリアルがプロファイルのシェーダーになるようにする。
+        /// シェーダー名の前方一致で判定するため、同系のバリアント
+        /// （Standard (Specular setup) や Transparent/Masked など）は維持される。
+        /// </summary>
+        private static void EnsureProfileShader(
+            Material material, MaterialModeProfile profile, BakeReport report)
         {
             if (material.shader != null &&
-                material.shader.name.StartsWith(MaterialModeProfiles.AutodeskInteractiveShaderName,
-                    StringComparison.Ordinal))
+                material.shader.name.StartsWith(profile.shaderName, StringComparison.Ordinal))
             {
-                return; // 既にAutodesk Interactive系（Transparent/Masked含む）
+                return; // 既に対象シェーダー系
             }
 
-            Shader ai = Shader.Find(MaterialModeProfiles.AutodeskInteractiveShaderName);
-            if (ai != null)
+            Shader shader = Shader.Find(profile.shaderName);
+            if (shader != null)
             {
-                material.shader = ai;
+                material.shader = shader;
             }
             else
             {
                 report.warnings.Add(
-                    "Autodesk Interactiveシェーダーが見つからないため、ベースマテリアルのシェーダーのまま統合しました。");
+                    $"シェーダー「{profile.shaderName}」が見つからないため、" +
+                    "ベースマテリアルのシェーダーのまま統合しました。");
             }
         }
 
@@ -1005,13 +1011,13 @@ namespace YozoLab.MeshBaker
         // ---------------------------------------------------------------
 
         /// <summary>
-        /// ベイク結果をプレハブとして保存し、アセンブリの子としてそのインスタンスを配置する。
+        /// ベイク結果をプレハブとして保存し、ルート（MeshBakeGroup）の子としてそのインスタンスを配置する。
         /// プレハブは既存があれば LoadPrefabContents で中身だけ更新するため、
         /// 再ベイクしてもプレハブ自体のGUIDと内部のコンポーネントのfileIDが維持され、
         /// 配布物としての参照整合性が保たれる。
         /// </summary>
         private static string UpdateScenePrefab(
-            MeshBakeAssembly assembly, Mesh mesh, Material[] materials,
+            MeshBakeGroup bakeGroup, Mesh mesh, Material[] materials,
             string directory, string objectName)
         {
             string prefabPath = $"{directory}/{objectName}.prefab";
@@ -1022,7 +1028,7 @@ namespace YozoLab.MeshBaker
                 GameObject contents = PrefabUtility.LoadPrefabContents(prefabPath);
                 try
                 {
-                    ConfigureBakedObject(contents, objectName, mesh, materials, assembly.markStatic);
+                    ConfigureBakedObject(contents, objectName, mesh, materials, bakeGroup.markStatic);
                     PrefabUtility.SaveAsPrefabAsset(contents, prefabPath);
                 }
                 finally
@@ -1035,7 +1041,7 @@ namespace YozoLab.MeshBaker
                 var temp = new GameObject(objectName);
                 try
                 {
-                    ConfigureBakedObject(temp, objectName, mesh, materials, assembly.markStatic);
+                    ConfigureBakedObject(temp, objectName, mesh, materials, bakeGroup.markStatic);
                     PrefabUtility.SaveAsPrefabAsset(temp, prefabPath);
                 }
                 finally
@@ -1044,9 +1050,9 @@ namespace YozoLab.MeshBaker
                 }
             }
 
-            // アセンブリの子としてプレハブインスタンスを配置する
+            // ルート（MeshBakeGroup）の子としてプレハブインスタンスを配置する
             var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
-            Transform existingChild = assembly.transform.Find(objectName);
+            Transform existingChild = bakeGroup.transform.Find(objectName);
             bool isLinkedInstance = existingChild != null &&
                 PrefabUtility.GetCorrespondingObjectFromSource(existingChild.gameObject) == prefab;
 
@@ -1058,7 +1064,7 @@ namespace YozoLab.MeshBaker
                     Undo.DestroyObjectImmediate(existingChild.gameObject);
                 }
                 var instance = (GameObject)PrefabUtility.InstantiatePrefab(prefab);
-                instance.transform.SetParent(assembly.transform, false);
+                instance.transform.SetParent(bakeGroup.transform, false);
                 Undo.RegisterCreatedObjectUndo(instance, "Create Baked Mesh Prefab Instance");
             }
 

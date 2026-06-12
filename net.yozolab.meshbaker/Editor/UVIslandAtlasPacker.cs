@@ -36,7 +36,7 @@ namespace YozoLab.MeshBaker
             public Vector2 srcMin = new Vector2(float.MaxValue, float.MaxValue);
             public Vector2 srcMax = new Vector2(float.MinValue, float.MinValue);
 
-            /// <summary>ワールド（アセンブリローカル）空間での三角形面積の合計（密度正規化用）</summary>
+            /// <summary>ワールド（ルートローカル）空間での三角形面積の合計（密度正規化用）</summary>
             public float worldArea;
             /// <summary>ソースUV空間での三角形面積の合計（密度正規化用）</summary>
             public float uvArea;
@@ -86,7 +86,7 @@ namespace YozoLab.MeshBaker
         /// 各PartのUVをアトラス空間へ書き換えた上でアトラステクスチャ群を返す。
         /// </summary>
         internal static MaterialAtlasBuilder.Result Pack(
-            MeshBakeAssembly assembly,
+            MeshBakeGroup bakeGroup,
             List<BakeMaterialGroup> groups, IReadOnlyList<string> properties,
             int atlasSize, List<string> warnings, List<string> infos)
         {
@@ -134,18 +134,18 @@ namespace YozoLab.MeshBaker
                     : new Vector2(64, 64);
                 // テクスチャ解像度の上書き（非破壊）をテクセル密度に反映する
                 int longestEdge = Mathf.RoundToInt(Mathf.Max(textureSize.x, textureSize.y));
-                float resolutionScale = assembly.GetResolutionScale(densityReference, longestEdge);
+                float resolutionScale = bakeGroup.GetResolutionScale(densityReference, longestEdge);
 
                 var groupIslands = new List<Island>();
                 foreach (BakePart part in group.parts)
                 {
                     List<Island> islands = DetectIslands(part);
-                    if (assembly.normalizeTexelDensity) AccumulateIslandAreas(part, islands);
+                    if (bakeGroup.normalizeTexelDensity) AccumulateIslandAreas(part, islands);
                     groupIslands.AddRange(islands);
                 }
                 totalIslands += groupIslands.Count;
 
-                foreach (PackUnit unit in BuildPackUnits(groupIslands, assembly.mergeOverlappingUVIslands))
+                foreach (PackUnit unit in BuildPackUnits(groupIslands, bakeGroup.mergeOverlappingUVIslands))
                 {
                     unit.group = group;
                     unit.basePxSize = Vector2.Max(
@@ -172,25 +172,25 @@ namespace YozoLab.MeshBaker
                           "アトラス領域を節約しました。");
             }
 
-            if (assembly.normalizeTexelDensity)
+            if (bakeGroup.normalizeTexelDensity)
             {
                 ApplyDensityNormalization(units);
             }
 
             int finalSize = atlasSize;
-            if (NfdhPackAt(units, finalSize, assembly) <= 0f)
+            if (NfdhPackAt(units, finalSize, bakeGroup) <= 0f)
             {
                 throw new InvalidOperationException(
                     "UVアイランドをアトラスに収められませんでした。アトラスサイズを大きくするか、Paddingを小さくしてください。");
             }
 
             // 目標密度のまま収まるなら、より小さいアトラスへ縮小して無駄を省く
-            if (assembly.autoShrinkAtlas)
+            if (bakeGroup.autoShrinkAtlas)
             {
                 while (finalSize > 128 && AllAtTargetDensity(units, finalSize))
                 {
                     int half = finalSize / 2;
-                    if (NfdhPackAt(units, half, assembly) > 0f && AllAtTargetDensity(units, half))
+                    if (NfdhPackAt(units, half, bakeGroup) > 0f && AllAtTargetDensity(units, half))
                     {
                         finalSize = half;
                         continue;
@@ -198,7 +198,7 @@ namespace YozoLab.MeshBaker
                     break;
                 }
                 // 直前の縮小試行で失敗したレイアウトが残っている場合に備えて、採用サイズで確定パックする
-                NfdhPackAt(units, finalSize, assembly);
+                NfdhPackAt(units, finalSize, bakeGroup);
                 if (finalSize != atlasSize)
                 {
                     infos.Add($"アトラスを{atlasSize}px→{finalSize}pxに自動縮小しました（テクセル密度の低下ほぼなし）。");
@@ -214,7 +214,7 @@ namespace YozoLab.MeshBaker
 
             RemapUVs(units);
 
-            int effectivePaddingPx = assembly.GetEffectiveAtlasPadding(finalSize);
+            int effectivePaddingPx = bakeGroup.GetEffectiveAtlasPadding(finalSize);
             var result = new MaterialAtlasBuilder.Result();
             foreach (string property in properties)
             {
@@ -225,9 +225,9 @@ namespace YozoLab.MeshBaker
         }
 
         /// <summary>指定アトラスサイズでの相対サイズ・上限・余白を設定してパックする</summary>
-        private static float NfdhPackAt(List<PackUnit> units, int atlasSize, MeshBakeAssembly assembly)
+        private static float NfdhPackAt(List<PackUnit> units, int atlasSize, MeshBakeGroup bakeGroup)
         {
-            int paddingPx = assembly.GetEffectiveAtlasPadding(atlasSize);
+            int paddingPx = bakeGroup.GetEffectiveAtlasPadding(atlasSize);
             float padding = Mathf.Max(paddingPx, 1) / (float)atlasSize;
             foreach (PackUnit unit in units)
             {

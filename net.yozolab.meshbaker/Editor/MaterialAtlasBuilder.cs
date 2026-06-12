@@ -251,7 +251,7 @@ namespace YozoLab.MeshBaker
             return p.Contains("metallic") || p.Contains("rough") || p.Contains("smooth") ||
                    p.Contains("gloss") || p.Contains("spec") || p.Contains("occlusion") ||
                    p.Contains("aomap") || p.Contains("_ao") || p.Contains("mask") ||
-                   p.Contains("height") || p.Contains("parallax");
+                   p.Contains("height") || p.Contains("parallax") || p.Contains("packed");
         }
     }
 }

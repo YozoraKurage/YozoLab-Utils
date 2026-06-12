@@ -140,7 +140,7 @@ namespace YozoLab.MeshBaker
             }
         }
 
-        /// <summary>ベイク済み座標（アセンブリローカル空間）での総表面積</summary>
+        /// <summary>ベイク済み座標（ルートローカル空間）での総表面積</summary>
         private static float SurfaceArea(BakePart part)
         {
             float area = 0f;
