@@ -237,28 +237,30 @@ namespace YozoLab.MeshBaker
             }
 
             // 子のMeshBakeItemコンポーネント。
-            // 全グループの明示リストを先に確定させてから自動収集する（明示指定が常に優先）。
-            MeshBakeItem[] componentGroups = GetComponentsInChildren<MeshBakeItem>(true);
-            var resolved = new List<(MeshBakeItem component, BakeRendererGroup group)>();
-            foreach (MeshBakeItem component in componentGroups)
+            // 全アイテムの明示リストを先に確定させてから自動収集する（明示指定が常に優先）。
+            MeshBakeItem[] componentItems = GetComponentsInChildren<MeshBakeItem>(true);
+            var resolvedGroups = new List<BakeRendererGroup>(componentItems.Length);
+            for (int i = 0; i < componentItems.Length; i++)
             {
-                var group = new BakeRendererGroup { name = component.EffectiveName };
-                foreach (Renderer renderer in component.renderers)
+                var group = new BakeRendererGroup { name = componentItems[i].EffectiveName };
+                foreach (Renderer renderer in componentItems[i].renderers)
                 {
                     if (renderer == null || !claimed.Add(renderer)) continue;
                     group.renderers.Add(renderer);
                 }
-                resolved.Add((component, group));
+                resolvedGroups.Add(group);
             }
-            foreach ((MeshBakeItem component, BakeRendererGroup group) in resolved)
+            for (int i = 0; i < componentItems.Length; i++)
             {
-                if (component.includeChildRenderers)
+                MeshBakeItem item = componentItems[i];
+                BakeRendererGroup group = resolvedGroups[i];
+                if (item.includeChildRenderers)
                 {
-                    foreach (Renderer renderer in component.GetComponentsInChildren<Renderer>(true))
+                    foreach (Renderer renderer in item.GetComponentsInChildren<Renderer>(true))
                     {
                         if (!(renderer is SkinnedMeshRenderer) && !(renderer is MeshRenderer)) continue;
-                        // ネストしたグループ配下のRendererは近い方のグループに割り当てる
-                        if (renderer.GetComponentInParent<MeshBakeItem>(true) != component) continue;
+                        // ネストしたアイテム配下のRendererは近い方のアイテムに割り当てる
+                        if (FindNearestItem(renderer.transform) != item) continue;
                         if (!claimed.Add(renderer)) continue;
                         group.renderers.Add(renderer);
                     }
@@ -267,6 +269,17 @@ namespace YozoLab.MeshBaker
             }
 
             return result;
+        }
+
+        /// <summary>Transformから最も近い祖先（自身含む）のMeshBakeItemを返す（非アクティブも対象）</summary>
+        private static MeshBakeItem FindNearestItem(Transform transform)
+        {
+            for (Transform current = transform; current != null; current = current.parent)
+            {
+                MeshBakeItem item = current.GetComponent<MeshBakeItem>();
+                if (item != null) return item;
+            }
+            return null;
         }
     }
 }
