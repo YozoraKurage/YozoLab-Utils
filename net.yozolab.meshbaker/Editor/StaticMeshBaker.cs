@@ -74,6 +74,20 @@ namespace YozoLab.MeshBaker
             }
             report.sourceMaterialCount = distinctMaterials.Count;
 
+            // 統合マテリアルは1つしか作られないため、不透明と透明の混在は描画結果が変わる
+            if (assembly.mergeMaterials)
+            {
+                bool anyTransparent = distinctMaterials.Any(m => m.renderQueue > 2500);
+                bool anyOpaque = distinctMaterials.Any(m => m.renderQueue <= 2500);
+                if (anyTransparent && anyOpaque)
+                {
+                    report.warnings.Add(
+                        "不透明マテリアルと透明系マテリアル（RenderQueue > 2500）が混在しています。" +
+                        "統合マテリアルは1つのため、描画モードはベースマテリアルの設定に統一されます。" +
+                        "表示が変わる場合は、透明系のオブジェクトを別のMesh Bake Assemblyに分けてください。");
+                }
+            }
+
             // ---- マテリアル統合（全出力グループで共有のアトラス/マテリアルを作る） ----
             // マテリアルモードに応じてアトラス対象のテクスチャプロパティを決定する。
             // 先頭（メイン）は常に含め、それ以外はどれかのマテリアルが実際に持つものだけに絞る

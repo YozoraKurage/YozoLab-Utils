@@ -25,6 +25,9 @@ namespace YozoLab.MeshBaker
         /// <summary>重なり面積が小さい方のアイランドのこの割合以上なら同一ユニットにまとめる</summary>
         private const float OverlapMergeThreshold = 0.5f;
 
+        /// <summary>テクスチャを持たないマテリアルに割り当てる単色スウォッチの一辺(px)</summary>
+        private const float SwatchPx = 8f;
+
         /// <summary>1つのBakePart内で連結したUVアイランド（検出単位）</summary>
         private class Island
         {
@@ -48,6 +51,13 @@ namespace YozoLab.MeshBaker
         private class PackUnit : NfdhRectPacker.Item
         {
             public BakeMaterialGroup group;
+
+            /// <summary>
+            /// テクスチャなしマテリアルの単色スウォッチ。
+            /// アイランド展開せず、グループ全パートのUVをこの領域の中心へ集約する。
+            /// </summary>
+            public bool collapsed;
+
             public readonly List<Island> islands = new List<Island>();
             public Vector2 srcMin = new Vector2(float.MaxValue, float.MaxValue);
             public Vector2 srcMax = new Vector2(float.MinValue, float.MinValue);
@@ -83,8 +93,25 @@ namespace YozoLab.MeshBaker
             string mainProperty = properties[0];
             var units = new List<PackUnit>();
             int totalIslands = 0;
+            int collapsedGroups = 0;
             foreach (BakeMaterialGroup group in groups)
             {
+                // どのアトラス対象プロパティにもテクスチャを持たないマテリアルは、
+                // ユニークなテクセル領域が不要なのでアイランド展開せず、
+                // 小さな単色スウォッチ1つに集約する（全UVがその中心を指す）。
+                // 空いた領域は充填率探索でテクスチャ持ちマテリアルの密度へ再配分される。
+                if (IsColorOnlyGroup(group.material, properties))
+                {
+                    var swatch = new PackUnit { group = group, collapsed = true };
+                    swatch.srcMin = Vector2.zero;
+                    swatch.srcMax = Vector2.one;
+                    swatch.basePxSize = new Vector2(SwatchPx, SwatchPx);
+                    swatch.capPxSize = swatch.basePxSize;
+                    units.Add(swatch);
+                    collapsedGroups++;
+                    continue;
+                }
+
                 // テクセル密度の基準テクスチャ。メインが無いマテリアル（単色＋ノーマルのみ等）でも
                 // 他のアトラス対象マップがあるなら、その中で最大のものを基準にして解像度を確保する
                 Texture densityReference = GetMainTexture(group.material, mainProperty);
@@ -133,10 +160,16 @@ namespace YozoLab.MeshBaker
             {
                 throw new InvalidOperationException("UVアイランドが見つかりませんでした。");
             }
-            if (totalIslands > units.Count)
+            int packedUnits = units.Count - collapsedGroups;
+            if (totalIslands > packedUnits)
             {
-                infos.Add($"UV重複の最適化: 重なり合う{totalIslands}アイランドを{units.Count}ユニットに統合し、" +
+                infos.Add($"UV重複の最適化: 重なり合う{totalIslands}アイランドを{packedUnits}ユニットに統合し、" +
                           "アトラス領域を共有しました。");
+            }
+            if (collapsedGroups > 0)
+            {
+                infos.Add($"テクスチャなしマテリアル{collapsedGroups}件を単色スウォッチ（{SwatchPx:0}px）に集約し、" +
+                          "アトラス領域を節約しました。");
             }
 
             if (assembly.normalizeTexelDensity)
@@ -440,6 +473,18 @@ namespace YozoLab.MeshBaker
         {
             foreach (PackUnit unit in units)
             {
+                if (unit.collapsed)
+                {
+                    // 単色スウォッチ: グループ全パートのUVを領域中心の1点へ集約する
+                    // （どこをサンプリングしても同じ色なので、にじみに最も安全な中心を使う）
+                    Vector2 center = unit.pos + unit.size * 0.5f;
+                    foreach (BakePart part in unit.group.parts)
+                    {
+                        for (int i = 0; i < part.uv.Length; i++) part.uv[i] = center;
+                    }
+                    continue;
+                }
+
                 Vector2 srcSize = unit.SrcSize;
                 foreach (Island island in unit.islands)
                 {
@@ -577,6 +622,16 @@ namespace YozoLab.MeshBaker
             return (material != null && material.HasProperty(property))
                 ? material.GetTexture(property)
                 : null;
+        }
+
+        /// <summary>どのアトラス対象プロパティにもテクスチャを持たない（単色のみの）マテリアルか</summary>
+        private static bool IsColorOnlyGroup(Material material, IReadOnlyList<string> properties)
+        {
+            foreach (string property in properties)
+            {
+                if (GetMainTexture(material, property) != null) return false;
+            }
+            return true;
         }
     }
 }

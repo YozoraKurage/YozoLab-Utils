@@ -8,7 +8,13 @@ namespace YozoLab.MeshBaker
     /// Renderer群を解析して出力グループ分けの提案を作る（ドラッグ＆ドロップの自動解析用）。
     ///
     /// 方針:
-    /// - マテリアル統合が無効な場合は、まずマテリアル構成が同じRenderer同士でまとめる
+    /// - まずマテリアルの品質クラスで分離する:
+    ///   - Transparent（RenderQueue &gt; 2500）: 統合マテリアルは1つしか作られないため、
+    ///     不透明と混ぜると描画設定が壊れる。独立グループに分離して扱いを判断できるようにする。
+    ///   - ColorOnly（全マテリアルがテクスチャ未割り当て）: ユニークなテクセル領域を必要としない
+    ///     低コストなオブジェクト群。マテリアルが違っても1つのまとまりに集約し、
+    ///     高品質（テクスチャ持ち）のオブジェクト群とグループを分ける。
+    /// - テクスチャ持ちは、マテリアル統合が無効な場合のみマテリアル構成が同じRenderer同士でまとめる
     ///   （非統合出力ではサブメッシュ数＝マテリアル数になるため、混在を避けると出力が整理される）。
     ///   統合が有効な場合はアトラス/マテリアルが全グループ共有なので、この分割は行わない。
     /// - 各まとまりの中では、位置の近いRenderer同士から貪欲にクラスタリングし、
@@ -19,6 +25,9 @@ namespace YozoLab.MeshBaker
     {
         /// <summary>1グループの頂点数バジェット（UInt16インデックスで収まる目安）</summary>
         internal const int DefaultVertexBudget = 65000;
+
+        /// <summary>これより大きいRenderQueueを透明として扱う（Transparent=3000, AlphaTest=2450）</summary>
+        private const int TransparentQueueThreshold = 2500;
 
         internal class Proposal
         {
@@ -37,7 +46,7 @@ namespace YozoLab.MeshBaker
         internal static List<Proposal> Analyze(
             List<Renderer> renderers, bool splitByMaterialSet, int vertexBudget)
         {
-            // バケット分け（マテリアル構成 or 全体で1つ）
+            // バケット分け（品質クラス → マテリアル構成の順で判定）
             var buckets = new List<(string baseName, List<Entry> entries)>();
             var byKey = new Dictionary<string, int>();
             foreach (Renderer renderer in renderers)
@@ -51,12 +60,35 @@ namespace YozoLab.MeshBaker
                     vertexCount = mesh.vertexCount,
                 };
 
-                string key = splitByMaterialSet ? MaterialSetKey(renderer) : "";
+                string key;
+                string baseName;
+                if (IsTransparent(renderer))
+                {
+                    key = "::transparent";
+                    baseName = "Transparent";
+                }
+                else if (IsColorOnly(renderer))
+                {
+                    // 色のみのオブジェクトは、マテリアルが違っても1つのまとまりに集約する
+                    key = "::coloronly";
+                    baseName = "ColorOnly";
+                }
+                else if (splitByMaterialSet)
+                {
+                    key = MaterialSetKey(renderer);
+                    baseName = BucketBaseName(renderer, true);
+                }
+                else
+                {
+                    key = "";
+                    baseName = "Area";
+                }
+
                 if (!byKey.TryGetValue(key, out int bucketIndex))
                 {
                     bucketIndex = buckets.Count;
                     byKey.Add(key, bucketIndex);
-                    buckets.Add((BucketBaseName(renderer, splitByMaterialSet), new List<Entry>()));
+                    buckets.Add((baseName, new List<Entry>()));
                 }
                 buckets[bucketIndex].entries.Add(entry);
             }
@@ -124,6 +156,27 @@ namespace YozoLab.MeshBaker
                 clusters.Add(cluster);
             }
             return clusters;
+        }
+
+        /// <summary>いずれかのマテリアルが透明系（RenderQueueがしきい値超）か</summary>
+        private static bool IsTransparent(Renderer renderer)
+        {
+            return renderer.sharedMaterials.Any(
+                m => m != null && m.renderQueue > TransparentQueueThreshold);
+        }
+
+        /// <summary>全マテリアルがテクスチャ未割り当て（単色のみ）か</summary>
+        private static bool IsColorOnly(Renderer renderer)
+        {
+            foreach (Material material in renderer.sharedMaterials)
+            {
+                if (material == null) continue;
+                foreach (string property in material.GetTexturePropertyNames())
+                {
+                    if (material.GetTexture(property) != null) return false;
+                }
+            }
+            return true;
         }
 
         /// <summary>マテリアル構成のキー（順不同・null除外のインスタンスID列）</summary>
