@@ -132,20 +132,20 @@ namespace YozoLab.MeshBaker
                     ? material.color
                     : Color.white;
 
-                int width = 4;
-                int height = 4;
+                int solidWidth = 4;
+                int solidHeight = 4;
                 Texture sizeReference = FindLargestTexture(material, sizeReferenceProperties);
                 if (sizeReference != null)
                 {
-                    float scale = Mathf.Clamp(resolutionScale, 0.01f, 1f);
-                    width = Mathf.Clamp(
-                        Mathf.RoundToInt(sizeReference.width * bounds.width * scale), 4, atlasSize);
-                    height = Mathf.Clamp(
-                        Mathf.RoundToInt(sizeReference.height * bounds.height * scale), 4, atlasSize);
+                    float referenceScale = Mathf.Clamp(resolutionScale, 0.01f, 1f);
+                    solidWidth = Mathf.Clamp(
+                        Mathf.RoundToInt(sizeReference.width * bounds.width * referenceScale), 4, atlasSize);
+                    solidHeight = Mathf.Clamp(
+                        Mathf.RoundToInt(sizeReference.height * bounds.height * referenceScale), 4, atlasSize);
                 }
 
-                var solid = new Texture2D(width, height, TextureFormat.RGBA32, false);
-                var pixels = new Color[width * height];
+                var solid = new Texture2D(solidWidth, solidHeight, TextureFormat.RGBA32, false);
+                var pixels = new Color[solidWidth * solidHeight];
                 for (int i = 0; i < pixels.Length; i++) pixels[i] = color;
                 solid.SetPixels(pixels);
                 solid.Apply();
