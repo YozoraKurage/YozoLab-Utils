@@ -33,6 +33,7 @@ public partial class FBXAnimationExtractorWindow
         Debug.Log($"[FBX Animation Extractor] Processing started: {fbxPaths.Length} FBX file(s){(ignoreCache ? " (cache ignored: full re-export)" : string.Empty)}");
         int processedCount = 0;
         int skippedCount = 0;
+        int folderDisabledCount = 0;
 
         try
         {
@@ -44,16 +45,25 @@ public partial class FBXAnimationExtractorWindow
                 string sourceDependencyHash;
                 string ruleSignature;
 
+                // Rule の属するフォルダの Extract フラグが OFF なら処理対象から除外
+                if (matchingRule != null && !IsFolderExtractEnabled(matchingRule.folder))
+                {
+                    folderDisabledCount++;
+                    Debug.Log($"[FBX Animation Extractor] Folder \"{matchingRule.folder.Trim()}\" extract is OFF, skipped: {fbxName}");
+                    continue;
+                }
+
                 // Rule に出力先オーバーライドがあればそちらへ、無ければグローバルの Output Directory へ。
                 WarnIfInvalidOutputOverride(matchingRule);
                 string outputPath = GetRuleOutputFolder(matchingRule, defaultOutputPath);
+                string outputName = GetRuleOutputName(matchingRule, fbxName);
 
                 EditorUtility.DisplayProgressBar("FBX Animation Extractor",
                     $"Processing: {fbxName} ({i + 1}/{fbxPaths.Length})",
                     (float)i / fbxPaths.Length);
 
                 // out 値（ハッシュ/署名）はキャッシュ更新に必要なため常に計算し、スキップ判定だけ ignoreCache で抑止する
-                bool canSkip = ShouldSkipProcessing(fbxPath, fbxName, outputPath, matchingRule, out sourceDependencyHash, out ruleSignature);
+                bool canSkip = ShouldSkipProcessing(fbxPath, outputName, outputPath, matchingRule, out sourceDependencyHash, out ruleSignature);
                 if (!ignoreCache && canSkip)
                 {
                     skippedCount++;
@@ -66,13 +76,13 @@ public partial class FBXAnimationExtractorWindow
 
                 // アニメーションクリップを抽出・保存。Separate モード時は generic clip も別途生成。
                 string generatedGenericClipPath;
-                bool extracted = ExtractAndSaveAnimationClip(fbxPath, outputPath, fbxName, out generatedGenericClipPath);
+                bool extracted = ExtractAndSaveAnimationClip(fbxPath, outputPath, fbxName, outputName, out generatedGenericClipPath);
                 if (!extracted)
                 {
                     continue;
                 }
 
-                string generatedClipPath = $"{outputPath}/{fbxName}.anim";
+                string generatedClipPath = $"{outputPath}/{outputName}.anim";
                 UpdateProcessCache(fbxPath, sourceDependencyHash, ruleSignature, generatedClipPath, generatedGenericClipPath);
                 processedCount++;
 
@@ -83,7 +93,7 @@ public partial class FBXAnimationExtractorWindow
             AssetDatabase.Refresh();
             settings.SaveSettings();
 
-            Debug.Log($"[FBX Animation Extractor] All done: total={fbxPaths.Length}, processed={processedCount}, skipped={skippedCount}");
+            Debug.Log($"[FBX Animation Extractor] All done: total={fbxPaths.Length}, processed={processedCount}, skipped={skippedCount}, folder-off={folderDisabledCount}");
         }
         finally
         {
@@ -184,7 +194,7 @@ public partial class FBXAnimationExtractorWindow
         importer.SaveAndReimport();
     }
 
-    private bool ExtractAndSaveAnimationClip(string fbxPath, string outputPath, string fbxName, out string generatedGenericClipPath)
+    private bool ExtractAndSaveAnimationClip(string fbxPath, string outputPath, string fbxName, string outputName, out string generatedGenericClipPath)
     {
         generatedGenericClipPath = string.Empty;
 
@@ -200,10 +210,10 @@ public partial class FBXAnimationExtractorWindow
             return false;
         }
 
-        string outputFilePath = $"{outputPath}/{fbxName}.anim";
+        string outputFilePath = $"{outputPath}/{outputName}.anim";
         AnimationClip existingClip = AssetDatabase.LoadAssetAtPath<AnimationClip>(outputFilePath);
 
-        string genericOutputFilePath = $"{outputPath}/{fbxName}_generic.anim";
+        string genericOutputFilePath = $"{outputPath}/{outputName}_generic.anim";
         AnimationClip existingGenericClip = AssetDatabase.LoadAssetAtPath<AnimationClip>(genericOutputFilePath);
 
         // 抽出処理はメモリ上の一時クリップで行う
@@ -212,7 +222,7 @@ public partial class FBXAnimationExtractorWindow
         try
         {
             EditorUtility.CopySerialized(sourceClip, workingClip);
-            workingClip.name = fbxName;
+            workingClip.name = outputName;
 
             workingGenericClip = ApplyPostProcessRules(workingClip, fbxName, fbxPath);
 
@@ -241,7 +251,7 @@ public partial class FBXAnimationExtractorWindow
                 // 新規ファイルの場合: 後処理済みクリップを資産として書き出し
                 AnimationClip newClip = new AnimationClip();
                 EditorUtility.CopySerialized(workingClip, newClip);
-                newClip.name = fbxName;
+                newClip.name = outputName;
                 AssetDatabase.CreateAsset(newClip, outputFilePath);
             }
 
@@ -266,7 +276,7 @@ public partial class FBXAnimationExtractorWindow
                 {
                     AnimationClip newGenericClip = new AnimationClip();
                     EditorUtility.CopySerialized(workingGenericClip, newGenericClip);
-                    newGenericClip.name = $"{fbxName}_generic";
+                    newGenericClip.name = $"{outputName}_generic";
                     AssetDatabase.CreateAsset(newGenericClip, genericOutputFilePath);
                 }
                 generatedGenericClipPath = genericOutputFilePath;
@@ -332,12 +342,12 @@ public partial class FBXAnimationExtractorWindow
         return max;
     }
 
-    private bool ShouldSkipProcessing(string fbxPath, string fbxName, string outputPath, AnimationPostProcessRule matchingRule, out string sourceDependencyHash, out string ruleSignature)
+    private bool ShouldSkipProcessing(string fbxPath, string outputName, string outputPath, AnimationPostProcessRule matchingRule, out string sourceDependencyHash, out string ruleSignature)
     {
         sourceDependencyHash = AssetDatabase.GetAssetDependencyHash(fbxPath).ToString();
         ruleSignature = BuildRuleSignature(matchingRule);
 
-        string outputFilePath = $"{outputPath}/{fbxName}.anim";
+        string outputFilePath = $"{outputPath}/{outputName}.anim";
         AnimationClip outputClip = AssetDatabase.LoadAssetAtPath<AnimationClip>(outputFilePath);
         if (outputClip == null)
         {
@@ -417,6 +427,63 @@ public partial class FBXAnimationExtractorWindow
             }
         }
         return defaultOutputPath;
+    }
+
+    /// <summary>
+    /// 書き出す .anim のファイル名(拡張子なし)を解決する。
+    /// Rule の outputFileName が設定されていればそれを、未設定なら FBX 名を返す。
+    /// </summary>
+    private static string GetRuleOutputName(AnimationPostProcessRule rule, string fbxName)
+    {
+        return SanitizeOutputName(rule?.outputFileName, fbxName);
+    }
+
+    /// <summary>
+    /// ユーザー指定の出力ファイル名を整形する。末尾の ".anim" と
+    /// ファイル名に使えない文字を除去し、空になったら fallback を返す。
+    /// </summary>
+    private static string SanitizeOutputName(string requested, string fallback)
+    {
+        if (string.IsNullOrWhiteSpace(requested))
+        {
+            return fallback;
+        }
+
+        string name = requested.Trim();
+        if (name.EndsWith(".anim", StringComparison.OrdinalIgnoreCase))
+        {
+            name = name.Substring(0, name.Length - ".anim".Length).TrimEnd();
+        }
+
+        foreach (char c in Path.GetInvalidFileNameChars())
+        {
+            name = name.Replace(c.ToString(), string.Empty);
+        }
+
+        return string.IsNullOrWhiteSpace(name) ? fallback : name;
+    }
+
+    /// <summary>
+    /// Rule が属するフォルダの Extract フラグを返す。
+    /// フォルダ未所属・フォルダ状態が未登録の場合は true(処理する)。
+    /// </summary>
+    private bool IsFolderExtractEnabled(string folderName)
+    {
+        if (string.IsNullOrWhiteSpace(folderName) || settings == null || settings.ruleFolders == null)
+        {
+            return true;
+        }
+
+        string key = folderName.Trim();
+        foreach (RuleFolderState folder in settings.ruleFolders)
+        {
+            if (folder != null && string.Equals(folder.name?.Trim(), key, StringComparison.OrdinalIgnoreCase))
+            {
+                return folder.extractEnabled;
+            }
+        }
+
+        return true;
     }
 
     private void WarnIfInvalidOutputOverride(AnimationPostProcessRule rule)

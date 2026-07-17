@@ -181,6 +181,28 @@ public partial class FBXAnimationExtractorWindow
             }
         }
 
+        if (GUILayout.Button(new GUIContent("New Folder",
+                L10n.T("Rule Listに新しいフォルダを作成します",
+                       "Create a new folder in the Rule List")),
+            GUILayout.Width(90)))
+        {
+            FolderNamePromptWindow.Open(
+                L10n.T("新規フォルダ", "New Folder"),
+                name => CreateFolder(name, null));
+        }
+
+        List<int> folderTargets = GetPasteTargetIndices();
+        using (new EditorGUI.DisabledScope(folderTargets.Count == 0))
+        {
+            if (GUILayout.Button(new GUIContent($"Folder ({folderTargets.Count}) ▾",
+                    L10n.T("チェック済みRule(未チェックなら選択中Rule)をフォルダへ移動",
+                           "Move checked rules (or the selected rule when none are checked) to a folder")),
+                GUILayout.Width(95)))
+            {
+                ShowFolderAssignMenu(folderTargets);
+            }
+        }
+
         DrawAutoCollectButton();
 
         EditorGUILayout.EndHorizontal();
@@ -334,54 +356,84 @@ public partial class FBXAnimationExtractorWindow
             return;
         }
 
+        SyncRuleFolders();
+
         ruleListScrollPosition = EditorGUILayout.BeginScrollView(ruleListScrollPosition);
 
         string normalizedSearch = string.IsNullOrWhiteSpace(ruleSearchText)
             ? string.Empty
             : ruleSearchText.Trim().ToLowerInvariant();
+        bool searching = !string.IsNullOrEmpty(normalizedSearch);
 
+        // フォルダごとに index をグループ化(Rule の並び順は維持)
+        var rootIndices = new List<int>();
+        var folderBuckets = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < postProcessRulesProp.arraySize; i++)
         {
-            SerializedProperty ruleProp = postProcessRulesProp.GetArrayElementAtIndex(i);
-            SerializedProperty targetNameProp = ruleProp.FindPropertyRelative("targetName");
+            string folderName = GetRuleFolderName(i);
+            if (string.IsNullOrEmpty(folderName))
+            {
+                rootIndices.Add(i);
+                continue;
+            }
 
-            string targetName = string.IsNullOrWhiteSpace(targetNameProp.stringValue)
-                ? "(No Target Name)"
-                : targetNameProp.stringValue.Trim();
+            if (!folderBuckets.TryGetValue(folderName, out List<int> bucket))
+            {
+                bucket = new List<int>();
+                folderBuckets.Add(folderName, bucket);
+            }
+            bucket.Add(i);
+        }
 
-            if (!string.IsNullOrEmpty(normalizedSearch)
-                && targetName.ToLowerInvariant().IndexOf(normalizedSearch, StringComparison.Ordinal) < 0)
+        // フォルダなしの Rule
+        foreach (int i in rootIndices)
+        {
+            if (RuleMatchesSearch(i, normalizedSearch))
+            {
+                DrawRuleListItem(i);
+            }
+        }
+
+        // フォルダごとの Rule(空のフォルダも見出しだけ表示する)
+        foreach (RuleFolderState folder in settings.ruleFolders)
+        {
+            if (folder == null || string.IsNullOrWhiteSpace(folder.name))
             {
                 continue;
             }
 
-            bool isSelected = selectedRuleIndex == i;
-            Color prevBg = GUI.backgroundColor;
-            if (isSelected)
+            if (!folderBuckets.TryGetValue(folder.name.Trim(), out List<int> indices))
             {
-                GUI.backgroundColor = new Color(0.35f, 0.58f, 0.85f, 0.9f);
+                indices = new List<int>();
             }
 
-            EditorGUILayout.BeginVertical("box");
+            var visibleIndices = new List<int>();
+            foreach (int i in indices)
+            {
+                if (RuleMatchesSearch(i, normalizedSearch)) visibleIndices.Add(i);
+            }
+
+            // 検索中は一致する Rule が無いフォルダを丸ごと隠し、あるフォルダは強制展開する
+            if (searching && visibleIndices.Count == 0)
+            {
+                continue;
+            }
+
+            bool expanded = DrawFolderHeader(folder, indices.Count, searching);
+            if (!expanded)
+            {
+                continue;
+            }
 
             EditorGUILayout.BeginHorizontal();
-            bool wasChecked = checkedRuleIndices.Contains(i);
-            bool isChecked = EditorGUILayout.Toggle(wasChecked, GUILayout.Width(18));
-            if (isChecked != wasChecked)
+            GUILayout.Space(14);
+            EditorGUILayout.BeginVertical();
+            foreach (int i in visibleIndices)
             {
-                if (isChecked) checkedRuleIndices.Add(i);
-                else checkedRuleIndices.Remove(i);
+                DrawRuleListItem(i);
             }
-            if (GUILayout.Button($"{i + 1}. {targetName}", EditorStyles.miniButton, GUILayout.Height(22)))
-            {
-                selectedRuleIndex = i;
-            }
-            EditorGUILayout.EndHorizontal();
-
-            GUI.backgroundColor = prevBg;
-
-            DrawGeneratedClipShortcut(targetNameProp.stringValue);
             EditorGUILayout.EndVertical();
+            EditorGUILayout.EndHorizontal();
         }
 
         EditorGUILayout.EndScrollView();
@@ -429,17 +481,337 @@ public partial class FBXAnimationExtractorWindow
     {
         for (int i = 0; i < postProcessRulesProp.arraySize; i++)
         {
-            if (!string.IsNullOrEmpty(normalizedSearch))
+            if (RuleMatchesSearch(i, normalizedSearch))
             {
-                SerializedProperty ruleProp = postProcessRulesProp.GetArrayElementAtIndex(i);
-                string name = ruleProp.FindPropertyRelative("targetName").stringValue ?? string.Empty;
-                if (name.Trim().ToLowerInvariant().IndexOf(normalizedSearch, StringComparison.Ordinal) < 0)
+                checkedRuleIndices.Add(i);
+            }
+        }
+    }
+
+    private bool RuleMatchesSearch(int index, string normalizedSearch)
+    {
+        if (string.IsNullOrEmpty(normalizedSearch))
+        {
+            return true;
+        }
+
+        SerializedProperty ruleProp = postProcessRulesProp.GetArrayElementAtIndex(index);
+        string name = ruleProp.FindPropertyRelative("targetName").stringValue ?? string.Empty;
+        return name.Trim().ToLowerInvariant().IndexOf(normalizedSearch, StringComparison.Ordinal) >= 0;
+    }
+
+    /// <summary>Rule List の 1 行(チェックボックス + 選択ボタン + 生成 Clip ショートカット)を描画する。</summary>
+    private void DrawRuleListItem(int i)
+    {
+        SerializedProperty ruleProp = postProcessRulesProp.GetArrayElementAtIndex(i);
+        SerializedProperty targetNameProp = ruleProp.FindPropertyRelative("targetName");
+
+        string targetName = string.IsNullOrWhiteSpace(targetNameProp.stringValue)
+            ? "(No Target Name)"
+            : targetNameProp.stringValue.Trim();
+
+        bool isSelected = selectedRuleIndex == i;
+        Color prevBg = GUI.backgroundColor;
+        if (isSelected)
+        {
+            GUI.backgroundColor = new Color(0.35f, 0.58f, 0.85f, 0.9f);
+        }
+
+        EditorGUILayout.BeginVertical("box");
+
+        EditorGUILayout.BeginHorizontal();
+        bool wasChecked = checkedRuleIndices.Contains(i);
+        bool isChecked = EditorGUILayout.Toggle(wasChecked, GUILayout.Width(18));
+        if (isChecked != wasChecked)
+        {
+            if (isChecked) checkedRuleIndices.Add(i);
+            else checkedRuleIndices.Remove(i);
+        }
+        if (GUILayout.Button($"{i + 1}. {targetName}", EditorStyles.miniButton, GUILayout.Height(22)))
+        {
+            selectedRuleIndex = i;
+        }
+        EditorGUILayout.EndHorizontal();
+
+        GUI.backgroundColor = prevBg;
+
+        DrawGeneratedClipShortcut(targetNameProp.stringValue);
+        EditorGUILayout.EndVertical();
+    }
+
+    /// <summary>
+    /// フォルダ見出し行を描画する。折りたたみと「このフォルダをExtractするか」のトグルを持つ。
+    /// 戻り値は中身を描画すべきかどうか(検索中は強制展開)。
+    /// </summary>
+    private bool DrawFolderHeader(RuleFolderState folder, int ruleCount, bool searching)
+    {
+        EditorGUILayout.BeginHorizontal("box");
+
+        bool shownExpanded = searching || folder.expanded;
+        bool nowExpanded = EditorGUILayout.Foldout(shownExpanded, $"{folder.name}  ({ruleCount})", true, EditorStyles.foldoutHeader);
+        if (!searching && nowExpanded != folder.expanded)
+        {
+            folder.expanded = nowExpanded;
+            EditorUtility.SetDirty(settings);
+        }
+
+        GUILayout.FlexibleSpace();
+
+        // Extract フラグはフォルダ見出しに常時表示して、すぐ切り替えられるようにする
+        Color prevBg = GUI.backgroundColor;
+        if (!folder.extractEnabled)
+        {
+            GUI.backgroundColor = new Color(1f, 0.55f, 0.45f, 0.9f);
+        }
+        EditorGUI.BeginChangeCheck();
+        bool extract = GUILayout.Toggle(folder.extractEnabled,
+            new GUIContent(folder.extractEnabled ? "Extract: ON" : "Extract: OFF",
+                L10n.T("OFFにすると、このフォルダ内のRuleに一致するFBXはExecuteで処理されません",
+                       "When OFF, FBX files matching rules in this folder are skipped by Execute")),
+            EditorStyles.miniButton, GUILayout.Width(90));
+        GUI.backgroundColor = prevBg;
+        if (EditorGUI.EndChangeCheck())
+        {
+            Undo.RecordObject(settings, "Toggle Folder Extract");
+            folder.extractEnabled = extract;
+            EditorUtility.SetDirty(settings);
+            settings.SaveSettings();
+        }
+
+        if (GUILayout.Button(new GUIContent("✕",
+                L10n.T("フォルダを削除(中のRuleはフォルダなしに戻ります)",
+                       "Delete this folder (rules inside are moved out of folders)")),
+            EditorStyles.miniButton, GUILayout.Width(20)))
+        {
+            DeleteFolder(folder, ruleCount);
+            GUIUtility.ExitGUI(); // リスト構造が変わるので今フレームの描画を打ち切る
+        }
+
+        EditorGUILayout.EndHorizontal();
+        return searching || folder.expanded;
+    }
+
+    /// <summary>フォルダを削除する。中に Rule がある場合は確認のうえ、フォルダなしへ戻す。</summary>
+    private void DeleteFolder(RuleFolderState folder, int ruleCount)
+    {
+        if (ruleCount > 0)
+        {
+            bool confirmed = EditorUtility.DisplayDialog(
+                L10n.T("フォルダ削除", "Delete Folder"),
+                L10n.T(
+                    $"フォルダ \"{folder.name}\" を削除します。\n中の {ruleCount} 個のRuleは削除されず、フォルダなしに戻ります。よろしいですか?",
+                    $"Delete folder \"{folder.name}\"?\nThe {ruleCount} rule(s) inside are kept and moved out of the folder."),
+                L10n.T("削除", "Delete"),
+                L10n.T("キャンセル", "Cancel"));
+            if (!confirmed) return;
+        }
+
+        serializedSettings.ApplyModifiedProperties();
+        Undo.RecordObject(settings, "Delete Rule Folder");
+
+        string key = folder.name.Trim();
+        if (settings.postProcessRules != null)
+        {
+            foreach (AnimationPostProcessRule rule in settings.postProcessRules)
+            {
+                if (rule != null && !string.IsNullOrWhiteSpace(rule.folder)
+                    && string.Equals(rule.folder.Trim(), key, StringComparison.OrdinalIgnoreCase))
                 {
-                    continue;
+                    rule.folder = string.Empty;
                 }
             }
-            checkedRuleIndices.Add(i);
         }
+        settings.ruleFolders.Remove(folder);
+
+        EditorUtility.SetDirty(settings);
+        serializedSettings.Update();
+        settings.SaveSettings();
+        Repaint();
+    }
+
+    /// <summary>
+    /// settings.ruleFolders を整える。フォルダは New Folder ボタンで明示的に作成/削除するため
+    /// ここでは削除しない。名前が空・重複のエントリの除去と、Rule 側だけに存在する
+    /// フォルダ名(旧データ等)の補完のみ行う。
+    /// </summary>
+    private void SyncRuleFolders()
+    {
+        if (settings.ruleFolders == null)
+        {
+            settings.ruleFolders = new List<RuleFolderState>();
+        }
+
+        bool changed = false;
+
+        // 名前が空のエントリと重複エントリを除去
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (int i = settings.ruleFolders.Count - 1; i >= 0; i--)
+        {
+            RuleFolderState folder = settings.ruleFolders[i];
+            if (folder == null || string.IsNullOrWhiteSpace(folder.name))
+            {
+                settings.ruleFolders.RemoveAt(i);
+                changed = true;
+            }
+        }
+        for (int i = 0; i < settings.ruleFolders.Count; i++)
+        {
+            if (!seen.Add(settings.ruleFolders[i].name.Trim()))
+            {
+                settings.ruleFolders.RemoveAt(i);
+                i--;
+                changed = true;
+            }
+        }
+
+        // Rule 側だけに存在するフォルダ名を補完(旧バージョンのデータ読み込み対策)
+        if (settings.postProcessRules != null)
+        {
+            foreach (AnimationPostProcessRule rule in settings.postProcessRules)
+            {
+                if (rule == null || string.IsNullOrWhiteSpace(rule.folder)) continue;
+                string name = rule.folder.Trim();
+                if (seen.Add(name))
+                {
+                    settings.ruleFolders.Add(new RuleFolderState { name = name });
+                    changed = true;
+                }
+            }
+        }
+
+        if (changed)
+        {
+            EditorUtility.SetDirty(settings);
+        }
+    }
+
+    private string GetRuleFolderName(int index)
+    {
+        SerializedProperty folderProp = postProcessRulesProp.GetArrayElementAtIndex(index).FindPropertyRelative("folder");
+        return folderProp == null || string.IsNullOrWhiteSpace(folderProp.stringValue)
+            ? string.Empty
+            : folderProp.stringValue.Trim();
+    }
+
+    /// <summary>作成済みフォルダの名前一覧(重複なし・定義順)を返す。</summary>
+    private List<string> CollectFolderNames()
+    {
+        var names = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (settings == null || settings.ruleFolders == null) return names;
+
+        foreach (RuleFolderState folder in settings.ruleFolders)
+        {
+            if (folder == null || string.IsNullOrWhiteSpace(folder.name)) continue;
+            string name = folder.name.Trim();
+            if (seen.Add(name)) names.Add(name);
+        }
+        return names;
+    }
+
+    /// <summary>登録済みフォルダを名前(大文字小文字無視)で探す。</summary>
+    private RuleFolderState FindFolderState(string folderName)
+    {
+        if (string.IsNullOrWhiteSpace(folderName) || settings == null || settings.ruleFolders == null)
+        {
+            return null;
+        }
+
+        string key = folderName.Trim();
+        foreach (RuleFolderState folder in settings.ruleFolders)
+        {
+            if (folder != null && string.Equals(folder.name?.Trim(), key, StringComparison.OrdinalIgnoreCase))
+            {
+                return folder;
+            }
+        }
+        return null;
+    }
+
+    private void ShowFolderAssignMenu(List<int> ruleIndices)
+    {
+        var menu = new GenericMenu();
+        menu.AddItem(new GUIContent(L10n.T("(フォルダなし)", "(No Folder)")), false,
+            () => AssignFolderToRules(ruleIndices, string.Empty));
+
+        List<string> names = CollectFolderNames();
+        if (names.Count > 0)
+        {
+            menu.AddSeparator(string.Empty);
+            foreach (string name in names)
+            {
+                string captured = name;
+                menu.AddItem(new GUIContent(captured), false, () => AssignFolderToRules(ruleIndices, captured));
+            }
+        }
+
+        menu.AddSeparator(string.Empty);
+        menu.AddItem(new GUIContent(L10n.T("新規フォルダ...", "New Folder...")), false, () =>
+            FolderNamePromptWindow.Open(
+                L10n.T("新規フォルダ", "New Folder"),
+                name => CreateFolder(name, ruleIndices)));
+
+        menu.ShowAsContext();
+    }
+
+    /// <summary>
+    /// フォルダを作成する。同名(大文字小文字無視)が既にあればそれを使う。
+    /// assignRuleIndices が指定されていれば、その Rule をフォルダへ移動する。
+    /// </summary>
+    private void CreateFolder(string folderName, List<int> assignRuleIndices)
+    {
+        folderName = folderName?.Trim();
+        if (string.IsNullOrEmpty(folderName)) return;
+
+        RuleFolderState existing = FindFolderState(folderName);
+        if (existing == null)
+        {
+            Undo.RecordObject(settings, "Create Rule Folder");
+            settings.ruleFolders.Add(new RuleFolderState { name = folderName });
+            EditorUtility.SetDirty(settings);
+            settings.SaveSettings();
+            Debug.Log($"[FBX Animation Extractor] Created folder \"{folderName}\".");
+        }
+        else
+        {
+            // 既存フォルダ名で作成した場合はそこへ合流させる(見た目の名前は既存側を維持)
+            folderName = existing.name.Trim();
+        }
+
+        if (assignRuleIndices != null && assignRuleIndices.Count > 0)
+        {
+            AssignFolderToRules(assignRuleIndices, folderName);
+        }
+        else
+        {
+            Repaint();
+        }
+    }
+
+    private void AssignFolderToRules(List<int> ruleIndices, string folderName)
+    {
+        if (ruleIndices == null || ruleIndices.Count == 0) return;
+
+        serializedSettings.ApplyModifiedProperties();
+        Undo.RecordObject(settings, "Set Rule Folder");
+
+        int applied = 0;
+        foreach (int i in ruleIndices)
+        {
+            if (i < 0 || i >= settings.postProcessRules.Count) continue;
+            AnimationPostProcessRule rule = settings.postProcessRules[i];
+            if (rule == null) continue;
+            rule.folder = folderName;
+            applied++;
+        }
+
+        EditorUtility.SetDirty(settings);
+        serializedSettings.Update();
+        settings.SaveSettings();
+        Repaint();
+
+        string label = string.IsNullOrEmpty(folderName) ? "(No Folder)" : folderName;
+        Debug.Log($"[FBX Animation Extractor] Moved {applied} rule(s) to folder \"{label}\".");
     }
 
     private void DrawGeneratedClipShortcut(string targetName)
@@ -526,13 +898,14 @@ public partial class FBXAnimationExtractorWindow
             }
         }
 
-        string outputPath = GetRuleOutputFolder(FindMatchingRule(normalizedTargetName));
+        AnimationPostProcessRule matchingRule = FindMatchingRule(normalizedTargetName);
+        string outputPath = GetRuleOutputFolder(matchingRule);
         if (string.IsNullOrEmpty(outputPath))
         {
             return string.Empty;
         }
 
-        string fallbackClipPath = $"{outputPath}/{normalizedTargetName}.anim";
+        string fallbackClipPath = $"{outputPath}/{GetRuleOutputName(matchingRule, normalizedTargetName)}.anim";
         return AssetDatabase.LoadAssetAtPath<AnimationClip>(fallbackClipPath) != null
             ? fallbackClipPath
             : string.Empty;
@@ -575,6 +948,8 @@ public partial class FBXAnimationExtractorWindow
     private void DrawRuleEditor(SerializedProperty ruleProp)
     {
         SerializedProperty targetNameProp = ruleProp.FindPropertyRelative("targetName");
+        SerializedProperty folderProp = ruleProp.FindPropertyRelative("folder");
+        SerializedProperty outputFileNameProp = ruleProp.FindPropertyRelative("outputFileName");
         SerializedProperty outputDirectoryOverrideProp = ruleProp.FindPropertyRelative("outputDirectoryOverride");
         SerializedProperty useOtherAvatarDefinitionProp = ruleProp.FindPropertyRelative("useOtherAvatarDefinition");
         SerializedProperty avatarDefinitionProp = ruleProp.FindPropertyRelative("avatarDefinition");
@@ -589,9 +964,17 @@ public partial class FBXAnimationExtractorWindow
         SerializedProperty eventMarkersProp = ruleProp.FindPropertyRelative("eventMarkers");
 
         EditorGUILayout.PropertyField(targetNameProp, new GUIContent("Target Name", L10n.T("FBX名と完全一致（大文字小文字は無視）", "Case-insensitive exact match with the FBX file name")));
+        DrawRuleFolderField(folderProp);
 
         EditorGUILayout.Space(2);
         EditorGUILayout.LabelField("Output", EditorStyles.boldLabel);
+        EditorGUILayout.PropertyField(outputFileNameProp, new GUIContent("Output File Name", L10n.T("書き出す .anim のファイル名(拡張子不要)。未設定ならFBX名を使用します", "File name of the exported .anim (no extension). Leave empty to use the FBX name")));
+        if (!string.IsNullOrWhiteSpace(outputFileNameProp.stringValue))
+        {
+            EditorGUILayout.LabelField(" ",
+                $"→ {SanitizeOutputName(outputFileNameProp.stringValue, targetNameProp.stringValue?.Trim())}.anim",
+                EditorStyles.miniLabel);
+        }
         EditorGUILayout.PropertyField(outputDirectoryOverrideProp, new GUIContent("Output Directory (Override)", L10n.T("このRule専用の出力先フォルダ。未設定なら上部のOutput Directoryを使用します", "Per-rule output folder. Leave empty to use the global Output Directory above")));
         if (outputDirectoryOverrideProp.objectReferenceValue != null)
         {
@@ -801,9 +1184,104 @@ public partial class FBXAnimationExtractorWindow
         }
     }
 
+    /// <summary>
+    /// Folder の選択ドロップダウンを描く。フォルダの作成はメニューの「新規フォルダ...」
+    /// または Rule List 上部の New Folder ボタンから明示的に行う(テキスト入力起点にしない)。
+    /// </summary>
+    private void DrawRuleFolderField(SerializedProperty folderProp)
+    {
+        EditorGUILayout.BeginHorizontal();
+        EditorGUILayout.PrefixLabel(new GUIContent("Folder",
+            L10n.T("Rule Listでのグループ。ドロップダウンから選択します",
+                   "Group in the Rule List. Pick one from the dropdown")));
+
+        string current = string.IsNullOrWhiteSpace(folderProp.stringValue)
+            ? L10n.T("(フォルダなし)", "(No Folder)")
+            : folderProp.stringValue.Trim();
+        if (GUILayout.Button(current, EditorStyles.popup))
+        {
+            ShowFolderAssignMenu(new List<int> { selectedRuleIndex });
+        }
+        EditorGUILayout.EndHorizontal();
+    }
+
+    /// <summary>フォルダ名を入力させる小さなモーダルウィンドウ。Enter で確定、Esc でキャンセル。</summary>
+    private sealed class FolderNamePromptWindow : EditorWindow
+    {
+        private string folderName = string.Empty;
+        private Action<string> onConfirm;
+        private bool focusRequested = true;
+
+        public static void Open(string title, Action<string> onConfirm)
+        {
+            var window = CreateInstance<FolderNamePromptWindow>();
+            window.titleContent = new GUIContent(title);
+            window.onConfirm = onConfirm;
+            window.minSize = new Vector2(340f, 80f);
+            window.maxSize = new Vector2(340f, 80f);
+            window.ShowModalUtility();
+        }
+
+        private void OnGUI()
+        {
+            Event e = Event.current;
+            if (e.type == EventType.KeyDown)
+            {
+                if (e.keyCode == KeyCode.Return || e.keyCode == KeyCode.KeypadEnter)
+                {
+                    e.Use();
+                    Confirm();
+                    return;
+                }
+                if (e.keyCode == KeyCode.Escape)
+                {
+                    e.Use();
+                    Close();
+                    return;
+                }
+            }
+
+            EditorGUILayout.Space(8);
+            GUI.SetNextControlName("FolderNameField");
+            folderName = EditorGUILayout.TextField(L10n.T("フォルダ名", "Folder Name"), folderName);
+            if (focusRequested)
+            {
+                EditorGUI.FocusTextInControl("FolderNameField");
+                focusRequested = false;
+            }
+
+            EditorGUILayout.Space(8);
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.FlexibleSpace();
+            using (new EditorGUI.DisabledScope(string.IsNullOrWhiteSpace(folderName)))
+            {
+                if (GUILayout.Button(L10n.T("作成", "Create"), GUILayout.Width(90)))
+                {
+                    Confirm();
+                }
+            }
+            if (GUILayout.Button(L10n.T("キャンセル", "Cancel"), GUILayout.Width(90)))
+            {
+                Close();
+            }
+            EditorGUILayout.EndHorizontal();
+        }
+
+        private void Confirm()
+        {
+            if (string.IsNullOrWhiteSpace(folderName)) return;
+            Action<string> callback = onConfirm;
+            string name = folderName.Trim();
+            Close();
+            callback?.Invoke(name);
+        }
+    }
+
     private void InitializeRule(SerializedProperty ruleProp)
     {
         ruleProp.FindPropertyRelative("targetName").stringValue = string.Empty;
+        ruleProp.FindPropertyRelative("folder").stringValue = string.Empty;
+        ruleProp.FindPropertyRelative("outputFileName").stringValue = string.Empty;
         ruleProp.FindPropertyRelative("outputDirectoryOverride").objectReferenceValue = null;
         ruleProp.FindPropertyRelative("useOtherAvatarDefinition").boolValue = false;
         ruleProp.FindPropertyRelative("avatarDefinition").objectReferenceValue = null;
