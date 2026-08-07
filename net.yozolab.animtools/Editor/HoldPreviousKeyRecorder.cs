@@ -1,8 +1,10 @@
 // この機能は Harmony（0Harmony.dll）に依存します。
-// スクリプティング定義シンボル "YOZOLAB_ANIMTOOLS_HARMONY" が設定されているときだけ
-// コンパイルされ、このシンボルは HarmonyDefineBootstrap が Harmony の有無を自動検出して
-// 付け外しします（手動設定は不要）。Harmony が無い環境ではこのファイルは空になり、
-// コンパイルは通ります。
+// Harmony を同梱する VRCSDK（com.vrchat.base）がある環境でだけコンパイルされ、
+// 判定は asmdef の versionDefines に任せています（手動設定は不要）。
+// シンボル "YOZOLAB_ANIMTOOLS_HARMONY" はこのアセンブリのコンパイル時のみ有効で、
+// プロジェクトの Scripting Define Symbols には何も書き込みません。
+// 別のパッケージ経由で Harmony を導入している場合は asmdef に 1 エントリ足してください。
+// Harmony が無い環境ではこのファイルは空になり、コンパイルは通ります。
 #if YOZOLAB_ANIMTOOLS_HARMONY
 using System;
 using System.Reflection;
@@ -32,6 +34,13 @@ namespace YozoLab.AnimTools
         private const string MenuPath = "YozoLab/Animation/前フレーム自動キー (レコード時)";
         private const string Pref = "YozoLab.AnimTools.HoldPrevKey.Enabled";
         private const string HarmonyId = "net.yozolab.animtools.holdprevkey";
+
+        // Animation ウィンドウ右上に重ねるツールバーボタンの共通レイアウト。
+        // 他機能（Clip ping ボタン等）がトグルの左隣に並べる際、この既知位置を基準にする。
+        internal const float ToolbarButtonWidth = 118f; // トグルボタンの幅
+        internal const float ToolbarRightMargin = 4f;   // ウィンドウ右端からの余白
+        internal const float ToolbarTop = 1f;           // 上端 y
+        internal const float ToolbarHeight = 18f;       // ボタン高さ
 
         /// <summary>機能の有効/無効。パッチは常駐し、OFF のときは即 no-op。</summary>
         public static bool Enabled { get; private set; }
@@ -138,8 +147,9 @@ namespace YozoLab.AnimTools
         {
             try
             {
-                const float w = 118f, h = 18f;
-                var rect = new Rect(__instance.position.width - w - 4f, 1f, w, h);
+                var rect = new Rect(
+                    __instance.position.width - ToolbarButtonWidth - ToolbarRightMargin,
+                    ToolbarTop, ToolbarButtonWidth, ToolbarHeight);
                 var label = new GUIContent(
                     Enabled ? "前F自動キー: ON" : "前F自動キー: OFF",
                     "レコード時、打ったキーの1フレーム前に直前の値を自動で打ち込みます。");

@@ -11,6 +11,12 @@
     "precompiledReferences": [],
     "autoReferenced": false,
     "defineConstraints": [],
-    "versionDefines": [],
+    "versionDefines": [
+        {
+            "name": "com.vrchat.base",
+            "expression": "",
+            "define": "YOZOLAB_ANIMTOOLS_HARMONY"
+        }
+    ],
     "noEngineReferences": false
 }
