@@ -23,6 +23,9 @@ public class FBXAnimationExtractorSettings : ScriptableSingleton<FBXAnimationExt
     [Tooltip("List of animation post-process rules")]
     public List<AnimationPostProcessRule> postProcessRules = new List<AnimationPostProcessRule>();
 
+    [Tooltip("Folder states for organizing the rule list (per-folder extract flag / foldout)")]
+    public List<RuleFolderState> ruleFolders = new List<RuleFolderState>();
+
     [HideInInspector]
     public List<FbxProcessCacheEntry> processCacheEntries = new List<FbxProcessCacheEntry>();
 
@@ -46,6 +49,22 @@ public class FbxProcessCacheEntry
 }
 
 /// <summary>
+/// Rule List 上のフォルダ。「New Folder」ボタンで明示的に作成・削除され、
+/// 「フォルダ単位で Extract を実行するか」と foldout の開閉状態を保持する。
+/// 空のフォルダも保持される。名前の一致は大文字小文字を無視する。
+/// </summary>
+[Serializable]
+public class RuleFolderState
+{
+    public string name;
+
+    [Tooltip("When OFF, FBX files matching rules in this folder are skipped by Execute")]
+    public bool extractEnabled = true;
+
+    public bool expanded = true;
+}
+
+/// <summary>
 /// Generic Extract の出力モード。
 /// Merge   = 既存の挙動。非Humanoidカーブを Humanoid clip にマージする。
 /// Separate = Humanoid clip と <fbxName>_generic.anim に分離出力する。
@@ -64,6 +83,12 @@ public class AnimationPostProcessRule
 {
     [Tooltip("Target animation name (case-insensitive exact match with FBX file name)")]
     public string targetName;
+
+    [Tooltip("Name of the rule folder this rule belongs to (empty = no folder, case-insensitive)")]
+    public string folder;
+
+    [Tooltip("File name of the exported .anim (without extension). Leave empty to use the FBX name")]
+    public string outputFileName;
 
     [Tooltip("Per-rule output folder. When set, clips matched by this rule are written here instead of the global Output Directory")]
     public DefaultAsset outputDirectoryOverride;

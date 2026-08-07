@@ -1,0 +1,22 @@
+{
+    "name": "net.yozolab.animtools.Editor",
+    "rootNamespace": "",
+    "references": [],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [
+        {
+            "name": "com.vrchat.base",
+            "expression": "",
+            "define": "YOZOLAB_ANIMTOOLS_HARMONY"
+        }
+    ],
+    "noEngineReferences": false
+}

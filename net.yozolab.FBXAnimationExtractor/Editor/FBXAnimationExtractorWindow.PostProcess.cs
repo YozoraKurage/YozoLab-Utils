@@ -131,6 +131,7 @@ public partial class FBXAnimationExtractorWindow
 
         StringBuilder signatureBuilder = new StringBuilder();
         signatureBuilder.Append(rule.targetName?.Trim() ?? string.Empty);
+        signatureBuilder.Append("|outputFileName:").Append(rule.outputFileName?.Trim() ?? string.Empty);
         signatureBuilder.Append("|outputOverride:").Append(GetObjectReferenceSignature(rule.outputDirectoryOverride));
         signatureBuilder.Append("|avatarEnabled:").Append(rule.useOtherAvatarDefinition);
         signatureBuilder.Append("|avatar:").Append(GetAvatarSignature(rule));
