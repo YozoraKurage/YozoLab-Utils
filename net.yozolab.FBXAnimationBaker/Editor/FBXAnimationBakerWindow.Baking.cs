@@ -203,15 +203,19 @@ namespace YozoLab.FBXAnimationBaker
                 // ── サンプリング ──────────────────────────────────────────
                 var samples = new BakeSampleBuffer(instance, entry.bakeBlendShapes);
                 float fps = ResolveFrameRate(entry, clip);
-                int frameCount = Mathf.Max(2, Mathf.RoundToInt(clip.length * fps) + 1);
                 float dt = 1f / fps;
+
+                // 1 フレームだけのポーズクリップは length が 0 になる。そのまま同じ時刻に
+                // 2 キー打つと壊れたカーブになるので、最低 1 フレーム分の長さを確保する。
+                float duration = Mathf.Max(clip.length, dt);
+                int frameCount = Mathf.Max(2, Mathf.RoundToInt(duration * fps) + 1);
 
                 AnimationMode.StartAnimationMode();
                 animationModeStarted = true;
 
                 for (int frame = 0; frame < frameCount; frame++)
                 {
-                    float time = Mathf.Min(frame * dt, clip.length);
+                    float time = Mathf.Min(frame * dt, duration);
 
                     AnimationMode.BeginSampling();
                     AnimationMode.SampleAnimationClip(instance, clip, time);
@@ -224,7 +228,23 @@ namespace YozoLab.FBXAnimationBaker
                 animationModeStarted = false;
 
                 // ── カーブ生成 ────────────────────────────────────────────
-                bakedClip = samples.BuildClip(entry, fps);
+                bakedClip = samples.BuildClip(entry, fps, entry.removeConstantCurves, out int curveCount);
+
+                // 1 フレームのポーズクリップは全チャンネルが「変化なし」になるため、
+                // 定数カーブ除去をそのまま適用するとカーブが 1 本も残らず、
+                // アニメーションの入っていない FBX ができてしまう。その場合は除去せず作り直す。
+                if (curveCount == 0 && entry.removeConstantCurves)
+                {
+                    UnityEngine.Object.DestroyImmediate(bakedClip);
+                    bakedClip = samples.BuildClip(entry, fps, false, out curveCount);
+                    Debug.Log($"{LogPrefix} \"{clip.name}\" has no changing curve (static pose). Baked it with Remove Constant Curves disabled.");
+                }
+
+                if (curveCount == 0)
+                {
+                    Debug.LogWarning($"{LogPrefix} No curve was baked for \"{clip.name}\". The generated FBX will have no animation.");
+                }
+
                 bakedClip.name = outputName;
 
                 AnimationClipSettings clipSettings = AnimationUtility.GetAnimationClipSettings(bakedClip);
@@ -245,6 +265,11 @@ namespace YozoLab.FBXAnimationBaker
                 UnityEngine.Object.DestroyImmediate(animator);
 
                 samples.ApplyFirstFrame();
+
+                if (entry.exportContent == BakeExportContent.SkeletonOnly)
+                {
+                    StripRenderers(instance, entry.bakeBlendShapes);
+                }
 
                 legacyClip = new AnimationClip { name = outputName };
                 EditorUtility.CopySerialized(bakedClip, legacyClip);
@@ -269,6 +294,9 @@ namespace YozoLab.FBXAnimationBaker
 
                 AssetDatabase.ImportAsset(outputAssetPath, ImportAssetOptions.ForceUpdate);
                 ConfigureBakedFbxImporter(outputAssetPath, entry);
+
+                long fileSizeKb = new FileInfo(absolutePath).Length / 1024;
+                Debug.Log($"{LogPrefix} \"{outputName}\": {curveCount} curve(s), {CountKeys(bakedClip)} key(s), {frameCount} sampled frame(s), {fileSizeKb} KB");
                 return true;
             }
             catch (Exception e)
@@ -294,6 +322,42 @@ namespace YozoLab.FBXAnimationBaker
                 {
                     UnityEngine.Object.DestroyImmediate(legacyClip);
                 }
+            }
+        }
+
+        /// <summary>クリップ内の全キー数。ベイク結果のサイズ感をログに出すために使う。</summary>
+        private static int CountKeys(AnimationClip clip)
+        {
+            int count = 0;
+            foreach (EditorCurveBinding binding in AnimationUtility.GetCurveBindings(clip))
+            {
+                AnimationCurve curve = AnimationUtility.GetEditorCurve(clip, binding);
+                count += curve != null ? curve.length : 0;
+            }
+            return count;
+        }
+
+        /// <summary>
+        /// メッシュ/レンダラーを取り除き、アニメーションするノード階層だけを残す。
+        /// メッシュとブレンドシェイプが FBX 容量の大半を占めるため、
+        /// アニメーションだけが欲しい場合はこれで劇的に小さくなる。
+        /// </summary>
+        private static void StripRenderers(GameObject instance, bool keepSkinnedMeshes)
+        {
+            foreach (MeshFilter filter in instance.GetComponentsInChildren<MeshFilter>(true))
+            {
+                UnityEngine.Object.DestroyImmediate(filter);
+            }
+
+            foreach (Renderer renderer in instance.GetComponentsInChildren<Renderer>(true))
+            {
+                // ブレンドシェイプをベイクする場合、対象の SkinnedMeshRenderer を消すと
+                // カーブの参照先が無くなるため残す(その分ファイルは大きくなる)。
+                if (keepSkinnedMeshes && renderer is SkinnedMeshRenderer)
+                {
+                    continue;
+                }
+                UnityEngine.Object.DestroyImmediate(renderer);
             }
         }
 
@@ -487,6 +551,9 @@ namespace YozoLab.FBXAnimationBaker
             sb.Append(entry.bakeScale).Append('|');
             sb.Append(entry.bakeBlendShapes).Append('|');
             sb.Append(entry.removeConstantCurves).Append('|');
+            sb.Append(entry.keyframeReduction).Append('|');
+            sb.Append(entry.reductionTolerance).Append('|');
+            sb.Append(entry.exportContent).Append('|');
             sb.Append(entry.saveBakedClipAsset).Append('|');
             sb.Append(entry.importAnimationType).Append('|');
             sb.Append(entry.exportAscii).Append('|');
@@ -637,18 +704,27 @@ namespace YozoLab.FBXAnimationBaker
                 }
             }
 
-            public AnimationClip BuildClip(AnimationBakeEntry entry, float frameRate)
+            /// <param name="removeConstant">
+            /// 変化しないカーブを省くか。ポーズクリップのように全カーブが定数のときは、
+            /// 呼び出し側が false で作り直す。
+            /// </param>
+            /// <param name="curveCount">実際に書き込まれたカーブ本数。0 ならアニメーションなし。</param>
+            public AnimationClip BuildClip(AnimationBakeEntry entry, float frameRate, bool removeConstant, out int curveCount)
             {
                 var clip = new AnimationClip { frameRate = frameRate };
                 float[] timeArray = times.ToArray();
+                bool reduce = entry.keyframeReduction;
+                float tolerance = Mathf.Max(0f, entry.reductionTolerance);
+                curveCount = 0;
 
                 foreach (TransformTrack track in transformTracks)
                 {
-                    SetVectorCurves(clip, track.path, "m_LocalPosition", timeArray,
-                        track.positions.Select(p => p.x), track.positions.Select(p => p.y), track.positions.Select(p => p.z),
-                        entry.removeConstantCurves);
+                    curveCount += SetCurveGroup(clip, track.path, timeArray, removeConstant, reduce, tolerance,
+                        ("m_LocalPosition.x", track.positions.Select(p => p.x).ToArray()),
+                        ("m_LocalPosition.y", track.positions.Select(p => p.y).ToArray()),
+                        ("m_LocalPosition.z", track.positions.Select(p => p.z).ToArray()));
 
-                    SetCurveGroup(clip, track.path, timeArray, entry.removeConstantCurves,
+                    curveCount += SetCurveGroup(clip, track.path, timeArray, removeConstant, reduce, tolerance,
                         ("m_LocalRotation.x", track.rotations.Select(r => r.x).ToArray()),
                         ("m_LocalRotation.y", track.rotations.Select(r => r.y).ToArray()),
                         ("m_LocalRotation.z", track.rotations.Select(r => r.z).ToArray()),
@@ -656,55 +732,50 @@ namespace YozoLab.FBXAnimationBaker
 
                     if (entry.bakeScale)
                     {
-                        SetVectorCurves(clip, track.path, "m_LocalScale", timeArray,
-                            track.scales.Select(s => s.x), track.scales.Select(s => s.y), track.scales.Select(s => s.z),
-                            entry.removeConstantCurves);
+                        curveCount += SetCurveGroup(clip, track.path, timeArray, removeConstant, reduce, tolerance,
+                            ("m_LocalScale.x", track.scales.Select(s => s.x).ToArray()),
+                            ("m_LocalScale.y", track.scales.Select(s => s.y).ToArray()),
+                            ("m_LocalScale.z", track.scales.Select(s => s.z).ToArray()));
                     }
                 }
 
                 foreach (BlendShapeTrack track in blendShapeTracks)
                 {
                     float[] values = track.weights.ToArray();
-                    if (entry.removeConstantCurves && IsConstant(values))
+                    if (removeConstant && IsConstant(values))
                     {
                         continue;
                     }
 
                     AnimationUtility.SetEditorCurve(clip,
                         EditorCurveBinding.FloatCurve(track.path, typeof(SkinnedMeshRenderer), track.propertyName),
-                        BuildLinearCurve(timeArray, values));
+                        BuildLinearCurve(timeArray, values, reduce, tolerance));
+                    curveCount++;
                 }
 
                 return clip;
             }
 
-            private static void SetVectorCurves(AnimationClip clip, string path, string property, float[] times,
-                IEnumerable<float> x, IEnumerable<float> y, IEnumerable<float> z, bool removeConstant)
-            {
-                SetCurveGroup(clip, path, times, removeConstant,
-                    ($"{property}.x", x.ToArray()),
-                    ($"{property}.y", y.ToArray()),
-                    ($"{property}.z", z.ToArray()));
-            }
-
             /// <summary>
             /// 1 つのプロパティ(位置/回転/スケール)を構成するチャンネルをまとめて設定する。
-            /// 「全チャンネルが変化なし」のときだけ、まとめて省略する。
+            /// 「全チャンネルが変化なし」のときだけ、まとめて省略する。書き込んだカーブ本数を返す。
             /// </summary>
-            private static void SetCurveGroup(AnimationClip clip, string path, float[] times, bool removeConstant,
+            private static int SetCurveGroup(AnimationClip clip, string path, float[] times,
+                bool removeConstant, bool reduce, float tolerance,
                 params (string property, float[] values)[] channels)
             {
                 if (removeConstant && channels.All(c => IsConstant(c.values)))
                 {
-                    return;
+                    return 0;
                 }
 
                 foreach ((string property, float[] values) in channels)
                 {
                     AnimationUtility.SetEditorCurve(clip,
                         EditorCurveBinding.FloatCurve(path, typeof(Transform), property),
-                        BuildLinearCurve(times, values));
+                        BuildLinearCurve(times, values, reduce, tolerance));
                 }
+                return channels.Length;
             }
 
             private static bool IsConstant(float[] values)
@@ -728,15 +799,31 @@ namespace YozoLab.FBXAnimationBaker
             /// 毎フレーム値を持つベイク済みカーブなので、補間は線形にしておく。
             /// Auto のままだとキー間でオーバーシュートし、元のモーションとずれる。
             /// </summary>
-            private static AnimationCurve BuildLinearCurve(float[] times, float[] values)
+            private static AnimationCurve BuildLinearCurve(float[] times, float[] values, bool reduce, float tolerance)
             {
-                var keys = new Keyframe[times.Length];
+                var keys = new List<Keyframe>(times.Length);
                 for (int i = 0; i < times.Length; i++)
                 {
-                    keys[i] = new Keyframe(times[i], values[i]);
+                    // 直前に残したキーと次のサンプルを結んだ直線上に乗るキーは落とす。
+                    // 毎フレームキーのままだと FBX が肥大化するため。
+                    if (reduce && i > 0 && i < times.Length - 1 && keys.Count > 0)
+                    {
+                        Keyframe last = keys[keys.Count - 1];
+                        float span = times[i + 1] - last.time;
+                        float expected = span > Mathf.Epsilon
+                            ? Mathf.Lerp(last.value, values[i + 1], (times[i] - last.time) / span)
+                            : last.value;
+
+                        if (Mathf.Abs(values[i] - expected) <= tolerance)
+                        {
+                            continue;
+                        }
+                    }
+
+                    keys.Add(new Keyframe(times[i], values[i]));
                 }
 
-                var curve = new AnimationCurve(keys);
+                var curve = new AnimationCurve(keys.ToArray());
                 for (int i = 0; i < curve.length; i++)
                 {
                     AnimationUtility.SetKeyLeftTangentMode(curve, i, AnimationUtility.TangentMode.Linear);

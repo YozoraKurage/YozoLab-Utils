@@ -2,7 +2,9 @@ using UnityEngine;
 using System;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Reflection;
+using System.Collections.Generic;
 
 namespace YozoLab.FBXAnimationBaker
 {
@@ -10,19 +12,31 @@ namespace YozoLab.FBXAnimationBaker
     /// Unity FBX Exporter (com.unity.formats.fbx) へのリフレクション橋渡し。
     ///
     /// asmdef から直接参照するとパッケージ未導入のプロジェクトでコンパイルが通らなくなるため、
-    /// アセンブリを実行時に探して呼び出す。エクスポーターのバージョン差でオプション型の
-    /// プロパティ名が異なることがあるので、設定は「あれば設定する」方式にしている。
+    /// アセンブリを実行時に探して呼び出す。
+    ///
+    /// 注意: ExportModelOptions を受け取る ExportObject のオーバーロードは、バージョンによっては
+    /// internal になっている。Public だけを探すとこのオーバーロードが見つからず、
+    /// 既定設定(= ASCII FBX、オプション無効)での書き出しになってしまうため、
+    /// NonPublic も含めて探索する。
     /// </summary>
     internal static class FbxExporterBridge
     {
         private const string ModelExporterTypeName = "UnityEditor.Formats.Fbx.Exporter.ModelExporter";
         private const string ExportOptionsTypeName = "UnityEditor.Formats.Fbx.Exporter.ExportModelOptions";
 
+        private const BindingFlags MemberFlags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+        private const BindingFlags StaticFlags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static;
+
+        /// <summary>バイナリ FBX のファイル先頭にあるマジック文字列。</summary>
+        private const string BinaryFbxMagic = "Kaydara FBX Binary";
+
         private static bool resolved;
         private static Type modelExporterType;
         private static Type exportOptionsType;
         private static MethodInfo exportWithOptions;
+        private static MethodInfo exportObjectsWithOptions;
         private static MethodInfo exportSimple;
+        private static bool loggedOptionWarning;
 
         /// <summary>FBX Exporter が利用可能か。GUI の警告表示にも使う。</summary>
         public static bool IsAvailable
@@ -30,17 +44,20 @@ namespace YozoLab.FBXAnimationBaker
             get
             {
                 Resolve();
-                return exportWithOptions != null || exportSimple != null;
+                return exportWithOptions != null || exportObjectsWithOptions != null || exportSimple != null;
             }
         }
 
-        /// <summary>ExportModelOptions が使えるか(使えない場合はエクスポーター既定設定での書き出しになる)。</summary>
+        /// <summary>
+        /// エクスポートオプション(バイナリ/ASCII、スキンメッシュアニメーションなど)を指定できるか。
+        /// false の場合は FBX Exporter 既定設定での書き出しになる。
+        /// </summary>
         public static bool SupportsExportOptions
         {
             get
             {
                 Resolve();
-                return exportWithOptions != null && exportOptionsType != null;
+                return exportOptionsType != null && (exportWithOptions != null || exportObjectsWithOptions != null);
             }
         }
 
@@ -50,7 +67,9 @@ namespace YozoLab.FBXAnimationBaker
             modelExporterType = null;
             exportOptionsType = null;
             exportWithOptions = null;
+            exportObjectsWithOptions = null;
             exportSimple = null;
+            loggedOptionWarning = false;
         }
 
         /// <summary>
@@ -58,7 +77,7 @@ namespace YozoLab.FBXAnimationBaker
         /// </summary>
         /// <param name="absoluteFilePath">出力先の絶対パス(.fbx)</param>
         /// <param name="target">エクスポート対象のヒエラルキールート</param>
-        /// <param name="ascii">ASCII FBX で書き出すか</param>
+        /// <param name="ascii">ASCII FBX で書き出すか(false ならバイナリ)</param>
         /// <param name="animateSkinnedMesh">ブレンドシェイプなどスキンメッシュのアニメーションを含めるか</param>
         public static bool Export(string absoluteFilePath, GameObject target, bool ascii, bool animateSkinnedMesh, out string error)
         {
@@ -80,10 +99,12 @@ namespace YozoLab.FBXAnimationBaker
             try
             {
                 object result;
-                if (exportWithOptions != null && exportOptionsType != null)
+                if (SupportsExportOptions)
                 {
                     object options = BuildExportOptions(ascii, animateSkinnedMesh);
-                    result = exportWithOptions.Invoke(null, new object[] { absoluteFilePath, target, options });
+                    result = exportWithOptions != null
+                        ? exportWithOptions.Invoke(null, new object[] { absoluteFilePath, target, options })
+                        : exportObjectsWithOptions.Invoke(null, new object[] { absoluteFilePath, new UnityEngine.Object[] { target }, options });
                 }
                 else
                 {
@@ -96,6 +117,7 @@ namespace YozoLab.FBXAnimationBaker
                     return false;
                 }
 
+                WarnIfFormatMismatch(absoluteFilePath, ascii);
                 return true;
             }
             catch (TargetInvocationException e)
@@ -110,55 +132,123 @@ namespace YozoLab.FBXAnimationBaker
             }
         }
 
-        private static object BuildExportOptions(bool ascii, bool animateSkinnedMesh)
+        /// <summary>
+        /// 書き出したファイルが要求した形式になっているか検証する。
+        /// エクスポーターのバージョン差でオプション名が変わっていると黙って既定形式になるため、
+        /// 気付けるようにログを出す。
+        /// </summary>
+        private static void WarnIfFormatMismatch(string absoluteFilePath, bool ascii)
         {
-            object options = Activator.CreateInstance(exportOptionsType);
-
-            // モデルとアニメーションの両方を含める。プロパティ名はバージョンによって異なる。
-            if (!TrySetEnum(options, "ModelAnimIncludeOption", "ModelAndAnim"))
+            bool? isBinary = IsBinaryFbx(absoluteFilePath);
+            if (isBinary == null || isBinary.Value == !ascii)
             {
-                TrySetEnum(options, "ExportModel", "ModelAndAnim");
+                return;
             }
 
-            TrySetEnum(options, "ExportFormat", ascii ? "ASCII" : "Binary");
+            Debug.LogWarning($"[FBX Animation Baker] Requested {(ascii ? "ASCII" : "Binary")} FBX but the exporter wrote " +
+                             $"{(isBinary.Value ? "Binary" : "ASCII")}: {absoluteFilePath}" +
+                             (SupportsExportOptions
+                                 ? " (the installed FBX Exporter may use different export option names)"
+                                 : " (this FBX Exporter version does not expose export options, so its default format is used)"));
+        }
+
+        private static bool? IsBinaryFbx(string absoluteFilePath)
+        {
+            try
+            {
+                using (var stream = new FileStream(absoluteFilePath, FileMode.Open, FileAccess.Read))
+                {
+                    var header = new byte[BinaryFbxMagic.Length];
+                    int read = stream.Read(header, 0, header.Length);
+                    if (read < header.Length)
+                    {
+                        return null;
+                    }
+                    return Encoding.ASCII.GetString(header) == BinaryFbxMagic;
+                }
+            }
+            catch (IOException)
+            {
+                return null;
+            }
+        }
+
+        private static object BuildExportOptions(bool ascii, bool animateSkinnedMesh)
+        {
+            object options = Activator.CreateInstance(exportOptionsType, true);
+            var unapplied = new List<string>();
+
+            // プロパティ名・フィールド名はエクスポーターのバージョンによって異なるため候補を順に試す。
+            if (!TrySetEnum(options, new[] { "ModelAnimIncludeOption", "ExportModel", "modelAnimIncludeOption" }, "ModelAndAnim"))
+            {
+                unapplied.Add("ModelAnimIncludeOption");
+            }
+
+            if (!TrySetEnum(options, new[] { "ExportFormat", "exportFormat" }, ascii ? "ASCII" : "Binary"))
+            {
+                unapplied.Add("ExportFormat");
+            }
 
             // ルートの位置をそのまま保つ(LocalCentered だとルートモーションの原点がずれる)。
-            TrySetEnum(options, "ObjectPosition", "WorldAbsolute");
+            TrySetEnum(options, new[] { "ObjectPosition", "objectPosition" }, "WorldAbsolute");
 
-            TrySetBool(options, "AnimateSkinnedMesh", animateSkinnedMesh);
-            TrySetBool(options, "ExportUnrendered", true);
-            TrySetBool(options, "PreserveImportSettings", true);
+            TrySetBool(options, new[] { "AnimateSkinnedMesh", "animateSkinnedMesh" }, animateSkinnedMesh);
+            TrySetBool(options, new[] { "ExportUnrendered", "exportUnrendered" }, true);
+            TrySetBool(options, new[] { "PreserveImportSettings", "preserveImportSettings" }, true);
+            TrySetBool(options, new[] { "EmbedTextures", "embedTextures" }, false);
+
+            if (unapplied.Count > 0 && !loggedOptionWarning)
+            {
+                loggedOptionWarning = true;
+                Debug.LogWarning($"[FBX Animation Baker] These export options could not be applied to {exportOptionsType.FullName}: " +
+                                 $"{string.Join(", ", unapplied)}. The exporter default will be used instead.");
+            }
 
             return options;
         }
 
-        private static bool TrySetEnum(object target, string propertyName, string valueName)
+        private static bool TrySetEnum(object target, string[] memberNames, string valueName)
         {
-            PropertyInfo property = exportOptionsType.GetProperty(propertyName, BindingFlags.Public | BindingFlags.Instance);
-            if (property == null || !property.CanWrite || !property.PropertyType.IsEnum)
+            foreach (string memberName in memberNames)
             {
-                return false;
-            }
+                PropertyInfo property = exportOptionsType.GetProperty(memberName, MemberFlags);
+                if (property != null && property.CanWrite && property.PropertyType.IsEnum
+                    && Enum.GetNames(property.PropertyType).Contains(valueName))
+                {
+                    property.SetValue(target, Enum.Parse(property.PropertyType, valueName));
+                    return true;
+                }
 
-            if (!Enum.GetNames(property.PropertyType).Contains(valueName))
-            {
-                return false;
+                FieldInfo field = exportOptionsType.GetField(memberName, MemberFlags);
+                if (field != null && field.FieldType.IsEnum
+                    && Enum.GetNames(field.FieldType).Contains(valueName))
+                {
+                    field.SetValue(target, Enum.Parse(field.FieldType, valueName));
+                    return true;
+                }
             }
-
-            property.SetValue(target, Enum.Parse(property.PropertyType, valueName));
-            return true;
+            return false;
         }
 
-        private static bool TrySetBool(object target, string propertyName, bool value)
+        private static bool TrySetBool(object target, string[] memberNames, bool value)
         {
-            PropertyInfo property = exportOptionsType.GetProperty(propertyName, BindingFlags.Public | BindingFlags.Instance);
-            if (property == null || !property.CanWrite || property.PropertyType != typeof(bool))
+            foreach (string memberName in memberNames)
             {
-                return false;
-            }
+                PropertyInfo property = exportOptionsType.GetProperty(memberName, MemberFlags);
+                if (property != null && property.CanWrite && property.PropertyType == typeof(bool))
+                {
+                    property.SetValue(target, value);
+                    return true;
+                }
 
-            property.SetValue(target, value);
-            return true;
+                FieldInfo field = exportOptionsType.GetField(memberName, MemberFlags);
+                if (field != null && field.FieldType == typeof(bool))
+                {
+                    field.SetValue(target, value);
+                    return true;
+                }
+            }
+            return false;
         }
 
         private static void Resolve()
@@ -191,32 +281,34 @@ namespace YozoLab.FBXAnimationBaker
                 return;
             }
 
-            foreach (MethodInfo method in modelExporterType.GetMethods(BindingFlags.Public | BindingFlags.Static))
+            foreach (MethodInfo method in modelExporterType.GetMethods(StaticFlags))
             {
-                if (method.Name != "ExportObject")
-                {
-                    continue;
-                }
-
                 ParameterInfo[] parameters = method.GetParameters();
                 if (parameters.Length < 2 || parameters[0].ParameterType != typeof(string))
                 {
                     continue;
                 }
-                if (!parameters[1].ParameterType.IsAssignableFrom(typeof(GameObject)))
-                {
-                    continue;
-                }
 
-                if (parameters.Length == 2)
-                {
-                    exportSimple = method;
-                }
-                else if (parameters.Length == 3
+                bool takesSingleObject = parameters[1].ParameterType.IsAssignableFrom(typeof(GameObject));
+                bool takesObjectArray = parameters[1].ParameterType == typeof(UnityEngine.Object[]);
+                bool takesOptions = parameters.Length == 3
                     && exportOptionsType != null
-                    && parameters[2].ParameterType.IsAssignableFrom(exportOptionsType))
+                    && parameters[2].ParameterType.IsAssignableFrom(exportOptionsType);
+
+                if (method.Name == "ExportObject" && takesSingleObject)
                 {
-                    exportWithOptions = method;
+                    if (parameters.Length == 2)
+                    {
+                        exportSimple = method;
+                    }
+                    else if (takesOptions)
+                    {
+                        exportWithOptions = method;
+                    }
+                }
+                else if (method.Name == "ExportObjects" && takesObjectArray && takesOptions)
+                {
+                    exportObjectsWithOptions = method;
                 }
             }
         }

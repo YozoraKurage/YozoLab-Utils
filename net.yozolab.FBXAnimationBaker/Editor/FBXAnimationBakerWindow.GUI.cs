@@ -229,6 +229,19 @@ namespace YozoLab.FBXAnimationBaker
             EditorGUILayout.PropertyField(entryProp.FindPropertyRelative("outputFileName"), new GUIContent("Output File Name",
                 L10n.T("拡張子なしのファイル名(空ならクリップ名。複数クリップならクリップ名を後置)",
                        "File name without extension (empty = clip name; the clip name is appended when there are multiple clips)")));
+            SerializedProperty exportContentProp = entryProp.FindPropertyRelative("exportContent");
+            EditorGUILayout.PropertyField(exportContentProp, new GUIContent("Export Content",
+                L10n.T("生成FBXに含めるもの。Skeleton Onlyはメッシュ/レンダラーを外し、アニメーションするノード階層だけにします",
+                       "What to include in the generated FBX. Skeleton Only strips meshes/renderers and keeps only the animated node hierarchy")));
+
+            if (exportContentProp.enumValueIndex == (int)BakeExportContent.ModelAndAnimation)
+            {
+                EditorGUILayout.HelpBox(L10n.T(
+                    "モデル込みで書き出すため、メッシュやブレンドシェイプの分だけFBXが大きくなります。アニメーションだけが欲しい場合は Skeleton Only を選んでください。",
+                    "Exporting the model includes meshes and blend shapes, which makes the FBX large. Choose Skeleton Only if you only need the animation."),
+                    MessageType.Info);
+            }
+
             EditorGUILayout.PropertyField(entryProp.FindPropertyRelative("importAnimationType"), new GUIContent("Import Animation Type",
                 L10n.T("生成したFBXを読み込み直すときのAnimation Type", "Animation Type applied when the generated FBX is imported back")));
             EditorGUILayout.PropertyField(entryProp.FindPropertyRelative("saveBakedClipAsset"), new GUIContent("Save Baked .anim",
@@ -249,7 +262,18 @@ namespace YozoLab.FBXAnimationBaker
             EditorGUILayout.PropertyField(entryProp.FindPropertyRelative("bakeBlendShapes"), new GUIContent("Bake BlendShapes",
                 L10n.T("クリップが動かすブレンドシェイプもベイクする", "Bake blend shape weights driven by the clip")));
             EditorGUILayout.PropertyField(entryProp.FindPropertyRelative("removeConstantCurves"), new GUIContent("Remove Constant Curves",
-                L10n.T("値が変化しないカーブを省いてFBXを軽くする", "Drop curves whose value never changes")));
+                L10n.T("値が変化しないカーブを省いてFBXを軽くする(1Fポーズなど全カーブが定数の場合は自動的に無効化されます)",
+                       "Drop curves whose value never changes (automatically disabled when every curve is constant, e.g. a 1-frame pose)")));
+
+            SerializedProperty reductionProp = entryProp.FindPropertyRelative("keyframeReduction");
+            EditorGUILayout.PropertyField(reductionProp, new GUIContent("Keyframe Reduction",
+                L10n.T("直線上に乗るキーを間引いてFBXを軽くする", "Remove keys that sit on a straight line between their neighbours")));
+            using (new EditorGUI.DisabledScope(!reductionProp.boolValue))
+            {
+                EditorGUILayout.PropertyField(entryProp.FindPropertyRelative("reductionTolerance"), new GUIContent("Reduction Tolerance",
+                    L10n.T("間引きの許容誤差。大きいほど軽くなりますが精度は落ちます",
+                           "Allowed error for keyframe reduction. Larger = smaller file, less accurate")));
+            }
 
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("Avatar", EditorStyles.boldLabel);
@@ -385,8 +409,11 @@ namespace YozoLab.FBXAnimationBaker
             entryProp.FindPropertyRelative("bakeScale").boolValue = false;
             entryProp.FindPropertyRelative("bakeBlendShapes").boolValue = false;
             entryProp.FindPropertyRelative("removeConstantCurves").boolValue = true;
-            entryProp.FindPropertyRelative("saveBakedClipAsset").boolValue = false;
+            entryProp.FindPropertyRelative("keyframeReduction").boolValue = true;
+            entryProp.FindPropertyRelative("reductionTolerance").floatValue = 0.0001f;
+            entryProp.FindPropertyRelative("saveBakedClipAsset").boolValue = true;
             entryProp.FindPropertyRelative("exportAscii").boolValue = false;
+            entryProp.FindPropertyRelative("exportContent").enumValueIndex = (int)BakeExportContent.ModelAndAnimation;
             entryProp.FindPropertyRelative("importAnimationType").enumValueIndex = (int)BakedFbxAnimationType.Generic;
 
             SerializedProperty clipsProp = entryProp.FindPropertyRelative("clips");

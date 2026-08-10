@@ -43,6 +43,17 @@ namespace YozoLab.FBXAnimationBaker
     }
 
     /// <summary>
+    /// 生成 FBX に何を含めるか。
+    /// ModelAndAnimation = メッシュ込みのモデル + アニメーション。
+    /// SkeletonOnly      = レンダラー/メッシュを外し、アニメーションするノード階層だけを含める(ファイルが劇的に小さい)。
+    /// </summary>
+    public enum BakeExportContent
+    {
+        ModelAndAnimation = 0,
+        SkeletonOnly = 1,
+    }
+
+    /// <summary>
     /// 1 エントリ = 「1 つの FBX に対して、指定した Humanoid AnimationClip 群を
     /// Transform ベイク済みで同梱した FBX を出力する」単位。
     /// </summary>
@@ -88,8 +99,17 @@ namespace YozoLab.FBXAnimationBaker
         [Tooltip("Drop curves whose value never changes over the whole clip (keeps the FBX small)")]
         public bool removeConstantCurves = true;
 
+        [Tooltip("Remove keys that sit on a straight line between their neighbours. Greatly reduces the FBX size of per-frame baked curves")]
+        public bool keyframeReduction = true;
+
+        [Tooltip("Allowed error for keyframe reduction. Larger = smaller file, less accurate")]
+        public float reductionTolerance = 0.0001f;
+
+        [Tooltip("What to include in the generated FBX. Skeleton Only strips meshes/renderers and keeps only the animated node hierarchy")]
+        public BakeExportContent exportContent = BakeExportContent.ModelAndAnimation;
+
         [Tooltip("Also save the baked Transform clip as a .anim asset next to the generated FBX")]
-        public bool saveBakedClipAsset = false;
+        public bool saveBakedClipAsset = true;
 
         [Tooltip("Animation Type applied to the generated FBX when it is imported back into the project")]
         public BakedFbxAnimationType importAnimationType = BakedFbxAnimationType.Generic;
