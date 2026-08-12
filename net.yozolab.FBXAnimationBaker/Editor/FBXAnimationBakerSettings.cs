@@ -96,6 +96,9 @@ namespace YozoLab.FBXAnimationBaker
         [Tooltip("Bake SkinnedMeshRenderer blend shape weights driven by the clip")]
         public bool bakeBlendShapes = false;
 
+        [Tooltip("Strip blend shape data from the exported meshes. Blend shapes usually dominate the FBX size. Ignored when Bake BlendShapes is enabled")]
+        public bool excludeBlendShapes = false;
+
         [Tooltip("Drop curves whose value never changes over the whole clip (keeps the FBX small)")]
         public bool removeConstantCurves = true;
 

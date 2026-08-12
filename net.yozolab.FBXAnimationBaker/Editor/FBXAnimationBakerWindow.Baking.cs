@@ -157,6 +157,7 @@ namespace YozoLab.FBXAnimationBaker
             GameObject instance = null;
             AnimationClip bakedClip = null;
             AnimationClip legacyClip = null;
+            List<Mesh> temporaryMeshes = null;
             bool animationModeStarted = false;
 
             try
@@ -271,6 +272,18 @@ namespace YozoLab.FBXAnimationBaker
                     StripRenderers(instance, entry.bakeBlendShapes);
                 }
 
+                if (entry.excludeBlendShapes)
+                {
+                    if (entry.bakeBlendShapes)
+                    {
+                        Debug.LogWarning($"{LogPrefix} 'Exclude BlendShapes' is ignored because 'Bake BlendShapes' is enabled: {GetEntryDisplayName(entry)}");
+                    }
+                    else
+                    {
+                        temporaryMeshes = StripBlendShapes(instance);
+                    }
+                }
+
                 legacyClip = new AnimationClip { name = outputName };
                 EditorUtility.CopySerialized(bakedClip, legacyClip);
                 legacyClip.name = outputName;
@@ -322,7 +335,86 @@ namespace YozoLab.FBXAnimationBaker
                 {
                     UnityEngine.Object.DestroyImmediate(legacyClip);
                 }
+                if (temporaryMeshes != null)
+                {
+                    foreach (Mesh mesh in temporaryMeshes)
+                    {
+                        UnityEngine.Object.DestroyImmediate(mesh);
+                    }
+                }
             }
+        }
+
+        /// <summary>
+        /// エクスポート対象のメッシュからブレンドシェイプを取り除く。
+        ///
+        /// ブレンドシェイプはメッシュ側のデータなので、カーブをベイクしなくても
+        /// FBX には常に含まれてしまう(そして容量の大半を占める)。
+        /// ここでブレンドシェイプ抜きのメッシュを作って差し替える。
+        /// 返した一時メッシュは呼び出し側で破棄すること。
+        /// </summary>
+        private static List<Mesh> StripBlendShapes(GameObject instance)
+        {
+            var temporaryMeshes = new List<Mesh>();
+
+            foreach (SkinnedMeshRenderer renderer in instance.GetComponentsInChildren<SkinnedMeshRenderer>(true))
+            {
+                Mesh mesh = renderer.sharedMesh;
+                if (mesh == null || mesh.blendShapeCount == 0)
+                {
+                    continue;
+                }
+
+                Mesh stripped = CreateMeshWithoutBlendShapes(mesh);
+                renderer.sharedMesh = stripped;
+                temporaryMeshes.Add(stripped);
+            }
+
+            return temporaryMeshes;
+        }
+
+        /// <summary>ブレンドシェイプ以外のメッシュデータを複製した新しいメッシュを返す。</summary>
+        private static Mesh CreateMeshWithoutBlendShapes(Mesh source)
+        {
+            var copy = new Mesh
+            {
+                name = source.name,
+                indexFormat = source.indexFormat,
+            };
+
+            copy.vertices = source.vertices;
+            copy.normals = source.normals;
+            copy.tangents = source.tangents;
+            copy.colors32 = source.colors32;
+            copy.uv = source.uv;
+            copy.uv2 = source.uv2;
+            copy.uv3 = source.uv3;
+            copy.uv4 = source.uv4;
+            copy.uv5 = source.uv5;
+            copy.uv6 = source.uv6;
+            copy.uv7 = source.uv7;
+            copy.uv8 = source.uv8;
+            copy.bindposes = source.bindposes;
+
+            // 4 影響を超えるスキニングを落とさないよう、可能なら可変長のボーンウェイトを使う
+            var bonesPerVertex = source.GetBonesPerVertex();
+            if (bonesPerVertex.Length > 0)
+            {
+                copy.SetBoneWeights(bonesPerVertex, source.GetAllBoneWeights());
+            }
+            else
+            {
+                copy.boneWeights = source.boneWeights;
+            }
+
+            copy.subMeshCount = source.subMeshCount;
+            for (int i = 0; i < source.subMeshCount; i++)
+            {
+                copy.SetIndices(source.GetIndices(i), source.GetTopology(i), i, false);
+            }
+
+            copy.RecalculateBounds();
+            return copy;
         }
 
         /// <summary>クリップ内の全キー数。ベイク結果のサイズ感をログに出すために使う。</summary>
@@ -550,6 +642,7 @@ namespace YozoLab.FBXAnimationBaker
             sb.Append(entry.bakeRootMotion).Append('|');
             sb.Append(entry.bakeScale).Append('|');
             sb.Append(entry.bakeBlendShapes).Append('|');
+            sb.Append(entry.excludeBlendShapes).Append('|');
             sb.Append(entry.removeConstantCurves).Append('|');
             sb.Append(entry.keyframeReduction).Append('|');
             sb.Append(entry.reductionTolerance).Append('|');

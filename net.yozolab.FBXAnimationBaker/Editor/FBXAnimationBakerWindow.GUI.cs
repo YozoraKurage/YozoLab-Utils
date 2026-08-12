@@ -259,8 +259,16 @@ namespace YozoLab.FBXAnimationBaker
                 L10n.T("ルートモーションをルートTransformにベイクする", "Bake root motion into the root Transform")));
             EditorGUILayout.PropertyField(entryProp.FindPropertyRelative("bakeScale"), new GUIContent("Bake Scale",
                 L10n.T("スケールカーブもベイクする", "Bake Transform scale curves as well")));
-            EditorGUILayout.PropertyField(entryProp.FindPropertyRelative("bakeBlendShapes"), new GUIContent("Bake BlendShapes",
+            SerializedProperty bakeBlendShapesProp = entryProp.FindPropertyRelative("bakeBlendShapes");
+            EditorGUILayout.PropertyField(bakeBlendShapesProp, new GUIContent("Bake BlendShapes",
                 L10n.T("クリップが動かすブレンドシェイプもベイクする", "Bake blend shape weights driven by the clip")));
+
+            using (new EditorGUI.DisabledScope(bakeBlendShapesProp.boolValue))
+            {
+                EditorGUILayout.PropertyField(entryProp.FindPropertyRelative("excludeBlendShapes"), new GUIContent("Exclude BlendShapes",
+                    L10n.T("メッシュからブレンドシェイプを取り除いて書き出す(FBXの容量削減に一番効きます)",
+                           "Strip blend shape data from the exported meshes (usually the biggest size win)")));
+            }
             EditorGUILayout.PropertyField(entryProp.FindPropertyRelative("removeConstantCurves"), new GUIContent("Remove Constant Curves",
                 L10n.T("値が変化しないカーブを省いてFBXを軽くする(1Fポーズなど全カーブが定数の場合は自動的に無効化されます)",
                        "Drop curves whose value never changes (automatically disabled when every curve is constant, e.g. a 1-frame pose)")));
@@ -408,6 +416,7 @@ namespace YozoLab.FBXAnimationBaker
             entryProp.FindPropertyRelative("bakeRootMotion").boolValue = true;
             entryProp.FindPropertyRelative("bakeScale").boolValue = false;
             entryProp.FindPropertyRelative("bakeBlendShapes").boolValue = false;
+            entryProp.FindPropertyRelative("excludeBlendShapes").boolValue = false;
             entryProp.FindPropertyRelative("removeConstantCurves").boolValue = true;
             entryProp.FindPropertyRelative("keyframeReduction").boolValue = true;
             entryProp.FindPropertyRelative("reductionTolerance").floatValue = 0.0001f;

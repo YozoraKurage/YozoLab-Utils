@@ -42,6 +42,7 @@ Generic な Transform カーブへ変換したうえで FBX に焼き込みま�
 | Bake Root Motion | ルートモーションをルート Transform に焼き込む |
 | Bake Scale | スケールカーブもベイクする（既定 OFF） |
 | Bake BlendShapes | クリップが動かすブレンドシェイプもベイクする |
+| Exclude BlendShapes | メッシュからブレンドシェイプデータを取り除いて書き出す。`Bake BlendShapes` が ON のときは無視される |
 | Remove Constant Curves | 値が変化しないカーブを省いて FBX を軽くする。1F ポーズのように全カーブが定数の場合は自動的に無効化される |
 | Keyframe Reduction | 直線上に乗るキーを間引いて FBX を軽くする（既定 ON） |
 | Reduction Tolerance | 間引きの許容誤差。大きいほど軽く、精度は落ちる |
@@ -62,6 +63,10 @@ Source FBX / クリップの依存ハッシュとエントリ設定の署名を�
 - 出力される Transform カーブは毎フレームのベイク結果で、補間は線形です。
 
 ## FBX が大きいとき
+
+ブレンドシェイプはメッシュ側のデータなので、`Bake BlendShapes` を OFF にしても FBX には入ります。
+モデルは含めたいがブレンドシェイプは要らない場合は `Exclude BlendShapes` を ON にしてください
+（ブレンドシェイプ抜きのメッシュを一時的に作って差し替えます。元のアセットは変更しません）。
 
 FBX の容量はほとんどがメッシュとブレンドシェイプです。アニメーションだけが欲しい場合は
 `Export Content` を `Skeleton Only` にしてください（ボーン階層とカーブだけになります）。
