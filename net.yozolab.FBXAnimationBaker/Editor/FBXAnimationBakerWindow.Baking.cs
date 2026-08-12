@@ -96,6 +96,8 @@ namespace YozoLab.FBXAnimationBaker
             int skippedCount = 0;
             int failedCount = 0;
 
+            var generatedPaths = new List<(string path, AnimationBakeEntry entry)>();
+
             // 1 本ごとにインポートを走らせると待ち時間が積み上がるため、
             // 生成中はインポートを止めておき、最後にまとめて 1 回で処理させる。
             AssetDatabase.StartAssetEditing();
@@ -135,6 +137,7 @@ namespace YozoLab.FBXAnimationBaker
                     if (BakeSingleClip(entry, clip, outputFolder, outputName, outputAssetPath))
                     {
                         UpdateBakeCache(outputAssetPath, sourceHash, clipHash, entrySignature);
+                        generatedPaths.Add((outputAssetPath, entry));
                         bakedCount++;
                         Debug.Log($"{LogPrefix} Baked: {outputAssetPath}");
                     }
@@ -147,6 +150,8 @@ namespace YozoLab.FBXAnimationBaker
                 EditorUtility.DisplayProgressBar("FBX Animation Baker", "Importing generated FBX...", 1f);
                 AssetDatabase.StopAssetEditing();
                 assetEditingStarted = false;
+
+                ApplyImportSettings(generatedPaths);
 
                 AssetDatabase.SaveAssets();
                 AssetDatabase.Refresh();
@@ -322,9 +327,8 @@ namespace YozoLab.FBXAnimationBaker
                     return false;
                 }
 
-                // 生成 → ImportAsset → 設定変更 → SaveAndReimport だと同じ FBX を 2 回
-                // インポートすることになる。設定を先に登録し、初回インポートで当てる。
-                FBXAnimationBakerPostprocessor.Register(outputAssetPath, BuildPendingImport(entry));
+                // 実際のインポートは StartAssetEditing 中なので、ここでは予約だけされる。
+                // インポート設定は全件書き出したあとに ApplyImportSettings でまとめて当てる。
                 AssetDatabase.ImportAsset(outputAssetPath, ImportAssetOptions.ForceUpdate);
 
                 long fileSizeKb = new FileInfo(absolutePath).Length / 1024;
@@ -495,19 +499,174 @@ namespace YozoLab.FBXAnimationBaker
             AssetDatabase.CreateAsset(newClip, clipAssetPath);
         }
 
-        /// <summary>生成 FBX の初回インポートに適用する設定を組み立てる。</summary>
-        private static FBXAnimationBakerPostprocessor.PendingImport BuildPendingImport(AnimationBakeEntry entry)
+        /// <summary>
+        /// 生成した FBX のインポート設定をまとめて適用する。
+        ///
+        /// AssetPostprocessor を使えば初回インポートで設定を当てられるが、
+        /// ポストプロセッサを持つアセンブリが変わるたびに Unity がプロジェクト内の
+        /// 全モデルを再インポートしてしまうため、この方式は採らない。
+        /// 代わりに、設定が実際に変わるものだけを 1 バッチで再インポートする
+        /// (2 回目以降のベイクでは .meta に設定が残っているので再インポートは走らない)。
+        /// </summary>
+        private static void ApplyImportSettings(List<(string path, AnimationBakeEntry entry)> generatedPaths)
         {
-            bool skeletonOnly = entry.exportContent == BakeExportContent.SkeletonOnly;
-
-            return new FBXAnimationBakerPostprocessor.PendingImport
+            if (generatedPaths.Count == 0)
             {
-                animationType = entry.importAnimationType,
-                leanImport = entry.fastImport,
-                // 書き出し側で外したものは読み込む必要がない
-                importBlendShapes = !skeletonOnly && !entry.excludeBlendShapes,
-                importTangents = !skeletonOnly,
-            };
+                return;
+            }
+
+            var pendingReimport = new List<ModelImporter>();
+
+            foreach ((string path, AnimationBakeEntry entry) in generatedPaths)
+            {
+                ModelImporter importer = AssetImporter.GetAtPath(path) as ModelImporter;
+                if (importer == null)
+                {
+                    Debug.LogWarning($"{LogPrefix} Failed to get ModelImporter for the generated FBX: {path}");
+                    continue;
+                }
+
+                if (ConfigureImporter(importer, entry))
+                {
+                    pendingReimport.Add(importer);
+                }
+            }
+
+            if (pendingReimport.Count == 0)
+            {
+                return;
+            }
+
+            EditorUtility.DisplayProgressBar("FBX Animation Baker",
+                $"Applying import settings ({pendingReimport.Count})...", 1f);
+
+            AssetDatabase.StartAssetEditing();
+            try
+            {
+                foreach (ModelImporter importer in pendingReimport)
+                {
+                    importer.SaveAndReimport();
+                }
+            }
+            finally
+            {
+                AssetDatabase.StopAssetEditing();
+            }
+        }
+
+        /// <summary>
+        /// エントリの設定を ModelImporter へ反映する。実際に変更があったときだけ true を返す。
+        /// 変更がなければ再インポートを走らせないため、再ベイク時のインポートは 1 回で済む。
+        /// </summary>
+        private static bool ConfigureImporter(ModelImporter importer, AnimationBakeEntry entry)
+        {
+            bool changed = false;
+
+            if (entry.importAnimationType != BakedFbxAnimationType.None)
+            {
+                ModelImporterAnimationType animationType;
+                switch (entry.importAnimationType)
+                {
+                    case BakedFbxAnimationType.Legacy:
+                        animationType = ModelImporterAnimationType.Legacy;
+                        break;
+                    case BakedFbxAnimationType.Humanoid:
+                        animationType = ModelImporterAnimationType.Human;
+                        break;
+                    default:
+                        animationType = ModelImporterAnimationType.Generic;
+                        break;
+                }
+
+                if (importer.animationType != animationType)
+                {
+                    importer.animationType = animationType;
+                    changed = true;
+                }
+
+                if (animationType == ModelImporterAnimationType.Human
+                    && importer.avatarSetup != ModelImporterAvatarSetup.CreateFromThisModel)
+                {
+                    importer.avatarSetup = ModelImporterAvatarSetup.CreateFromThisModel;
+                    changed = true;
+                }
+
+                if (!importer.importAnimation)
+                {
+                    importer.importAnimation = true;
+                    changed = true;
+                }
+            }
+
+            if (!entry.fastImport)
+            {
+                return changed;
+            }
+
+            bool skeletonOnly = entry.exportContent == BakeExportContent.SkeletonOnly;
+            // 書き出し側で外したものは読み込む必要がない
+            bool importBlendShapes = !skeletonOnly && !entry.excludeBlendShapes;
+            ModelImporterTangents tangents = skeletonOnly
+                ? ModelImporterTangents.None
+                : ModelImporterTangents.CalculateMikk;
+
+            // 既にベイク済みのカーブなので、インポート時の再サンプリング/圧縮は
+            // 時間がかかるだけで得がない(キーもずれる)。
+            if (importer.resampleCurves)
+            {
+                importer.resampleCurves = false;
+                changed = true;
+            }
+            if (importer.animationCompression != ModelImporterAnimationCompression.Off)
+            {
+                importer.animationCompression = ModelImporterAnimationCompression.Off;
+                changed = true;
+            }
+            if (importer.importBlendShapes != importBlendShapes)
+            {
+                importer.importBlendShapes = importBlendShapes;
+                changed = true;
+            }
+            if (importer.importTangents != tangents)
+            {
+                importer.importTangents = tangents;
+                changed = true;
+            }
+
+            // アニメーション用の FBX では使わないものを切る。
+            // マテリアル生成はテクスチャ探索を伴うため、体感で一番効く。
+            if (importer.materialImportMode != ModelImporterMaterialImportMode.None)
+            {
+                importer.materialImportMode = ModelImporterMaterialImportMode.None;
+                changed = true;
+            }
+            if (importer.importCameras)
+            {
+                importer.importCameras = false;
+                changed = true;
+            }
+            if (importer.importLights)
+            {
+                importer.importLights = false;
+                changed = true;
+            }
+            if (importer.importVisibility)
+            {
+                importer.importVisibility = false;
+                changed = true;
+            }
+            if (importer.importConstraints)
+            {
+                importer.importConstraints = false;
+                changed = true;
+            }
+            if (importer.isReadable)
+            {
+                importer.isReadable = false;
+                changed = true;
+            }
+
+            return changed;
         }
 
         private static float ResolveFrameRate(AnimationBakeEntry entry, AnimationClip clip)
