@@ -27,10 +27,13 @@ namespace YozoLab.FBXAnimationBaker
         /// ベイク結果が変わる修正を入れたら上げる版数。差分キャッシュの署名に含めており、
         /// パッケージ更新後は設定を触っていなくても Execute で作り直される。
         /// </summary>
-        private const string BakerVersion = "6";
+        private const string BakerVersion = "7";
 
         /// <summary>1 チャンネルが「変化なし」とみなされる振れ幅のしきい値。</summary>
         private const float ConstantEpsilon = 1e-5f;
+
+        /// <summary>回転が「変化なし」とみなされる角度差(度)のしきい値。</summary>
+        private const float ConstantAngleEpsilon = 0.01f;
 
         /// <param name="ignoreCache">true のとき差分キャッシュを無視し、全エントリを強制的に再ベイクする。</param>
         private void ProcessBakeEntries(bool ignoreCache = false)
@@ -197,8 +200,9 @@ namespace YozoLab.FBXAnimationBaker
                 }
 
                 instance.name = outputName;
-                instance.transform.position = Vector3.zero;
-                instance.transform.rotation = Quaternion.identity;
+
+                // ルートの位置/回転は触らない。モデルによっては軸変換の補正がルートに
+                // 入っており、identity へ潰すと元 FBX と姿勢が変わってしまう。
 
                 Animator animator = instance.GetComponent<Animator>();
                 if (animator == null)
@@ -289,7 +293,7 @@ namespace YozoLab.FBXAnimationBaker
                 // legacy の Animation コンポーネント 1 本に寄せる。
                 UnityEngine.Object.DestroyImmediate(animator);
 
-                samples.ApplyFirstFrame();
+                samples.ApplySourcePose();
 
                 if (entry.exportContent == BakeExportContent.SkeletonOnly)
                 {
@@ -337,9 +341,8 @@ namespace YozoLab.FBXAnimationBaker
                 samples.GetExportedPoseDeviation(out float poseDeviation, out string worstBonePath);
                 Debug.Log($"{LogPrefix} \"{outputName}\": {curveCount} curve(s), {CountKeys(bakedClip)} key(s), " +
                           $"{frameCount} sampled frame(s), {fileSizeKb} KB\n" +
-                          $"  exported pose vs source pose: max {poseDeviation:F1} deg at \"{worstBonePath}\" " +
-                          $"(the exporter writes the pose at export time as the skin bind pose, " +
-                          $"so a large value here means the skinning is written off its bind pose)");
+                          $"  the FBX is written in the source pose; frame 0 differs from it by max " +
+                          $"{poseDeviation:F1} deg at \"{worstBonePath}\" (that difference lives in the curves)");
                 return true;
             }
             catch (Exception e)
@@ -871,9 +874,8 @@ namespace YozoLab.FBXAnimationBaker
             public float LastTime => times.Count > 0 ? times[times.Count - 1] : 0f;
 
             /// <summary>
-            /// 書き出す姿勢(0 フレーム目)が、元 FBX の姿勢からどれだけ離れているかを返す。
-            /// Unity FBX Exporter は書き出し時点のボーン姿勢をスキンのバインドポーズとして
-            /// 書き出すため、ここが大きいほどメッシュの変形が壊れやすい。
+            /// クリップの 0 フレーム目が、元 FBX の姿勢からどれだけ離れているかを返す。
+            /// 書き出す姿勢は常に元 FBX の姿勢なので、この差はカーブ側が担う。
             /// </summary>
             public void GetExportedPoseDeviation(out float maxAngle, out string worstPath)
             {
@@ -907,9 +909,10 @@ namespace YozoLab.FBXAnimationBaker
                         target = t,
                         path = AnimationUtility.CalculateTransformPath(t, root),
 
-                        // 診断用: サンプリング開始前(= 元 FBX)の姿勢
-                        sourceRotation = t.localRotation,
+                        // サンプリング開始前(= 元 FBX)の姿勢。書き出す姿勢はこれに戻す
                         sourcePosition = t.localPosition,
+                        sourceRotation = t.localRotation,
+                        sourceScale = t.localScale,
                     });
                 }
 
@@ -934,6 +937,7 @@ namespace YozoLab.FBXAnimationBaker
                             index = i,
                             path = AnimationUtility.CalculateTransformPath(renderer.transform, root),
                             propertyName = $"blendShape.{mesh.GetBlendShapeName(i)}",
+                            sourceWeight = renderer.GetBlendShapeWeight(i),
                         });
                     }
                 }
@@ -971,31 +975,34 @@ namespace YozoLab.FBXAnimationBaker
             }
 
             /// <summary>
-            /// 記録した先頭フレームの姿勢をシーン上のインスタンスへ書き戻す。
-            /// 定数カーブを削除した Transform は FBX 側でこの姿勢のまま固定されるため、
-            /// エクスポート直前に 0 フレーム目へ戻しておく必要がある。
+            /// 元 FBX の姿勢をシーン上のインスタンスへ書き戻す。
+            ///
+            /// Unity FBX Exporter は「書き出し時点のボーンの姿勢」をスキンのバインドポーズとして
+            /// 書き出す。メッシュの頂点は元のバインド空間のままなので、ポーズを付けた状態で
+            /// 書き出すとその差分だけスキニングが壊れる。
+            /// 姿勢は全てカーブが持っているため、素の姿勢へ戻しても動きは変わらない。
             /// </summary>
-            public void ApplyFirstFrame()
+            public void ApplySourcePose()
             {
                 foreach (TransformTrack track in transformTracks)
                 {
-                    if (track.target == null || track.positions.Count == 0)
+                    if (track.target == null)
                     {
                         continue;
                     }
 
-                    track.target.localPosition = track.positions[0];
-                    track.target.localRotation = track.rotations[0];
-                    track.target.localScale = track.scales[0];
+                    track.target.localPosition = track.sourcePosition;
+                    track.target.localRotation = track.sourceRotation;
+                    track.target.localScale = track.sourceScale;
                 }
 
                 foreach (BlendShapeTrack track in blendShapeTracks)
                 {
-                    if (track.renderer == null || track.weights.Count == 0)
+                    if (track.renderer == null)
                     {
                         continue;
                     }
-                    track.renderer.SetBlendShapeWeight(track.index, track.weights[0]);
+                    track.renderer.SetBlendShapeWeight(track.index, track.sourceWeight);
                 }
             }
 
@@ -1014,12 +1021,22 @@ namespace YozoLab.FBXAnimationBaker
 
                 foreach (TransformTrack track in transformTracks)
                 {
-                    curveCount += SetCurveGroup(clip, track.path, timeArray, removeConstant, reduce, tolerance,
+                    // 省略できるのは「動かない」だけでなく「書き出す姿勢(= 元 FBX の姿勢)と同じ」場合だけ。
+                    // 元の姿勢と違う値で止まっているチャンネルを省くと、そのボーンだけ素の姿勢に取り残される。
+                    bool positionMatchesSource = IsStatic(track.positions.Select(p => p.x).ToArray(), track.sourcePosition.x)
+                        && IsStatic(track.positions.Select(p => p.y).ToArray(), track.sourcePosition.y)
+                        && IsStatic(track.positions.Select(p => p.z).ToArray(), track.sourcePosition.z);
+
+                    curveCount += SetCurveGroup(clip, track.path, timeArray, removeConstant && positionMatchesSource, reduce, tolerance,
                         ("m_LocalPosition.x", track.positions.Select(p => p.x).ToArray()),
                         ("m_LocalPosition.y", track.positions.Select(p => p.y).ToArray()),
                         ("m_LocalPosition.z", track.positions.Select(p => p.z).ToArray()));
 
-                    curveCount += SetCurveGroup(clip, track.path, timeArray, removeConstant, reduce, tolerance,
+                    // 回転は符号違いでも同じ姿勢を表すため、成分ではなく角度で比べる
+                    bool rotationMatchesSource = track.rotations.All(
+                        r => Quaternion.Angle(r, track.sourceRotation) <= ConstantAngleEpsilon);
+
+                    curveCount += SetCurveGroup(clip, track.path, timeArray, removeConstant && rotationMatchesSource, reduce, tolerance,
                         ("m_LocalRotation.x", track.rotations.Select(r => r.x).ToArray()),
                         ("m_LocalRotation.y", track.rotations.Select(r => r.y).ToArray()),
                         ("m_LocalRotation.z", track.rotations.Select(r => r.z).ToArray()),
@@ -1027,7 +1044,11 @@ namespace YozoLab.FBXAnimationBaker
 
                     if (entry.bakeScale)
                     {
-                        curveCount += SetCurveGroup(clip, track.path, timeArray, removeConstant, reduce, tolerance,
+                        bool scaleMatchesSource = IsStatic(track.scales.Select(s => s.x).ToArray(), track.sourceScale.x)
+                            && IsStatic(track.scales.Select(s => s.y).ToArray(), track.sourceScale.y)
+                            && IsStatic(track.scales.Select(s => s.z).ToArray(), track.sourceScale.z);
+
+                        curveCount += SetCurveGroup(clip, track.path, timeArray, removeConstant && scaleMatchesSource, reduce, tolerance,
                             ("m_LocalScale.x", track.scales.Select(s => s.x).ToArray()),
                             ("m_LocalScale.y", track.scales.Select(s => s.y).ToArray()),
                             ("m_LocalScale.z", track.scales.Select(s => s.z).ToArray()));
@@ -1037,7 +1058,7 @@ namespace YozoLab.FBXAnimationBaker
                 foreach (BlendShapeTrack track in blendShapeTracks)
                 {
                     float[] values = track.weights.ToArray();
-                    if (removeConstant && IsConstant(values))
+                    if (removeConstant && IsStatic(values, track.sourceWeight))
                     {
                         continue;
                     }
@@ -1053,13 +1074,16 @@ namespace YozoLab.FBXAnimationBaker
 
             /// <summary>
             /// 1 つのプロパティ(位置/回転/スケール)を構成するチャンネルをまとめて設定する。
-            /// 「全チャンネルが変化なし」のときだけ、まとめて省略する。書き込んだカーブ本数を返す。
+            /// 書き込んだカーブ本数を返す。
             /// </summary>
+            /// <param name="skipGroup">
+            /// この組を省略してよいか。「動かない」かつ「書き出す姿勢と同じ」ときだけ true を渡すこと。
+            /// </param>
             private static int SetCurveGroup(AnimationClip clip, string path, float[] times,
-                bool removeConstant, bool reduce, float tolerance,
+                bool skipGroup, bool reduce, float tolerance,
                 params (string property, float[] values)[] channels)
             {
-                if (removeConstant && channels.All(c => IsConstant(c.values)))
+                if (skipGroup)
                 {
                     return 0;
                 }
@@ -1073,21 +1097,17 @@ namespace YozoLab.FBXAnimationBaker
                 return channels.Length;
             }
 
-            private static bool IsConstant(float[] values)
+            /// <summary>全フレームが reference と同じ値か(= カーブを書かなくてよいか)。</summary>
+            private static bool IsStatic(float[] values, float reference)
             {
-                if (values.Length == 0)
+                foreach (float value in values)
                 {
-                    return true;
+                    if (Mathf.Abs(value - reference) > ConstantEpsilon)
+                    {
+                        return false;
+                    }
                 }
-
-                float min = values[0];
-                float max = values[0];
-                for (int i = 1; i < values.Length; i++)
-                {
-                    min = Mathf.Min(min, values[i]);
-                    max = Mathf.Max(max, values[i]);
-                }
-                return max - min <= ConstantEpsilon;
+                return true;
             }
 
             /// <summary>
@@ -1132,9 +1152,10 @@ namespace YozoLab.FBXAnimationBaker
                 public Transform target;
                 public string path;
 
-                // 診断用: サンプリング開始前(= 元 FBX)の姿勢
-                public Quaternion sourceRotation;
+                // サンプリング開始前(= 元 FBX)の姿勢
                 public Vector3 sourcePosition;
+                public Quaternion sourceRotation;
+                public Vector3 sourceScale;
                 public readonly List<Vector3> positions = new List<Vector3>();
                 public readonly List<Quaternion> rotations = new List<Quaternion>();
                 public readonly List<Vector3> scales = new List<Vector3>();
@@ -1146,6 +1167,7 @@ namespace YozoLab.FBXAnimationBaker
                 public int index;
                 public string path;
                 public string propertyName;
+                public float sourceWeight;
                 public readonly List<float> weights = new List<float>();
             }
         }
