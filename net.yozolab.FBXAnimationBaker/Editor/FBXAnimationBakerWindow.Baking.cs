@@ -27,7 +27,7 @@ namespace YozoLab.FBXAnimationBaker
         /// ベイク結果が変わる修正を入れたら上げる版数。差分キャッシュの署名に含めており、
         /// パッケージ更新後は設定を触っていなくても Execute で作り直される。
         /// </summary>
-        private const string BakerVersion = "4";
+        private const string BakerVersion = "5";
 
         /// <summary>1 チャンネルが「変化なし」とみなされる振れ幅のしきい値。</summary>
         private const float ConstantEpsilon = 1e-5f;
@@ -197,9 +197,8 @@ namespace YozoLab.FBXAnimationBaker
                 }
 
                 instance.name = outputName;
-
-                // ルートの位置/回転は触らない。モデルによっては軸変換の補正がルートの
-                // 回転やスケールに入っており、identity に潰すと基準ポーズが崩れる。
+                instance.transform.position = Vector3.zero;
+                instance.transform.rotation = Quaternion.identity;
 
                 Animator animator = instance.GetComponent<Animator>();
                 if (animator == null)
@@ -224,15 +223,6 @@ namespace YozoLab.FBXAnimationBaker
                 if (clip.isHumanMotion && (animator.avatar == null || !animator.avatar.isHuman))
                 {
                     Debug.LogWarning($"{LogPrefix} \"{clip.name}\" is a humanoid clip but the model has no humanoid Avatar. The result may be empty: {GetEntryDisplayName(entry)}");
-                }
-
-                // ルートに軸変換の補正回転が入っているモデルでルートモーションを焼くと、
-                // サンプリング時にその回転がルートモーションで上書きされ、結果が傾く。
-                if (entry.bakeRootMotion && Quaternion.Angle(instance.transform.localRotation, Quaternion.identity) > 0.01f)
-                {
-                    Debug.LogWarning($"{LogPrefix} The root of \"{entry.sourceFbx.name}\" has a non-identity rotation " +
-                                     $"({instance.transform.localRotation.eulerAngles}). Baking root motion overwrites it, " +
-                                     $"which can tip the result over. Turn off Bake Root Motion if the result looks rotated.");
                 }
 
                 // ── サンプリング ──────────────────────────────────────────
@@ -263,16 +253,12 @@ namespace YozoLab.FBXAnimationBaker
                 animationModeStarted = false;
 
                 // ── カーブ生成 ────────────────────────────────────────────
-                // 元 FBX の素のポーズを残すモードでは、姿勢を全てカーブ側で表現する必要がある。
-                // 定数カーブを間引くと、そのノードだけ T ポーズのまま取り残されてしまう。
-                bool removeConstant = entry.removeConstantCurves && entry.restPose == BakeRestPose.FirstFrame;
-
-                bakedClip = samples.BuildClip(entry, fps, removeConstant, out int curveCount);
+                bakedClip = samples.BuildClip(entry, fps, entry.removeConstantCurves, out int curveCount);
 
                 // 1 フレームのポーズクリップは全チャンネルが「変化なし」になるため、
                 // 定数カーブ除去をそのまま適用するとカーブが 1 本も残らず、
                 // アニメーションの入っていない FBX ができてしまう。その場合は除去せず作り直す。
-                if (curveCount == 0 && removeConstant)
+                if (curveCount == 0 && entry.removeConstantCurves)
                 {
                     UnityEngine.Object.DestroyImmediate(bakedClip);
                     bakedClip = samples.BuildClip(entry, fps, false, out curveCount);
@@ -303,7 +289,7 @@ namespace YozoLab.FBXAnimationBaker
                 // legacy の Animation コンポーネント 1 本に寄せる。
                 UnityEngine.Object.DestroyImmediate(animator);
 
-                samples.ApplyRestPose(entry.restPose);
+                samples.ApplyFirstFrame();
 
                 if (entry.exportContent == BakeExportContent.SkeletonOnly)
                 {
@@ -348,11 +334,7 @@ namespace YozoLab.FBXAnimationBaker
                 AssetDatabase.ImportAsset(outputAssetPath, ImportAssetOptions.ForceUpdate);
 
                 long fileSizeKb = new FileInfo(absolutePath).Length / 1024;
-                Debug.Log($"{LogPrefix} \"{outputName}\": {curveCount} curve(s), {CountKeys(bakedClip)} key(s), " +
-                          $"{frameCount} sampled frame(s), {fileSizeKb} KB\n" +
-                          $"  root rest rotation = {samples.RootRestRotation.eulerAngles}, " +
-                          $"exported root rotation = {instance.transform.localRotation.eulerAngles}, " +
-                          $"root scale = {instance.transform.localScale}");
+                Debug.Log($"{LogPrefix} \"{outputName}\": {curveCount} curve(s), {CountKeys(bakedClip)} key(s), {frameCount} sampled frame(s), {fileSizeKb} KB");
                 return true;
             }
             catch (Exception e)
@@ -827,7 +809,6 @@ namespace YozoLab.FBXAnimationBaker
             sb.Append(entry.bakeScale).Append('|');
             sb.Append(entry.bakeBlendShapes).Append('|');
             sb.Append(entry.excludeBlendShapes).Append('|');
-            sb.Append(entry.restPose).Append('|');
             sb.Append(entry.removeConstantCurves).Append('|');
             sb.Append(entry.keyframeReduction).Append('|');
             sb.Append(entry.reductionTolerance).Append('|');
@@ -884,25 +865,16 @@ namespace YozoLab.FBXAnimationBaker
 
             public float LastTime => times.Count > 0 ? times[times.Count - 1] : 0f;
 
-            /// <summary>元 FBX が持っていたルートのローカル回転(診断ログ用)。</summary>
-            public Quaternion RootRestRotation =>
-                transformTracks.Count > 0 ? transformTracks[0].restRotation : Quaternion.identity;
-
             public BakeSampleBuffer(GameObject instance, bool captureBlendShapes)
             {
                 root = instance.transform;
 
-                // コンストラクタはサンプリング前に呼ばれるので、ここで見えている姿勢が
-                // 元 FBX の素のポーズ(多くのモデルでは T ポーズ)になる。
                 foreach (Transform t in instance.GetComponentsInChildren<Transform>(true))
                 {
                     transformTracks.Add(new TransformTrack
                     {
                         target = t,
                         path = AnimationUtility.CalculateTransformPath(t, root),
-                        restPosition = t.localPosition,
-                        restRotation = t.localRotation,
-                        restScale = t.localScale,
                     });
                 }
 
@@ -927,7 +899,6 @@ namespace YozoLab.FBXAnimationBaker
                             index = i,
                             path = AnimationUtility.CalculateTransformPath(renderer.transform, root),
                             propertyName = $"blendShape.{mesh.GetBlendShapeName(i)}",
-                            restWeight = renderer.GetBlendShapeWeight(i),
                         });
                     }
                 }
@@ -965,19 +936,12 @@ namespace YozoLab.FBXAnimationBaker
             }
 
             /// <summary>
-            /// エクスポート直前の姿勢をシーン上のインスタンスへ書き戻す。
-            /// この姿勢が FBX ノードの静的なローカル変換 = アニメーションを評価しない状態の
-            /// 見た目になる。
-            ///
-            /// FirstFrame    … 0 フレーム目。カーブを持たない(定数として省いた)ノードも
-            ///                  正しい見た目になるため、間引きと併用できる。
-            /// SourceFbxPose … 元 FBX の姿勢(T ポーズ等)。姿勢は全てカーブ側が担うので、
-            ///                  呼び出し側は定数カーブの間引きを行わないこと。
+            /// 記録した先頭フレームの姿勢をシーン上のインスタンスへ書き戻す。
+            /// 定数カーブを削除した Transform は FBX 側でこの姿勢のまま固定されるため、
+            /// エクスポート直前に 0 フレーム目へ戻しておく必要がある。
             /// </summary>
-            public void ApplyRestPose(BakeRestPose restPose)
+            public void ApplyFirstFrame()
             {
-                bool useSourcePose = restPose == BakeRestPose.SourceFbxPose;
-
                 foreach (TransformTrack track in transformTracks)
                 {
                     if (track.target == null || track.positions.Count == 0)
@@ -985,17 +949,9 @@ namespace YozoLab.FBXAnimationBaker
                         continue;
                     }
 
-                    // ルートだけは常に元 FBX の値へ戻す。
-                    // ルートモーションのサンプリングはルートのローカル変換を「置き換える」ため、
-                    // 軸変換の補正回転を持つモデルでは、0 フレーム目を焼き込むと
-                    // その補正が消えてモデルが倒れてしまう。
-                    // (再生時の姿勢はカーブが担うので、素のポーズを元に戻しても動きは変わらない)
-                    bool isRoot = track.target == root;
-                    bool useRest = useSourcePose || isRoot;
-
-                    track.target.localPosition = useRest ? track.restPosition : track.positions[0];
-                    track.target.localRotation = useRest ? track.restRotation : track.rotations[0];
-                    track.target.localScale = useRest ? track.restScale : track.scales[0];
+                    track.target.localPosition = track.positions[0];
+                    track.target.localRotation = track.rotations[0];
+                    track.target.localScale = track.scales[0];
                 }
 
                 foreach (BlendShapeTrack track in blendShapeTracks)
@@ -1004,7 +960,7 @@ namespace YozoLab.FBXAnimationBaker
                     {
                         continue;
                     }
-                    track.renderer.SetBlendShapeWeight(track.index, useSourcePose ? track.restWeight : track.weights[0]);
+                    track.renderer.SetBlendShapeWeight(track.index, track.weights[0]);
                 }
             }
 
@@ -1140,12 +1096,6 @@ namespace YozoLab.FBXAnimationBaker
             {
                 public Transform target;
                 public string path;
-
-                // 元 FBX の素のポーズ(サンプリング開始前の姿勢)
-                public Vector3 restPosition;
-                public Quaternion restRotation;
-                public Vector3 restScale;
-
                 public readonly List<Vector3> positions = new List<Vector3>();
                 public readonly List<Quaternion> rotations = new List<Quaternion>();
                 public readonly List<Vector3> scales = new List<Vector3>();
@@ -1157,7 +1107,6 @@ namespace YozoLab.FBXAnimationBaker
                 public int index;
                 public string path;
                 public string propertyName;
-                public float restWeight;
                 public readonly List<float> weights = new List<float>();
             }
         }

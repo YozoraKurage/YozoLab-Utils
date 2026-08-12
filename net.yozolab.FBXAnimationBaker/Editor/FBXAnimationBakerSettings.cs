@@ -54,23 +54,6 @@ namespace YozoLab.FBXAnimationBaker
     }
 
     /// <summary>
-    /// 生成 FBX のノードに残す「素のポーズ」(アニメーションを評価しない状態の見た目)。
-    ///
-    /// FBX はノードごとに静的なローカル変換を持ち、テイク(アニメーション)のカーブが
-    /// 再生時にそれを上書きする。どちらを基準ポーズとして残すかの選択。
-    ///
-    /// SourceFbxPose = 元 FBX の姿勢(多くのモデルでは T ポーズ)をそのまま残す。
-    ///                 姿勢は全てカーブ側で表現されるため、定数カーブの間引きは行わない。
-    /// FirstFrame    = アニメーション 0 フレーム目の姿勢を焼き込む。定数カーブを間引ける。
-    /// </summary>
-    public enum BakeRestPose
-    {
-        // FirstFrame を 0 番に置いているのは、既存の設定(未指定=0)がこれまでの挙動になるようにするため
-        FirstFrame = 0,
-        SourceFbxPose = 1,
-    }
-
-    /// <summary>
     /// 1 エントリ = 「1 つの FBX に対して、指定した Humanoid AnimationClip 群を
     /// Transform ベイク済みで同梱した FBX を出力する」単位。
     /// </summary>
@@ -116,10 +99,7 @@ namespace YozoLab.FBXAnimationBaker
         [Tooltip("Strip blend shape data from the exported meshes. Blend shapes usually dominate the FBX size. Ignored when Bake BlendShapes is enabled")]
         public bool excludeBlendShapes = false;
 
-        [Tooltip("Which pose the FBX nodes keep when the animation is not evaluated. Source FBX Pose keeps the original (usually T-pose) and puts everything into the take")]
-        public BakeRestPose restPose = BakeRestPose.FirstFrame;
-
-        [Tooltip("Drop curves whose value never changes over the whole clip (keeps the FBX small). Ignored when Rest Pose is Source FBX Pose")]
+        [Tooltip("Drop curves whose value never changes over the whole clip (keeps the FBX small)")]
         public bool removeConstantCurves = true;
 
         [Tooltip("Remove keys that sit on a straight line between their neighbours. Greatly reduces the FBX size of per-frame baked curves")]

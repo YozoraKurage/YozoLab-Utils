@@ -39,7 +39,6 @@ Generic な Transform カーブへ変換したうえで FBX に焼き込みま�
 | Fast Import | 生成 FBX のインポート時に不要な処理（マテリアル/カメラ/ライト/カーブ再サンプリング等）を省く（既定 ON） |
 | Save Baked .anim | ベイク済み Transform クリップを .anim としても保存する |
 | Export ASCII | バイナリではなく ASCII FBX で書き出す |
-| Rest Pose | アニメーションを評価しないときに FBX が持つ姿勢。`First Frame`（既定）は 0 フレーム目を焼き込む／`Source FBX Pose` は元の T ポーズ等を保つ |
 | Frame Rate | サンプリングのフレームレート。0 で元クリップのフレームレートを使用 |
 | Bake Root Motion | ルートモーションをルート Transform に焼き込む |
 | Bake Scale | スケールカーブもベイクする（既定 OFF） |
@@ -49,24 +48,6 @@ Generic な Transform カーブへ変換したうえで FBX に焼き込みま�
 | Keyframe Reduction | 直線上に乗るキーを間引いて FBX を軽くする（既定 ON） |
 | Reduction Tolerance | 間引きの許容誤差。大きいほど軽く、精度は落ちる |
 | Use Other Avatar Definition | サンプリング時に FBX 以外の Avatar を使う |
-
-## 基準ポーズ（T ポーズ）の扱い
-
-FBX はノードごとに「静的なローカル変換」を持ち、テイク（アニメーション）のカーブが
-再生時にそれを上書きします。つまり FBX には *素のポーズ* と *動き* の 2 つが入っています。
-スキニングのバインドポーズはさらに別枠（デフォーマのクラスタ行列）に保存されるため、
-ボーンをどのポーズに置いてもバインドポーズは保たれます。
-
-`Rest Pose` はこの「素のポーズ」に何を残すかの選択です。
-
-- **Source FBX Pose** … 元 FBX の姿勢（多くのモデルでは T ポーズ）をそのまま残し、
-  動きは全てカーブ側に持たせます。DCC で開いたときや、生成 FBX を Humanoid として
-  再インポートして Avatar を作り直したいときはこちら。
-  姿勢を全ノードのカーブが担うため、`Remove Constant Curves` は自動的に無効になります
-  （その分カーブ本数は増えますが、`Keyframe Reduction` で静止ノードは 2 キーまで落ちます）。
-- **First Frame**（既定）… 0 フレーム目の姿勢をノードに焼き込みます。カーブを持たないノードも
-  正しい見た目になるので `Remove Constant Curves` と併用でき、ファイルは小さくなります。
-  ただし FBX を開いた初期状態は T ポーズではなくアニメーションの先頭姿勢になります。
 
 ## 差分スキップ
 
@@ -81,6 +62,8 @@ Source FBX / クリップの依存ハッシュとエントリ設定の署名を�
 - Humanoid クリップを指定する場合、Source FBX（または Avatar Definition）が
   Humanoid Avatar を持っている必要があります。持っていない場合は警告が出ます。
 - 出力される Transform カーブは毎フレームのベイク結果で、補間は線形です。
+- 生成 FBX の基準ポーズ（アニメーションを評価しない状態の姿勢）は、クリップの 0 フレーム目です。
+  元 FBX の T ポーズは保持されません。
 
 ## FBX が大きいとき
 
