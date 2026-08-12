@@ -23,6 +23,12 @@ namespace YozoLab.FBXAnimationBaker
     {
         private const string LogPrefix = "[FBX Animation Baker]";
 
+        /// <summary>
+        /// ベイク結果が変わる修正を入れたら上げる版数。差分キャッシュの署名に含めており、
+        /// パッケージ更新後は設定を触っていなくても Execute で作り直される。
+        /// </summary>
+        private const string BakerVersion = "2";
+
         /// <summary>1 チャンネルが「変化なし」とみなされる振れ幅のしきい値。</summary>
         private const float ConstantEpsilon = 1e-5f;
 
@@ -218,6 +224,15 @@ namespace YozoLab.FBXAnimationBaker
                 if (clip.isHumanMotion && (animator.avatar == null || !animator.avatar.isHuman))
                 {
                     Debug.LogWarning($"{LogPrefix} \"{clip.name}\" is a humanoid clip but the model has no humanoid Avatar. The result may be empty: {GetEntryDisplayName(entry)}");
+                }
+
+                // ルートに軸変換の補正回転が入っているモデルでルートモーションを焼くと、
+                // サンプリング時にその回転がルートモーションで上書きされ、結果が傾く。
+                if (entry.bakeRootMotion && Quaternion.Angle(instance.transform.localRotation, Quaternion.identity) > 0.01f)
+                {
+                    Debug.LogWarning($"{LogPrefix} The root of \"{entry.sourceFbx.name}\" has a non-identity rotation " +
+                                     $"({instance.transform.localRotation.eulerAngles}). Baking root motion overwrites it, " +
+                                     $"which can tip the result over. Turn off Bake Root Motion if the result looks rotated.");
                 }
 
                 // ── サンプリング ──────────────────────────────────────────
@@ -798,6 +813,10 @@ namespace YozoLab.FBXAnimationBaker
         private static string BuildEntrySignature(AnimationBakeEntry entry, AnimationClip clip)
         {
             var sb = new StringBuilder();
+
+            // ベイク結果が変わる修正を入れたらこれを上げる。
+            // 署名が変わることで、設定を触っていなくても Execute で作り直される。
+            sb.Append(BakerVersion).Append('|');
             sb.Append(clip.name).Append('|');
             sb.Append(entry.frameRate).Append('|');
             sb.Append(entry.bakeRootMotion).Append('|');
