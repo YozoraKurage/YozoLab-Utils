@@ -469,8 +469,12 @@ namespace YozoLab.FBXAnimationBaker
 
             TrySetBool(options, new[] { "AnimateSkinnedMesh", "animateSkinnedMesh" }, animateSkinnedMesh);
             TrySetBool(options, new[] { "ExportUnrendered", "exportUnrendered" }, true);
-            TrySetBool(options, new[] { "PreserveImportSettings", "preserveImportSettings" }, true);
             TrySetBool(options, new[] { "EmbedTextures", "embedTextures" }, false);
+
+            // PreserveImportSettings は元モデルのインポート設定(Bake Axis Conversion 含む)を
+            // 生成 FBX へ引き継ぐ。生成 FBX は既に Unity 側の軸で書かれているため、
+            // 引き継ぐと二重に軸変換がかかり、モデルが倒れることがある。
+            TrySetBool(options, new[] { "PreserveImportSettings", "preserveImportSettings" }, false);
 
             if (unapplied.Count > 0 && !loggedOptionWarning)
             {

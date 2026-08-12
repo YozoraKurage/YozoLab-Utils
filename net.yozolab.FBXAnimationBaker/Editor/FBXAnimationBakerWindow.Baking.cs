@@ -27,7 +27,7 @@ namespace YozoLab.FBXAnimationBaker
         /// ベイク結果が変わる修正を入れたら上げる版数。差分キャッシュの署名に含めており、
         /// パッケージ更新後は設定を触っていなくても Execute で作り直される。
         /// </summary>
-        private const string BakerVersion = "3";
+        private const string BakerVersion = "4";
 
         /// <summary>1 チャンネルが「変化なし」とみなされる振れ幅のしきい値。</summary>
         private const float ConstantEpsilon = 1e-5f;
@@ -348,7 +348,11 @@ namespace YozoLab.FBXAnimationBaker
                 AssetDatabase.ImportAsset(outputAssetPath, ImportAssetOptions.ForceUpdate);
 
                 long fileSizeKb = new FileInfo(absolutePath).Length / 1024;
-                Debug.Log($"{LogPrefix} \"{outputName}\": {curveCount} curve(s), {CountKeys(bakedClip)} key(s), {frameCount} sampled frame(s), {fileSizeKb} KB");
+                Debug.Log($"{LogPrefix} \"{outputName}\": {curveCount} curve(s), {CountKeys(bakedClip)} key(s), " +
+                          $"{frameCount} sampled frame(s), {fileSizeKb} KB\n" +
+                          $"  root rest rotation = {samples.RootRestRotation.eulerAngles}, " +
+                          $"exported root rotation = {instance.transform.localRotation.eulerAngles}, " +
+                          $"root scale = {instance.transform.localScale}");
                 return true;
             }
             catch (Exception e)
@@ -880,6 +884,10 @@ namespace YozoLab.FBXAnimationBaker
 
             public float LastTime => times.Count > 0 ? times[times.Count - 1] : 0f;
 
+            /// <summary>元 FBX が持っていたルートのローカル回転(診断ログ用)。</summary>
+            public Quaternion RootRestRotation =>
+                transformTracks.Count > 0 ? transformTracks[0].restRotation : Quaternion.identity;
+
             public BakeSampleBuffer(GameObject instance, bool captureBlendShapes)
             {
                 root = instance.transform;
@@ -977,9 +985,17 @@ namespace YozoLab.FBXAnimationBaker
                         continue;
                     }
 
-                    track.target.localPosition = useSourcePose ? track.restPosition : track.positions[0];
-                    track.target.localRotation = useSourcePose ? track.restRotation : track.rotations[0];
-                    track.target.localScale = useSourcePose ? track.restScale : track.scales[0];
+                    // ルートだけは常に元 FBX の値へ戻す。
+                    // ルートモーションのサンプリングはルートのローカル変換を「置き換える」ため、
+                    // 軸変換の補正回転を持つモデルでは、0 フレーム目を焼き込むと
+                    // その補正が消えてモデルが倒れてしまう。
+                    // (再生時の姿勢はカーブが担うので、素のポーズを元に戻しても動きは変わらない)
+                    bool isRoot = track.target == root;
+                    bool useRest = useSourcePose || isRoot;
+
+                    track.target.localPosition = useRest ? track.restPosition : track.positions[0];
+                    track.target.localRotation = useRest ? track.restRotation : track.rotations[0];
+                    track.target.localScale = useRest ? track.restScale : track.scales[0];
                 }
 
                 foreach (BlendShapeTrack track in blendShapeTracks)
