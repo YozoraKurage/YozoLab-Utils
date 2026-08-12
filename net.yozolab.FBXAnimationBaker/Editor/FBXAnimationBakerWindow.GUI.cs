@@ -253,8 +253,8 @@ namespace YozoLab.FBXAnimationBaker
             EditorGUILayout.PropertyField(entryProp.FindPropertyRelative("importAnimationType"), new GUIContent("Import Animation Type",
                 L10n.T("生成したFBXを読み込み直すときのAnimation Type", "Animation Type applied when the generated FBX is imported back")));
             EditorGUILayout.PropertyField(entryProp.FindPropertyRelative("fastImport"), new GUIContent("Fast Import",
-                L10n.T("生成FBXのインポート時に不要な処理(マテリアル/カメラ/ライト/カーブ再サンプリング等)を省いて速くする",
-                       "Skip import work the baked FBX does not need (materials, cameras, lights, curve resampling)")));
+                L10n.T("生成FBXのインポート時に不要な処理(マテリアル/カメラ/ライト/タンジェント計算等)を省いて速くする。結果が変わる項目には触れません",
+                       "Skip import work the baked FBX does not need (materials, cameras, lights, tangents). Never touches anything that changes the result")));
             EditorGUILayout.PropertyField(entryProp.FindPropertyRelative("saveBakedClipAsset"), new GUIContent("Save Baked .anim",
                 L10n.T("ベイク済みTransformクリップを .anim としても保存する", "Also save the baked Transform clip as a .anim asset")));
             EditorGUILayout.PropertyField(entryProp.FindPropertyRelative("exportAscii"), new GUIContent("Export ASCII",

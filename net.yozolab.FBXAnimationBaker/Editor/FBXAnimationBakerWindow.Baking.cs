@@ -27,7 +27,7 @@ namespace YozoLab.FBXAnimationBaker
         /// ベイク結果が変わる修正を入れたら上げる版数。差分キャッシュの署名に含めており、
         /// パッケージ更新後は設定を触っていなくても Execute で作り直される。
         /// </summary>
-        private const string BakerVersion = "7";
+        private const string BakerVersion = "8";
 
         /// <summary>1 チャンネルが「変化なし」とみなされる振れ幅のしきい値。</summary>
         private const float ConstantEpsilon = 1e-5f;
@@ -620,13 +620,18 @@ namespace YozoLab.FBXAnimationBaker
                 ? ModelImporterTangents.None
                 : ModelImporterTangents.CalculateMikk;
 
-            // 既にベイク済みのカーブなので、インポート時の再サンプリング/圧縮は
-            // 時間がかかるだけで得がない(キーもずれる)。
-            if (importer.resampleCurves)
+            // resampleCurves は切ってはいけない。
+            // OFF にすると Unity は FBX のカーブをそのまま取り込むため、ノードの
+            // pre/post rotation の扱いが変わり、姿勢が崩れる。
+            // (以前 Fast Import で OFF にしており、これが姿勢崩れの原因だった)
+            // 既定へ戻す指定を明示的に行い、過去に生成した FBX も再ベイクで直るようにする。
+            if (!importer.resampleCurves)
             {
-                importer.resampleCurves = false;
+                importer.resampleCurves = true;
                 changed = true;
             }
+
+            // 既にベイク済みのカーブなので、インポート時の圧縮は時間がかかるだけで得がない
             if (importer.animationCompression != ModelImporterAnimationCompression.Off)
             {
                 importer.animationCompression = ModelImporterAnimationCompression.Off;

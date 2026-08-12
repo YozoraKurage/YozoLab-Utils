@@ -114,7 +114,7 @@ namespace YozoLab.FBXAnimationBaker
         [Tooltip("Also save the baked Transform clip as a .anim asset next to the generated FBX")]
         public bool saveBakedClipAsset = true;
 
-        [Tooltip("Skip import work the baked FBX does not need (materials, cameras, lights, curve resampling). Makes importing the generated FBX much faster")]
+        [Tooltip("Skip import work the baked FBX does not need (materials, cameras, lights, blend shapes, tangents). Never touches anything that changes the imported result")]
         public bool fastImport = true;
 
         [Tooltip("Animation Type applied to the generated FBX when it is imported back into the project")]
