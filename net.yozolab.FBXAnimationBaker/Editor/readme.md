@@ -39,7 +39,7 @@ Generic な Transform カーブへ変換したうえで FBX に焼き込みま�
 | Fast Import | 生成 FBX のインポート時に不要な処理（マテリアル/カメラ/ライト/カーブ再サンプリング等）を省く（既定 ON） |
 | Save Baked .anim | ベイク済み Transform クリップを .anim としても保存する |
 | Export ASCII | バイナリではなく ASCII FBX で書き出す |
-| Rest Pose | アニメーションを評価しないときに FBX が持つ姿勢。`Source FBX Pose` は元の T ポーズ等を保つ／`First Frame` は 0 フレーム目を焼き込む |
+| Rest Pose | アニメーションを評価しないときに FBX が持つ姿勢。`First Frame`（既定）は 0 フレーム目を焼き込む／`Source FBX Pose` は元の T ポーズ等を保つ |
 | Frame Rate | サンプリングのフレームレート。0 で元クリップのフレームレートを使用 |
 | Bake Root Motion | ルートモーションをルート Transform に焼き込む |
 | Bake Scale | スケールカーブもベイクする（既定 OFF） |
@@ -59,12 +59,12 @@ FBX はノードごとに「静的なローカル変換」を持ち、テイク�
 
 `Rest Pose` はこの「素のポーズ」に何を残すかの選択です。
 
-- **Source FBX Pose**（既定）… 元 FBX の姿勢（多くのモデルでは T ポーズ）をそのまま残し、
+- **Source FBX Pose** … 元 FBX の姿勢（多くのモデルでは T ポーズ）をそのまま残し、
   動きは全てカーブ側に持たせます。DCC で開いたときや、生成 FBX を Humanoid として
   再インポートして Avatar を作り直したいときはこちら。
   姿勢を全ノードのカーブが担うため、`Remove Constant Curves` は自動的に無効になります
   （その分カーブ本数は増えますが、`Keyframe Reduction` で静止ノードは 2 キーまで落ちます）。
-- **First Frame** … 0 フレーム目の姿勢をノードに焼き込みます。カーブを持たないノードも
+- **First Frame**（既定）… 0 フレーム目の姿勢をノードに焼き込みます。カーブを持たないノードも
   正しい見た目になるので `Remove Constant Curves` と併用でき、ファイルは小さくなります。
   ただし FBX を開いた初期状態は T ポーズではなくアニメーションの先頭姿勢になります。
 

@@ -445,7 +445,7 @@ namespace YozoLab.FBXAnimationBaker
             entryProp.FindPropertyRelative("bakeScale").boolValue = false;
             entryProp.FindPropertyRelative("bakeBlendShapes").boolValue = false;
             entryProp.FindPropertyRelative("excludeBlendShapes").boolValue = false;
-            entryProp.FindPropertyRelative("restPose").enumValueIndex = (int)BakeRestPose.SourceFbxPose;
+            entryProp.FindPropertyRelative("restPose").enumValueIndex = (int)BakeRestPose.FirstFrame;
             entryProp.FindPropertyRelative("removeConstantCurves").boolValue = true;
             entryProp.FindPropertyRelative("keyframeReduction").boolValue = true;
             entryProp.FindPropertyRelative("reductionTolerance").floatValue = 0.0001f;

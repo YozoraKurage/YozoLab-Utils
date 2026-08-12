@@ -301,6 +301,13 @@ namespace YozoLab.FBXAnimationBaker
             sb.AppendLine($"  ExportObject(2 args)          : {(exportSimple != null ? "found" : "not found")}");
             sb.AppendLine($"  ExportObject(with options)    : {(exportWithOptions != null ? "found" : "not found")}");
             sb.AppendLine($"  ExportObjects(with options)   : {(exportObjectsWithOptions != null ? "found" : "not found")}");
+            sb.AppendLine($"  Options usable                : {SupportsExportOptions}");
+
+            MethodInfo optionsMethod = exportWithOptions ?? exportObjectsWithOptions;
+            if (optionsMethod != null)
+            {
+                sb.AppendLine($"  Options parameter type        : {optionsMethod.GetParameters()[2].ParameterType.FullName}");
+            }
 
             if (exportOptionsType != null)
             {
@@ -439,19 +446,26 @@ namespace YozoLab.FBXAnimationBaker
             object options = Activator.CreateInstance(exportOptionsType, true);
             var unapplied = new List<string>();
 
-            // プロパティ名・フィールド名はエクスポーターのバージョンによって異なるため候補を順に試す。
-            if (!TrySetEnum(options, new[] { "ModelAnimIncludeOption", "ExportModel", "modelAnimIncludeOption" }, "ModelAndAnim"))
+            // プロパティ名・フィールド名はエクスポーターのバージョンによって異なるため候補を順に試し、
+            // 見つからなければ「enum の中身」で探して設定する(名前に依存しない)。
+            if (!TrySetEnum(options, new[] { "ModelAnimIncludeOption", "ExportModel", "modelAnimIncludeOption" }, "ModelAndAnim")
+                && SetEnumsByValueName(options, "ModelAndAnim", new[] { "ModelAndAnim" }) == 0)
             {
                 unapplied.Add("ModelAnimIncludeOption");
             }
 
-            if (!TrySetEnum(options, new[] { "ExportFormat", "exportFormat" }, ascii ? "ASCII" : "Binary"))
+            string formatValue = ascii ? "ASCII" : "Binary";
+            if (!TrySetEnum(options, new[] { "ExportFormat", "exportFormat" }, formatValue)
+                && SetEnumsByValueName(options, formatValue, new[] { "ASCII", "Binary" }) == 0)
             {
                 unapplied.Add("ExportFormat");
             }
 
             // ルートの位置をそのまま保つ(LocalCentered だとルートモーションの原点がずれる)。
-            TrySetEnum(options, new[] { "ObjectPosition", "objectPosition" }, "WorldAbsolute");
+            if (!TrySetEnum(options, new[] { "ObjectPosition", "objectPosition" }, "WorldAbsolute"))
+            {
+                SetEnumsByValueName(options, "WorldAbsolute", new[] { "WorldAbsolute" });
+            }
 
             TrySetBool(options, new[] { "AnimateSkinnedMesh", "animateSkinnedMesh" }, animateSkinnedMesh);
             TrySetBool(options, new[] { "ExportUnrendered", "exportUnrendered" }, true);
@@ -468,6 +482,57 @@ namespace YozoLab.FBXAnimationBaker
             return options;
         }
 
+        /// <summary>
+        /// オブジェクト(と入れ子の設定オブジェクト)を辿り、指定の値名をすべて含む enum のメンバへ
+        /// 値を設定する。メンバ名がバージョンで変わっても効くよう、enum の中身で見分ける。
+        /// 設定できた数を返す。
+        /// </summary>
+        private static int SetEnumsByValueName(object target, string valueName, string[] requiredNames, int depth = 0)
+        {
+            if (target == null || depth > 3)
+            {
+                return 0;
+            }
+
+            int applied = 0;
+
+            foreach (FieldInfo field in GetAllInstanceFields(target.GetType()))
+            {
+                Type fieldType = field.FieldType;
+
+                if (fieldType.IsEnum)
+                {
+                    string[] names = Enum.GetNames(fieldType);
+                    if (requiredNames.All(names.Contains) && names.Contains(valueName))
+                    {
+                        field.SetValue(target, Enum.Parse(fieldType, valueName));
+                        applied++;
+                    }
+                    continue;
+                }
+
+                if (fieldType.IsPrimitive || fieldType == typeof(string) || fieldType.IsArray)
+                {
+                    continue;
+                }
+                if (fieldType.Assembly != target.GetType().Assembly)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    applied += SetEnumsByValueName(field.GetValue(target), valueName, requiredNames, depth + 1);
+                }
+                catch (Exception)
+                {
+                    // 辿れないメンバは無視
+                }
+            }
+
+            return applied;
+        }
+
         private static bool TrySetEnum(object target, string[] memberNames, string valueName)
         {
             foreach (string memberName in memberNames)
@@ -480,7 +545,7 @@ namespace YozoLab.FBXAnimationBaker
                     return true;
                 }
 
-                FieldInfo field = exportOptionsType.GetField(memberName, MemberFlags);
+                FieldInfo field = FindField(exportOptionsType, memberName);
                 if (field != null && field.FieldType.IsEnum
                     && Enum.GetNames(field.FieldType).Contains(valueName))
                 {
@@ -502,7 +567,7 @@ namespace YozoLab.FBXAnimationBaker
                     return true;
                 }
 
-                FieldInfo field = exportOptionsType.GetField(memberName, MemberFlags);
+                FieldInfo field = FindField(exportOptionsType, memberName);
                 if (field != null && field.FieldType == typeof(bool))
                 {
                     field.SetValue(target, value);
@@ -510,6 +575,19 @@ namespace YozoLab.FBXAnimationBaker
                 }
             }
             return false;
+        }
+
+        /// <summary>基底クラスの private フィールドも含めて名前でフィールドを探す。</summary>
+        private static FieldInfo FindField(Type type, string name)
+        {
+            foreach (FieldInfo field in GetAllInstanceFields(type))
+            {
+                if (field.Name == name)
+                {
+                    return field;
+                }
+            }
+            return null;
         }
 
         /// <summary>
@@ -558,6 +636,10 @@ namespace YozoLab.FBXAnimationBaker
                 return;
             }
 
+            // オプション型の名前はバージョンによって違う(見つからないと既定設定=ASCII で
+            // 書き出されてしまう)。名前を決め打ちせず、メソッドの第 3 引数の型から発見する。
+            Type optionsParameterType = null;
+
             foreach (MethodInfo method in modelExporterType.GetMethods(StaticFlags))
             {
                 ParameterInfo[] parameters = method.GetParameters();
@@ -568,26 +650,107 @@ namespace YozoLab.FBXAnimationBaker
 
                 bool takesSingleObject = parameters[1].ParameterType.IsAssignableFrom(typeof(GameObject));
                 bool takesObjectArray = parameters[1].ParameterType == typeof(UnityEngine.Object[]);
-                bool takesOptions = parameters.Length == 3
-                    && exportOptionsType != null
-                    && parameters[2].ParameterType.IsAssignableFrom(exportOptionsType);
+                if (!takesSingleObject && !takesObjectArray)
+                {
+                    continue;
+                }
+
+                if (method.Name == "ExportObject" && takesSingleObject && parameters.Length == 2)
+                {
+                    exportSimple = method;
+                    continue;
+                }
+
+                if (parameters.Length != 3)
+                {
+                    continue;
+                }
 
                 if (method.Name == "ExportObject" && takesSingleObject)
                 {
-                    if (parameters.Length == 2)
-                    {
-                        exportSimple = method;
-                    }
-                    else if (takesOptions)
-                    {
-                        exportWithOptions = method;
-                    }
+                    exportWithOptions = method;
+                    optionsParameterType = parameters[2].ParameterType;
                 }
-                else if (method.Name == "ExportObjects" && takesObjectArray && takesOptions)
+                else if (method.Name == "ExportObjects" && takesObjectArray)
                 {
                     exportObjectsWithOptions = method;
+                    optionsParameterType = optionsParameterType ?? parameters[2].ParameterType;
                 }
             }
+
+            if (optionsParameterType != null)
+            {
+                exportOptionsType = ResolveExportOptionsType(optionsParameterType);
+            }
+
+            // 生成できるオプション型が無いなら、オプション付きの呼び出しはできない
+            if (exportOptionsType == null)
+            {
+                exportWithOptions = null;
+                exportObjectsWithOptions = null;
+            }
+        }
+
+        /// <summary>
+        /// ExportObject の第 3 引数(多くは IExportOptions)に渡せる、実際に生成可能な型を探す。
+        /// 引数型そのものが具象クラスならそれを、インターフェイス/抽象クラスなら
+        /// 同じアセンブリ内の実装クラスから選ぶ。
+        /// </summary>
+        private static Type ResolveExportOptionsType(Type optionsParameterType)
+        {
+            if (IsInstantiable(optionsParameterType))
+            {
+                return optionsParameterType;
+            }
+
+            Type[] candidates;
+            try
+            {
+                candidates = optionsParameterType.Assembly.GetTypes();
+            }
+            catch (ReflectionTypeLoadException e)
+            {
+                candidates = e.Types.Where(t => t != null).ToArray();
+            }
+
+            Type best = null;
+            int bestScore = int.MinValue;
+
+            foreach (Type candidate in candidates)
+            {
+                if (!optionsParameterType.IsAssignableFrom(candidate) || !IsInstantiable(candidate))
+                {
+                    continue;
+                }
+
+                // ExportModelOptions のような「モデル書き出し用」の型を優先する。
+                // アニメーション専用など別用途の型を掴まないように名前で重み付けする。
+                int score = 0;
+                if (candidate.Name.Contains("ExportModelOptions")) score += 100;
+                if (candidate.Name.Contains("Model")) score += 10;
+                if (candidate.Name.Contains("Serialize")) score += 1;
+                if (candidate.Name.Contains("Anim") && !candidate.Name.Contains("Model")) score -= 50;
+
+                if (score > bestScore)
+                {
+                    best = candidate;
+                    bestScore = score;
+                }
+            }
+
+            return best;
+        }
+
+        private static bool IsInstantiable(Type type)
+        {
+            if (type == null || type.IsInterface || type.IsAbstract || type.IsGenericTypeDefinition)
+            {
+                return false;
+            }
+
+            return type.GetConstructor(
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
+                null, Type.EmptyTypes, null) != null;
         }
     }
 }

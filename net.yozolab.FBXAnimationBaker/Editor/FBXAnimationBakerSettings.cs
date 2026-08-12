@@ -65,8 +65,9 @@ namespace YozoLab.FBXAnimationBaker
     /// </summary>
     public enum BakeRestPose
     {
-        SourceFbxPose = 0,
-        FirstFrame = 1,
+        // FirstFrame を 0 番に置いているのは、既存の設定(未指定=0)がこれまでの挙動になるようにするため
+        FirstFrame = 0,
+        SourceFbxPose = 1,
     }
 
     /// <summary>
@@ -116,7 +117,7 @@ namespace YozoLab.FBXAnimationBaker
         public bool excludeBlendShapes = false;
 
         [Tooltip("Which pose the FBX nodes keep when the animation is not evaluated. Source FBX Pose keeps the original (usually T-pose) and puts everything into the take")]
-        public BakeRestPose restPose = BakeRestPose.SourceFbxPose;
+        public BakeRestPose restPose = BakeRestPose.FirstFrame;
 
         [Tooltip("Drop curves whose value never changes over the whole clip (keeps the FBX small). Ignored when Rest Pose is Source FBX Pose")]
         public bool removeConstantCurves = true;

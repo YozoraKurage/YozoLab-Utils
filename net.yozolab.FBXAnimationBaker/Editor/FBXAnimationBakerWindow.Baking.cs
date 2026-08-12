@@ -27,7 +27,7 @@ namespace YozoLab.FBXAnimationBaker
         /// ベイク結果が変わる修正を入れたら上げる版数。差分キャッシュの署名に含めており、
         /// パッケージ更新後は設定を触っていなくても Execute で作り直される。
         /// </summary>
-        private const string BakerVersion = "2";
+        private const string BakerVersion = "3";
 
         /// <summary>1 チャンネルが「変化なし」とみなされる振れ幅のしきい値。</summary>
         private const float ConstantEpsilon = 1e-5f;
