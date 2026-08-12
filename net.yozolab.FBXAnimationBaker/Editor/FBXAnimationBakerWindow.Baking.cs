@@ -27,7 +27,7 @@ namespace YozoLab.FBXAnimationBaker
         /// ベイク結果が変わる修正を入れたら上げる版数。差分キャッシュの署名に含めており、
         /// パッケージ更新後は設定を触っていなくても Execute で作り直される。
         /// </summary>
-        private const string BakerVersion = "5";
+        private const string BakerVersion = "6";
 
         /// <summary>1 チャンネルが「変化なし」とみなされる振れ幅のしきい値。</summary>
         private const float ConstantEpsilon = 1e-5f;
@@ -334,7 +334,12 @@ namespace YozoLab.FBXAnimationBaker
                 AssetDatabase.ImportAsset(outputAssetPath, ImportAssetOptions.ForceUpdate);
 
                 long fileSizeKb = new FileInfo(absolutePath).Length / 1024;
-                Debug.Log($"{LogPrefix} \"{outputName}\": {curveCount} curve(s), {CountKeys(bakedClip)} key(s), {frameCount} sampled frame(s), {fileSizeKb} KB");
+                samples.GetExportedPoseDeviation(out float poseDeviation, out string worstBonePath);
+                Debug.Log($"{LogPrefix} \"{outputName}\": {curveCount} curve(s), {CountKeys(bakedClip)} key(s), " +
+                          $"{frameCount} sampled frame(s), {fileSizeKb} KB\n" +
+                          $"  exported pose vs source pose: max {poseDeviation:F1} deg at \"{worstBonePath}\" " +
+                          $"(the exporter writes the pose at export time as the skin bind pose, " +
+                          $"so a large value here means the skinning is written off its bind pose)");
                 return true;
             }
             catch (Exception e)
@@ -865,6 +870,32 @@ namespace YozoLab.FBXAnimationBaker
 
             public float LastTime => times.Count > 0 ? times[times.Count - 1] : 0f;
 
+            /// <summary>
+            /// 書き出す姿勢(0 フレーム目)が、元 FBX の姿勢からどれだけ離れているかを返す。
+            /// Unity FBX Exporter は書き出し時点のボーン姿勢をスキンのバインドポーズとして
+            /// 書き出すため、ここが大きいほどメッシュの変形が壊れやすい。
+            /// </summary>
+            public void GetExportedPoseDeviation(out float maxAngle, out string worstPath)
+            {
+                maxAngle = 0f;
+                worstPath = string.Empty;
+
+                foreach (TransformTrack track in transformTracks)
+                {
+                    if (track.rotations.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    float angle = Quaternion.Angle(track.sourceRotation, track.rotations[0]);
+                    if (angle > maxAngle)
+                    {
+                        maxAngle = angle;
+                        worstPath = string.IsNullOrEmpty(track.path) ? "(root)" : track.path;
+                    }
+                }
+            }
+
             public BakeSampleBuffer(GameObject instance, bool captureBlendShapes)
             {
                 root = instance.transform;
@@ -875,6 +906,10 @@ namespace YozoLab.FBXAnimationBaker
                     {
                         target = t,
                         path = AnimationUtility.CalculateTransformPath(t, root),
+
+                        // 診断用: サンプリング開始前(= 元 FBX)の姿勢
+                        sourceRotation = t.localRotation,
+                        sourcePosition = t.localPosition,
                     });
                 }
 
@@ -1096,6 +1131,10 @@ namespace YozoLab.FBXAnimationBaker
             {
                 public Transform target;
                 public string path;
+
+                // 診断用: サンプリング開始前(= 元 FBX)の姿勢
+                public Quaternion sourceRotation;
+                public Vector3 sourcePosition;
                 public readonly List<Vector3> positions = new List<Vector3>();
                 public readonly List<Quaternion> rotations = new List<Quaternion>();
                 public readonly List<Vector3> scales = new List<Vector3>();
