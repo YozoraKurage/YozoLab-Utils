@@ -191,8 +191,9 @@ namespace YozoLab.FBXAnimationBaker
                 }
 
                 instance.name = outputName;
-                instance.transform.position = Vector3.zero;
-                instance.transform.rotation = Quaternion.identity;
+
+                // ルートの位置/回転は触らない。モデルによっては軸変換の補正がルートの
+                // 回転やスケールに入っており、identity に潰すと基準ポーズが崩れる。
 
                 Animator animator = instance.GetComponent<Animator>();
                 if (animator == null)

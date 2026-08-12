@@ -24,8 +24,12 @@ namespace YozoLab.FBXAnimationBaker
         private const string ModelExporterTypeName = "UnityEditor.Formats.Fbx.Exporter.ModelExporter";
         private const string ExportOptionsTypeName = "UnityEditor.Formats.Fbx.Exporter.ExportModelOptions";
 
-        private const BindingFlags MemberFlags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
-        private const BindingFlags StaticFlags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static;
+        // 継承メンバも拾えるよう FlattenHierarchy を含める。
+        // ExportSettings.instance は基底の ScriptableSingleton<T> 側にあるため、これが無いと見つからない。
+        private const BindingFlags MemberFlags =
+            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.FlattenHierarchy;
+        private const BindingFlags StaticFlags =
+            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.FlattenHierarchy;
 
         /// <summary>バイナリ FBX のファイル先頭にあるマジック文字列。</summary>
         private const string BinaryFbxMagic = "Kaydara FBX Binary";
@@ -37,6 +41,7 @@ namespace YozoLab.FBXAnimationBaker
         private static MethodInfo exportObjectsWithOptions;
         private static MethodInfo exportSimple;
         private static bool loggedOptionWarning;
+        private static bool loggedFormatDiagnostics;
 
         /// <summary>FBX Exporter が利用可能か。GUI の警告表示にも使う。</summary>
         public static bool IsAvailable
@@ -70,6 +75,7 @@ namespace YozoLab.FBXAnimationBaker
             exportObjectsWithOptions = null;
             exportSimple = null;
             loggedOptionWarning = false;
+            loggedFormatDiagnostics = false;
         }
 
         /// <summary>
@@ -189,7 +195,11 @@ namespace YozoLab.FBXAnimationBaker
 
             try
             {
-                PropertyInfo instanceProperty = settingsType.GetProperty("instance", StaticFlags);
+                // instance は基底の ScriptableSingleton<T> が持つ静的メンバ。
+                // 継承された静的メンバは FlattenHierarchy を付けないと GetProperty で拾えない。
+                PropertyInfo instanceProperty = settingsType.GetProperty("instance", StaticFlags)
+                    ?? typeof(ScriptableSingleton<>).MakeGenericType(settingsType)
+                        .GetProperty("instance", StaticFlags);
                 if (instanceProperty != null)
                 {
                     return instanceProperty.GetValue(null);
@@ -224,7 +234,7 @@ namespace YozoLab.FBXAnimationBaker
             }
             visited.Add(target);
 
-            foreach (FieldInfo field in target.GetType().GetFields(MemberFlags))
+            foreach (FieldInfo field in GetAllInstanceFields(target.GetType()))
             {
                 Type fieldType = field.FieldType;
 
@@ -332,7 +342,7 @@ namespace YozoLab.FBXAnimationBaker
             }
             visited.Add(target);
 
-            foreach (FieldInfo field in target.GetType().GetFields(MemberFlags))
+            foreach (FieldInfo field in GetAllInstanceFields(target.GetType()))
             {
                 Type fieldType = field.FieldType;
 
@@ -393,6 +403,13 @@ namespace YozoLab.FBXAnimationBaker
                              (SupportsExportOptions
                                  ? " (the installed FBX Exporter may use different export option names)"
                                  : " (this FBX Exporter version does not expose export options, so its default format is used)"));
+
+            // 原因の切り分けに必要な情報を、こちらから聞かなくても残るようにする(1 セッション 1 回)
+            if (!loggedFormatDiagnostics)
+            {
+                loggedFormatDiagnostics = true;
+                LogDiagnostics();
+            }
         }
 
         private static bool? IsBinaryFbx(string absoluteFilePath)
@@ -492,6 +509,22 @@ namespace YozoLab.FBXAnimationBaker
                 }
             }
             return false;
+        }
+
+        /// <summary>
+        /// 基底クラスの private フィールドも含めた全インスタンスフィールド。
+        /// FlattenHierarchy は基底の private メンバを返さないため、自前で辿る。
+        /// </summary>
+        private static IEnumerable<FieldInfo> GetAllInstanceFields(Type type)
+        {
+            for (Type current = type; current != null && current != typeof(object); current = current.BaseType)
+            {
+                foreach (FieldInfo field in current.GetFields(
+                    BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.DeclaredOnly))
+                {
+                    yield return field;
+                }
+            }
         }
 
         private static void Resolve()
