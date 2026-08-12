@@ -96,6 +96,11 @@ namespace YozoLab.FBXAnimationBaker
             int skippedCount = 0;
             int failedCount = 0;
 
+            // 1 本ごとにインポートを走らせると待ち時間が積み上がるため、
+            // 生成中はインポートを止めておき、最後にまとめて 1 回で処理させる。
+            AssetDatabase.StartAssetEditing();
+            bool assetEditingStarted = true;
+
             try
             {
                 for (int i = 0; i < jobs.Count; i++)
@@ -139,6 +144,10 @@ namespace YozoLab.FBXAnimationBaker
                     }
                 }
 
+                EditorUtility.DisplayProgressBar("FBX Animation Baker", "Importing generated FBX...", 1f);
+                AssetDatabase.StopAssetEditing();
+                assetEditingStarted = false;
+
                 AssetDatabase.SaveAssets();
                 AssetDatabase.Refresh();
                 settings.SaveSettings();
@@ -147,6 +156,10 @@ namespace YozoLab.FBXAnimationBaker
             }
             finally
             {
+                if (assetEditingStarted)
+                {
+                    AssetDatabase.StopAssetEditing();
+                }
                 EditorUtility.ClearProgressBar();
             }
         }
@@ -309,8 +322,10 @@ namespace YozoLab.FBXAnimationBaker
                     return false;
                 }
 
+                // 生成 → ImportAsset → 設定変更 → SaveAndReimport だと同じ FBX を 2 回
+                // インポートすることになる。設定を先に登録し、初回インポートで当てる。
+                FBXAnimationBakerPostprocessor.Register(outputAssetPath, BuildPendingImport(entry));
                 AssetDatabase.ImportAsset(outputAssetPath, ImportAssetOptions.ForceUpdate);
-                ConfigureBakedFbxImporter(outputAssetPath, entry);
 
                 long fileSizeKb = new FileInfo(absolutePath).Length / 1024;
                 Debug.Log($"{LogPrefix} \"{outputName}\": {curveCount} curve(s), {CountKeys(bakedClip)} key(s), {frameCount} sampled frame(s), {fileSizeKb} KB");
@@ -480,37 +495,19 @@ namespace YozoLab.FBXAnimationBaker
             AssetDatabase.CreateAsset(newClip, clipAssetPath);
         }
 
-        /// <summary>生成された FBX の ModelImporter に Animation Type を反映する。</summary>
-        private static void ConfigureBakedFbxImporter(string outputAssetPath, AnimationBakeEntry entry)
+        /// <summary>生成 FBX の初回インポートに適用する設定を組み立てる。</summary>
+        private static FBXAnimationBakerPostprocessor.PendingImport BuildPendingImport(AnimationBakeEntry entry)
         {
-            if (entry.importAnimationType == BakedFbxAnimationType.None)
-            {
-                return;
-            }
+            bool skeletonOnly = entry.exportContent == BakeExportContent.SkeletonOnly;
 
-            ModelImporter importer = AssetImporter.GetAtPath(outputAssetPath) as ModelImporter;
-            if (importer == null)
+            return new FBXAnimationBakerPostprocessor.PendingImport
             {
-                Debug.LogWarning($"{LogPrefix} Failed to get ModelImporter for the generated FBX: {outputAssetPath}");
-                return;
-            }
-
-            switch (entry.importAnimationType)
-            {
-                case BakedFbxAnimationType.Legacy:
-                    importer.animationType = ModelImporterAnimationType.Legacy;
-                    break;
-                case BakedFbxAnimationType.Humanoid:
-                    importer.animationType = ModelImporterAnimationType.Human;
-                    importer.avatarSetup = ModelImporterAvatarSetup.CreateFromThisModel;
-                    break;
-                default:
-                    importer.animationType = ModelImporterAnimationType.Generic;
-                    break;
-            }
-
-            importer.importAnimation = true;
-            importer.SaveAndReimport();
+                animationType = entry.importAnimationType,
+                leanImport = entry.fastImport,
+                // 書き出し側で外したものは読み込む必要がない
+                importBlendShapes = !skeletonOnly && !entry.excludeBlendShapes,
+                importTangents = !skeletonOnly,
+            };
         }
 
         private static float ResolveFrameRate(AnimationBakeEntry entry, AnimationClip clip)
@@ -654,6 +651,7 @@ namespace YozoLab.FBXAnimationBaker
             sb.Append(entry.exportContent).Append('|');
             sb.Append(entry.saveBakedClipAsset).Append('|');
             sb.Append(entry.importAnimationType).Append('|');
+            sb.Append(entry.fastImport).Append('|');
             sb.Append(entry.exportAscii).Append('|');
             sb.Append(entry.useOtherAvatarDefinition).Append('|');
             sb.Append(entry.avatarDefinition != null ? AssetDatabase.GetAssetPath(entry.avatarDefinition) : string.Empty);

@@ -96,6 +96,10 @@ namespace YozoLab.FBXAnimationBaker
                 Directory.CreateDirectory(directory);
             }
 
+            // 呼び出し時オプションだけでは形式が変わらないエクスポーターがあるため、
+            // Project Settings 側の形式も一時的に上書きし、終わったら必ず元へ戻す。
+            List<Action> restoreGlobalFormat = OverrideGlobalExportFormat(ascii);
+
             try
             {
                 object result;
@@ -129,6 +133,245 @@ namespace YozoLab.FBXAnimationBaker
             {
                 error = e.ToString();
                 return false;
+            }
+            finally
+            {
+                foreach (Action restore in restoreGlobalFormat)
+                {
+                    restore();
+                }
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        //  Project Settings 側のエクスポート形式の一時上書き
+        // ═══════════════════════════════════════════════════════════════
+
+        private const string ExportSettingsTypeName = "UnityEditor.Formats.Fbx.Exporter.ExportSettings";
+
+        /// <summary>
+        /// FBX Exporter の設定オブジェクトを辿り、ASCII/Binary を表す enum メンバを
+        /// 目的の値に設定する。元へ戻すための復元処理のリストを返す。
+        ///
+        /// エクスポーターのバージョンによって、形式が
+        /// 「呼び出し時オプション」ではなく「Project Settings の値」で決まることがあるため。
+        /// </summary>
+        private static List<Action> OverrideGlobalExportFormat(bool ascii)
+        {
+            var restores = new List<Action>();
+
+            object settings = GetExportSettingsInstance();
+            if (settings == null)
+            {
+                return restores;
+            }
+
+            OverrideFormatMembers(settings, ascii ? "ASCII" : "Binary", restores, new List<object>(), 0);
+            return restores;
+        }
+
+        private static object GetExportSettingsInstance()
+        {
+            Type settingsType = null;
+            foreach (Assembly assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                settingsType = assembly.GetType(ExportSettingsTypeName, false);
+                if (settingsType != null)
+                {
+                    break;
+                }
+            }
+
+            if (settingsType == null)
+            {
+                return null;
+            }
+
+            try
+            {
+                PropertyInfo instanceProperty = settingsType.GetProperty("instance", StaticFlags);
+                if (instanceProperty != null)
+                {
+                    return instanceProperty.GetValue(null);
+                }
+
+                FieldInfo instanceField = settingsType.GetField("instance", StaticFlags);
+                return instanceField?.GetValue(null);
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// 設定オブジェクトのフィールドを再帰的に辿り、ASCII/Binary を持つ enum を書き換える。
+        /// メンバ名がバージョンによって違うため、名前ではなく「enum の中身」で見分ける。
+        /// </summary>
+        private static void OverrideFormatMembers(object target, string valueName, List<Action> restores, List<object> visited, int depth)
+        {
+            if (target == null || depth > 3)
+            {
+                return;
+            }
+
+            foreach (object seen in visited)
+            {
+                if (ReferenceEquals(seen, target))
+                {
+                    return;
+                }
+            }
+            visited.Add(target);
+
+            foreach (FieldInfo field in target.GetType().GetFields(MemberFlags))
+            {
+                Type fieldType = field.FieldType;
+
+                if (fieldType.IsEnum)
+                {
+                    string[] names = Enum.GetNames(fieldType);
+                    if (!names.Contains("ASCII") || !names.Contains("Binary"))
+                    {
+                        continue;
+                    }
+
+                    object original = field.GetValue(target);
+                    object desired = Enum.Parse(fieldType, valueName);
+                    if (Equals(original, desired))
+                    {
+                        continue;
+                    }
+
+                    field.SetValue(target, desired);
+                    object capturedTarget = target;
+                    FieldInfo capturedField = field;
+                    restores.Add(() => capturedField.SetValue(capturedTarget, original));
+                    continue;
+                }
+
+                // エクスポーター自身が定義する入れ子の設定クラスだけ辿る
+                if (fieldType.IsPrimitive || fieldType == typeof(string) || fieldType.IsArray)
+                {
+                    continue;
+                }
+                if (fieldType.Assembly != target.GetType().Assembly)
+                {
+                    continue;
+                }
+
+                object child = null;
+                try
+                {
+                    child = field.GetValue(target);
+                }
+                catch (Exception)
+                {
+                    continue;
+                }
+
+                OverrideFormatMembers(child, valueName, restores, visited, depth + 1);
+            }
+        }
+
+        /// <summary>
+        /// 見つかったエクスポーター API の状態を Console に出す。
+        /// 形式やオプションが効かないときの原因切り分け用。
+        /// </summary>
+        public static void LogDiagnostics()
+        {
+            Resolve();
+
+            var sb = new StringBuilder();
+            sb.AppendLine("[FBX Animation Baker] FBX Exporter diagnostics");
+            sb.AppendLine($"  ModelExporter type : {modelExporterType?.FullName ?? "(not found)"}");
+            sb.AppendLine($"  Assembly           : {modelExporterType?.Assembly.GetName().Name} {modelExporterType?.Assembly.GetName().Version}");
+            sb.AppendLine($"  ExportModelOptions : {exportOptionsType?.FullName ?? "(not found)"}");
+            sb.AppendLine($"  ExportObject(2 args)          : {(exportSimple != null ? "found" : "not found")}");
+            sb.AppendLine($"  ExportObject(with options)    : {(exportWithOptions != null ? "found" : "not found")}");
+            sb.AppendLine($"  ExportObjects(with options)   : {(exportObjectsWithOptions != null ? "found" : "not found")}");
+
+            if (exportOptionsType != null)
+            {
+                sb.AppendLine("  ExportModelOptions members:");
+                foreach (PropertyInfo property in exportOptionsType.GetProperties(MemberFlags))
+                {
+                    sb.AppendLine($"    (prop) {property.Name} : {property.PropertyType.Name}{(property.CanWrite ? string.Empty : " (read-only)")}");
+                }
+                foreach (FieldInfo field in exportOptionsType.GetFields(MemberFlags))
+                {
+                    sb.AppendLine($"    (field) {field.Name} : {field.FieldType.Name}");
+                }
+            }
+
+            object settings = GetExportSettingsInstance();
+            sb.AppendLine($"  ExportSettings instance : {(settings != null ? settings.GetType().FullName : "(not found)")}");
+            if (settings != null)
+            {
+                var found = new List<string>();
+                CollectFormatMembers(settings, found, new List<object>(), 0);
+                sb.AppendLine($"  ASCII/Binary members found : {(found.Count > 0 ? string.Join(", ", found) : "(none)")}");
+            }
+
+            Debug.Log(sb.ToString());
+        }
+
+        private static void CollectFormatMembers(object target, List<string> found, List<object> visited, int depth)
+        {
+            if (target == null || depth > 3)
+            {
+                return;
+            }
+
+            foreach (object seen in visited)
+            {
+                if (ReferenceEquals(seen, target))
+                {
+                    return;
+                }
+            }
+            visited.Add(target);
+
+            foreach (FieldInfo field in target.GetType().GetFields(MemberFlags))
+            {
+                Type fieldType = field.FieldType;
+
+                if (fieldType.IsEnum)
+                {
+                    string[] names = Enum.GetNames(fieldType);
+                    if (names.Contains("ASCII") && names.Contains("Binary"))
+                    {
+                        object value = null;
+                        try
+                        {
+                            value = field.GetValue(target);
+                        }
+                        catch (Exception)
+                        {
+                            // 取得できないメンバは名前だけ拾う
+                        }
+                        found.Add($"{target.GetType().Name}.{field.Name}={value}");
+                    }
+                    continue;
+                }
+
+                if (fieldType.IsPrimitive || fieldType == typeof(string) || fieldType.IsArray)
+                {
+                    continue;
+                }
+                if (fieldType.Assembly != target.GetType().Assembly)
+                {
+                    continue;
+                }
+
+                try
+                {
+                    CollectFormatMembers(field.GetValue(target), found, visited, depth + 1);
+                }
+                catch (Exception)
+                {
+                    // 辿れないメンバは無視
+                }
             }
         }
 

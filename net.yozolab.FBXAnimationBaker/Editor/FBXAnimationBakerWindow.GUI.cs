@@ -26,6 +26,14 @@ namespace YozoLab.FBXAnimationBaker
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField("FBX Animation Baker", EditorStyles.boldLabel);
             GUILayout.FlexibleSpace();
+            if (GUILayout.Button(new GUIContent("Exporter Info",
+                    L10n.T("見つかったFBX Exporterのバージョンやオプションの状態をConsoleに出力します(形式が変わらないときの切り分け用)",
+                           "Log the detected FBX Exporter version and option state to the Console (for troubleshooting export format issues)")),
+                GUILayout.Width(95)))
+            {
+                FbxExporterBridge.ClearCache();
+                FbxExporterBridge.LogDiagnostics();
+            }
             if (GUILayout.Button(L10n.IsEnglish ? "EN" : "JP", GUILayout.Width(35)))
             {
                 L10n.IsEnglish = !L10n.IsEnglish;
@@ -244,6 +252,9 @@ namespace YozoLab.FBXAnimationBaker
 
             EditorGUILayout.PropertyField(entryProp.FindPropertyRelative("importAnimationType"), new GUIContent("Import Animation Type",
                 L10n.T("生成したFBXを読み込み直すときのAnimation Type", "Animation Type applied when the generated FBX is imported back")));
+            EditorGUILayout.PropertyField(entryProp.FindPropertyRelative("fastImport"), new GUIContent("Fast Import",
+                L10n.T("生成FBXのインポート時に不要な処理(マテリアル/カメラ/ライト/カーブ再サンプリング等)を省いて速くする",
+                       "Skip import work the baked FBX does not need (materials, cameras, lights, curve resampling)")));
             EditorGUILayout.PropertyField(entryProp.FindPropertyRelative("saveBakedClipAsset"), new GUIContent("Save Baked .anim",
                 L10n.T("ベイク済みTransformクリップを .anim としても保存する", "Also save the baked Transform clip as a .anim asset")));
             EditorGUILayout.PropertyField(entryProp.FindPropertyRelative("exportAscii"), new GUIContent("Export ASCII",
@@ -439,6 +450,7 @@ namespace YozoLab.FBXAnimationBaker
             entryProp.FindPropertyRelative("keyframeReduction").boolValue = true;
             entryProp.FindPropertyRelative("reductionTolerance").floatValue = 0.0001f;
             entryProp.FindPropertyRelative("saveBakedClipAsset").boolValue = true;
+            entryProp.FindPropertyRelative("fastImport").boolValue = true;
             entryProp.FindPropertyRelative("exportAscii").boolValue = false;
             entryProp.FindPropertyRelative("exportContent").enumValueIndex = (int)BakeExportContent.ModelAndAnimation;
             entryProp.FindPropertyRelative("importAnimationType").enumValueIndex = (int)BakedFbxAnimationType.Generic;

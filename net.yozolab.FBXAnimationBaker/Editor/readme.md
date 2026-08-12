@@ -36,6 +36,7 @@ Generic な Transform カーブへ変換したうえで FBX に焼き込みま�
 | Output File Name | 出力ファイル名（拡張子なし）。空ならクリップ名 |
 | Export Content | 生成 FBX に含めるもの。`Skeleton Only` はメッシュ/レンダラーを外し、アニメーションするノード階層だけにする（**FBX が劇的に小さくなる**） |
 | Import Animation Type | 生成 FBX を読み込み直すときの Animation Type（既定は Generic） |
+| Fast Import | 生成 FBX のインポート時に不要な処理（マテリアル/カメラ/ライト/カーブ再サンプリング等）を省く（既定 ON） |
 | Save Baked .anim | ベイク済み Transform クリップを .anim としても保存する |
 | Export ASCII | バイナリではなく ASCII FBX で書き出す |
 | Rest Pose | アニメーションを評価しないときに FBX が持つ姿勢。`Source FBX Pose` は元の T ポーズ等を保つ／`First Frame` は 0 フレーム目を焼き込む |
@@ -95,6 +96,17 @@ FBX の容量はほとんどがメッシュとブレンドシェイプです。�
 `Reduction Tolerance` を大きく（例: 0.001）、または `Frame Rate` を下げてください。
 ベイク結果のカーブ数・キー数・ファイルサイズは実行時に Console へ出力されます。
 
-なお `Export ASCII` を OFF にしてもバイナリにならない場合、その FBX Exporter の
-バージョンではエクスポートオプションのメンバ名が異なる可能性があります。
-その場合は書き出し後に Console へ警告が出ます。
+なお `Export ASCII` を OFF にしてもバイナリにならない場合（Blender は ASCII FBX を読めません）、
+その FBX Exporter のバージョンでは形式の指定方法が異なる可能性があります。
+書き出し後にファイルヘッダを検査して食い違えば警告を出すので、ウィンドウ右上の
+`Exporter Info` を押して Console のログを確認してください。
+
+## インポートが遅いとき
+
+生成 FBX の設定は `AssetPostprocessor` で初回インポート時に当てているため、
+インポートは 1 本につき 1 回だけです（設定変更後の再インポートは発生しません）。
+複数本まとめて実行した場合も、書き出しが全部終わってから 1 度だけインポートされます。
+
+さらに `Fast Import` が ON だと、マテリアル生成・カメラ/ライト・可視性・コンストレイント・
+タンジェント計算・カーブの再サンプリング/圧縮を省きます。ベイク済みカーブは
+再サンプリングすると精度も落ちるため、基本は ON のままで問題ありません。
