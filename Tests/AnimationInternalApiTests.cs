@@ -173,6 +173,18 @@ namespace YozoLab.Tests
         }
 
         [Test]
+        public void AnimationWindowUtility_ExposesDisplayNameBuilder()
+        {
+            Type utility = GetEditorType("UnityEditorInternal.AnimationWindowUtility");
+
+            MethodInfo displayName = utility.GetMethod("GetNicePropertyDisplayName", Static, null,
+                new[] { typeof(Type), typeof(string) }, null);
+            Assert.That(displayName, Is.Not.Null,
+                "GetNicePropertyDisplayName(Type, string) が無い（行の表示名を短くできない）");
+            Assert.That(displayName.ReturnType, Is.EqualTo(typeof(string)), "戻り値が string ではない");
+        }
+
+        [Test]
         public void AnimationWindow_ExposesOnGuiAndState()
         {
             Type window = GetEditorType("UnityEditor.AnimationWindow");

@@ -63,8 +63,6 @@ namespace YozoLab.AnimTools
         private static Type stateType;              // UnityEditorInternal.AnimationWindowState
         private static MethodInfo allCurvesGetter;  // AnimationWindowState.get_allCurves
         private static FieldInfo allCurvesCache;    // AnimationWindowState.m_AllCurvesCache
-        private static PropertyInfo refreshProp;    // AnimationWindowState.refresh
-        private static object refreshEverything;    // AnimationWindowState.RefreshType.Everything
         private static PropertyInfo curveBindingProp; // AnimationWindowCurve.binding
 
         // 絞り込み済みリストの記憶。allCurves は 1 フレームに何度も、しかもループの中から
@@ -123,56 +121,7 @@ namespace YozoLab.AnimTools
                     Debug.LogWarning("[HumanoidLayer] Animation ウィンドウへのパッチに失敗しているため機能しません。");
             }
 
-            RefreshAnimationWindows();
-        }
-
-        /// <summary>
-        /// 開いている Animation ウィンドウに作り直しを要求する。allCurves のキャッシュを
-        /// 捨てさせ、階層ツリーを組み直させるため、state.refresh に Everything を立てる。
-        /// </summary>
-        private static void RefreshAnimationWindows()
-        {
-            try
-            {
-                Type winType = typeof(Editor).Assembly.GetType("UnityEditor.AnimationWindow");
-                if (winType == null) return;
-
-                foreach (UnityEngine.Object obj in Resources.FindObjectsOfTypeAll(winType))
-                {
-                    var window = obj as EditorWindow;
-                    if (window == null) continue;
-
-                    object state = GetState(window);
-                    if (state != null && refreshProp != null && refreshEverything != null)
-                        refreshProp.SetValue(state, refreshEverything);
-
-                    window.Repaint();
-                }
-            }
-            catch
-            {
-                // 切り替え自体は成立しているので、再描画の失敗は黙って諦める（次の再描画で追い付く）。
-            }
-        }
-
-        /// <summary>AnimationWindow.m_AnimEditor → AnimEditor.state と辿る。失敗時は null。</summary>
-        private static object GetState(EditorWindow window)
-        {
-            try
-            {
-                FieldInfo animEditorField = window.GetType().GetField("m_AnimEditor",
-                    BindingFlags.Instance | BindingFlags.NonPublic);
-                object animEditor = animEditorField?.GetValue(window);
-                if (animEditor == null) return null;
-
-                PropertyInfo stateProp = animEditor.GetType().GetProperty("state",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                return stateProp?.GetValue(animEditor);
-            }
-            catch
-            {
-                return null;
-            }
+            AnimationWindowRefresher.RefreshAll();
         }
 
         // ---------------------------------------------------------------
@@ -197,7 +146,6 @@ namespace YozoLab.AnimTools
                     return;
                 }
 
-                CacheRefreshMembers();
 
                 var harmony = new Harmony(HarmonyId);
                 BindingFlags sf = BindingFlags.Static | BindingFlags.NonPublic;
@@ -213,24 +161,6 @@ namespace YozoLab.AnimTools
             catch (Exception e)
             {
                 Debug.LogWarning($"[HumanoidLayer] パッチ適用に失敗しました（機能は無効のまま）: {e.Message}");
-            }
-        }
-
-        /// <summary>state.refresh へ Everything を書き込むためのメンバを解決する。</summary>
-        private static void CacheRefreshMembers()
-        {
-            try
-            {
-                refreshProp = stateType.GetProperty("refresh",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                Type refreshType = stateType.GetNestedType("RefreshType", BindingFlags.Public | BindingFlags.NonPublic);
-                if (refreshType != null)
-                    refreshEverything = Enum.Parse(refreshType, "Everything");
-            }
-            catch
-            {
-                refreshProp = null;
-                refreshEverything = null;
             }
         }
 
