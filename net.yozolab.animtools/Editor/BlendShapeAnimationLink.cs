@@ -48,9 +48,10 @@ namespace YozoLab.AnimTools
         private const string BlendShapePrefix = "blendShape.";
 
         // OnBlendShapeUI の中だけで有効な、そのフレーム分の状態。
+        // 位置をここに持たないのが要点。理由は HandleRow のコメントを参照。
         private static bool drawingBlendShapes;
         private static SkinnedMeshRenderer target;
-        private static Vector2? pendingDoubleClick;
+        private static bool pendingDoubleClick;
 
         // 内部 API 読み取り用リフレクションキャッシュ
         private static FieldInfo animEditorField;    // AnimationWindow.m_AnimEditor
@@ -167,9 +168,9 @@ namespace YozoLab.AnimTools
         // ---------------------------------------------------------------
 
         /// <summary>
-        /// ブレンドシェイプ欄の描画に入る。ダブルクリックはこの時点で拾っておく。
-        /// Slider は自分が処理したイベントを消費してしまうので、Postfix 側では
-        /// Event.current が Used になっていて判定できない。
+        /// ブレンドシェイプ欄の描画に入る。ダブルクリックが起きたという事実だけをここで拾う。
+        /// Slider は自分が処理したイベントを消費してしまうので、行を描く場所では
+        /// Event.current が Used になっており、種別からは判定できない。
         /// </summary>
         private static void BlendShapeUIPrefix(object __instance)
         {
@@ -179,15 +180,13 @@ namespace YozoLab.AnimTools
                 target = (__instance as Editor)?.target as SkinnedMeshRenderer;
 
                 Event e = Event.current;
-                pendingDoubleClick = (target != null && e != null
-                    && e.type == EventType.MouseDown && e.button == 0 && e.clickCount == 2)
-                    ? e.mousePosition
-                    : (Vector2?)null;
+                pendingDoubleClick = target != null && e != null
+                    && e.type == EventType.MouseDown && e.button == 0 && e.clickCount == 2;
             }
             catch
             {
                 drawingBlendShapes = false;
-                pendingDoubleClick = null;
+                pendingDoubleClick = false;
             }
         }
 
@@ -195,13 +194,13 @@ namespace YozoLab.AnimTools
         {
             drawingBlendShapes = false;
             target = null;
-            pendingDoubleClick = null;
+            pendingDoubleClick = false;
         }
 
         /// <summary>素の Unity の行。矩形は直前に描かれたものとして取り出す。</summary>
         private static void StockSliderPostfix(GUIContent label)
         {
-            if (!drawingBlendShapes || pendingDoubleClick == null) return;
+            if (!drawingBlendShapes || !pendingDoubleClick) return;
             try
             {
                 HandleRow(GUILayoutUtility.GetLastRect(), label);
@@ -216,7 +215,7 @@ namespace YozoLab.AnimTools
         /// <summary>EditorPatcher の行。矩形もラベルも引数で渡ってくる。</summary>
         private static void PatchedSliderPostfix(Rect position, GUIContent label)
         {
-            if (!drawingBlendShapes || pendingDoubleClick == null) return;
+            if (!drawingBlendShapes || !pendingDoubleClick) return;
             try
             {
                 HandleRow(position, label);
@@ -231,16 +230,26 @@ namespace YozoLab.AnimTools
         /// <summary>
         /// 行の矩形のうち名前が描かれている側（先頭 labelWidth 分）にダブルクリックが
         /// 入っていれば、Animation ウィンドウ側へ飛ばす。
+        ///
+        /// マウス位置は必ず「行を描いている今ここ」で読むこと。OnBlendShapeUI の入口で
+        /// 記録した位置を持ち回ってはならない。EditorPatcher の行は TreeView が
+        /// useScrollView = false で描くため GUI.BeginClip の内側にあり
+        /// （TreeViewController.OnGUI）、クリップの内と外では Event.current.mousePosition が
+        /// 平行移動する。入口で取った座標を持ち込むと、リストの左上位置のぶんだけ
+        /// ずれた行に当たる（行高 24px に対し数行ぶん、スクロール量で変動する）。
+        /// row も Event.current もこの場所で読めば、常に同じ座標系になる。
         /// </summary>
         private static void HandleRow(Rect row, GUIContent label)
         {
             if (label == null || string.IsNullOrEmpty(label.text)) return;
 
-            Vector2 point = pendingDoubleClick.Value;
-            var labelRect = new Rect(row.x, row.y, Mathf.Min(EditorGUIUtility.labelWidth, row.width), row.height);
-            if (!labelRect.Contains(point)) return;
+            Event e = Event.current;
+            if (e == null) return;
 
-            pendingDoubleClick = null; // 一度きり。以降の行では判定しない
+            var labelRect = new Rect(row.x, row.y, Mathf.Min(EditorGUIUtility.labelWidth, row.width), row.height);
+            if (!labelRect.Contains(e.mousePosition)) return;
+
+            pendingDoubleClick = false; // 一度きり。以降の行では判定しない
             TryReveal(target, label.text);
         }
 
