@@ -31,8 +31,9 @@ namespace YozoLab.AnimTools
 
         // ping ボタン自身のレイアウト。x はトグルの左隣に置く（トグル位置は
         // HoldPreviousKeyRecorder の共通定数を基準にする）。
-        private const float ButtonWidth = 24f;
-        private const float Gap = 2f;
+        // さらに左へボタンを並べる機能（HumanoidLayerFilter 等）がこの位置を基準にするため internal。
+        internal const float ButtonWidth = 24f;
+        internal const float Gap = 2f;
 
         // 内部 API 読み取り用リフレクションキャッシュ
         private static FieldInfo animEditorField;   // AnimationWindow.m_AnimEditor
