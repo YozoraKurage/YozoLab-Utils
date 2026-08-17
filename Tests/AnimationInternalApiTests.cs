@@ -4,6 +4,7 @@ using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
 using UnityEditor;
+using UnityEngine;
 
 namespace YozoLab.Tests
 {
@@ -34,7 +35,7 @@ namespace YozoLab.Tests
         }
 
         [Test]
-        public void AnimationWindowState_allCurves_とキャッシュ場所が存在する()
+        public void AnimationWindowState_ExposesAllCurvesAndCache()
         {
             Type state = GetEditorType("UnityEditorInternal.AnimationWindowState");
 
@@ -52,7 +53,7 @@ namespace YozoLab.Tests
         }
 
         [Test]
-        public void AnimationWindowState_refresh_で作り直しを要求できる()
+        public void AnimationWindowState_CanRequestFullRefresh()
         {
             Type state = GetEditorType("UnityEditorInternal.AnimationWindowState");
 
@@ -67,7 +68,7 @@ namespace YozoLab.Tests
         }
 
         [Test]
-        public void AnimationWindowCurve_から_binding_を読める()
+        public void AnimationWindowCurve_ExposesBinding()
         {
             Type curve = GetEditorType("UnityEditorInternal.AnimationWindowCurve");
 
@@ -78,7 +79,7 @@ namespace YozoLab.Tests
         }
 
         [Test]
-        public void AnimationRecording_のキー書き込み経路が二つとも存在する()
+        public void AnimationRecording_ExposesBothKeyWritePaths()
         {
             Type recording = GetEditorType("UnityEditorInternal.AnimationRecording");
 
@@ -100,7 +101,79 @@ namespace YozoLab.Tests
         }
 
         [Test]
-        public void AnimationWindow_の描画と状態への入口が存在する()
+        public void AnimationWindowState_ExposesRowSelectionApi()
+        {
+            Type state = GetEditorType("UnityEditorInternal.AnimationWindowState");
+
+            FieldInfo hierarchyData = state.GetField("hierarchyData", Instance);
+            Assert.That(hierarchyData, Is.Not.Null, "hierarchyData が無い（行を走査できない）");
+
+            MethodInfo getRows = hierarchyData.FieldType.GetMethod("GetRows", Instance, null, Type.EmptyTypes, null);
+            Assert.That(getRows, Is.Not.Null, "hierarchyData.GetRows() が無い");
+
+            MethodInfo select = state.GetMethod("SelectHierarchyItem", Instance, null,
+                new[] { typeof(int), typeof(bool), typeof(bool) }, null);
+            Assert.That(select, Is.Not.Null, "SelectHierarchyItem(int, bool, bool) が無い");
+
+            Assert.That(state.GetProperty("activeRootGameObject", Instance), Is.Not.Null,
+                "activeRootGameObject が無い（対象がこのウィンドウの配下か判定できない）");
+        }
+
+        [Test]
+        public void AnimationWindowHierarchyNode_ExposesBinding()
+        {
+            Type node = GetEditorType("UnityEditorInternal.AnimationWindowHierarchyNode");
+
+            FieldInfo binding = node.GetField("binding", Instance);
+            Assert.That(binding, Is.Not.Null, "binding フィールドが無い（行の同定ができない）");
+            Assert.That(binding.FieldType, Is.EqualTo(typeof(EditorCurveBinding?)),
+                "binding が EditorCurveBinding? ではない");
+        }
+
+        [Test]
+        public void TreeViewController_ExposesFrameForScrollingToRow()
+        {
+            Type animEditor = GetEditorType("UnityEditor.AnimEditor");
+
+            FieldInfo hierarchy = animEditor.GetField("m_Hierarchy", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(hierarchy, Is.Not.Null, "AnimEditor.m_Hierarchy が無い");
+
+            FieldInfo treeView = hierarchy.FieldType.GetField("m_TreeView", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(treeView, Is.Not.Null, "AnimationWindowHierarchy.m_TreeView が無い");
+
+            MethodInfo frame = treeView.FieldType.GetMethod("Frame", Instance, null,
+                new[] { typeof(int), typeof(bool), typeof(bool) }, null);
+            Assert.That(frame, Is.Not.Null, "TreeViewController.Frame(int, bool, bool) が無い（スクロールと点滅ができない）");
+        }
+
+        [Test]
+        public void BlendShapeUI_ExposesBothSliderEntryPoints()
+        {
+            Type smrEditor = GetEditorType("UnityEditor.SkinnedMeshRendererEditor");
+            Assert.That(smrEditor.GetMethod("OnBlendShapeUI", Instance), Is.Not.Null,
+                "OnBlendShapeUI が無い（ブレンドシェイプ欄を囲い込めない）");
+
+            // 素の Unity 経路：SkinnedMeshRendererEditor が呼ぶ内部 overload。
+            MethodInfo layoutSlider = typeof(EditorGUILayout).GetMethod("Slider", Static, null, new[]
+            {
+                typeof(SerializedProperty), typeof(float), typeof(float),
+                typeof(float), typeof(float), typeof(GUIContent), typeof(GUILayoutOption[]),
+            }, null);
+            Assert.That(layoutSlider, Is.Not.Null, "EditorGUILayout.Slider の内部 overload が無い");
+
+            // EditorPatcher 経路：あちらの行描画が呼ぶ Unity 内部 overload。
+            // EditorPatcher の有無に関わらず、Unity 側にこれが在ることを見張る。
+            MethodInfo guiSlider = typeof(EditorGUI).GetMethod("Slider", Static, null, new[]
+            {
+                typeof(Rect), typeof(GUIContent), typeof(float), typeof(float), typeof(float),
+                typeof(float), typeof(float), typeof(GUIStyle), typeof(GUIStyle), typeof(GUIStyle),
+                typeof(Texture2D), typeof(GUIStyle),
+            }, null);
+            Assert.That(guiSlider, Is.Not.Null, "EditorGUI.Slider の 12 引数 overload が無い");
+        }
+
+        [Test]
+        public void AnimationWindow_ExposesOnGuiAndState()
         {
             Type window = GetEditorType("UnityEditor.AnimationWindow");
 
