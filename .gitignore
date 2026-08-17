@@ -13,3 +13,8 @@ Logs/
 obj/
 *.csproj
 *.sln
+
+# PhysBoneLab を切り出した先の組み立て場（別リポジトリへ移したら消す）
+physbonelab~
+.distillery/
+.claude/
