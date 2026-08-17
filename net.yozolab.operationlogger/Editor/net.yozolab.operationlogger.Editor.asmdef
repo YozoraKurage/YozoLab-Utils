@@ -10,12 +10,19 @@
     "overrideReferences": false,
     "precompiledReferences": [],
     "autoReferenced": false,
-    "defineConstraints": [],
+    "defineConstraints": [
+        "YOZOLAB_ENABLE_OPERATIONLOGGER"
+    ],
     "versionDefines": [
         {
             "name": "com.vrchat.base",
             "expression": "",
             "define": "YOZOLAB_OPLOG_HARMONY"
+        },
+        {
+            "name": "Unity",
+            "expression": "",
+            "define": "YOZOLAB_ENABLE_OPERATIONLOGGER"
         }
     ],
     "noEngineReferences": false

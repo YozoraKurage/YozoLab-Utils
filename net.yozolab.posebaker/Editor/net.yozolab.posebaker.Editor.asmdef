@@ -12,12 +12,19 @@
     "overrideReferences": false,
     "precompiledReferences": [],
     "autoReferenced": false,
-    "defineConstraints": [],
+    "defineConstraints": [
+        "YOZOLAB_ENABLE_POSEBAKER"
+    ],
     "versionDefines": [
         {
             "name": "nadena.dev.ndmf",
             "expression": "",
             "define": "YOZOLAB_NDMF"
+        },
+        {
+            "name": "Unity",
+            "expression": "",
+            "define": "YOZOLAB_ENABLE_POSEBAKER"
         }
     ],
     "noEngineReferences": false
