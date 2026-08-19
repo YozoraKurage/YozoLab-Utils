@@ -3,6 +3,22 @@ using System;
 namespace YozoLab.UtilSettings
 {
     /// <summary>
+    /// パッケージ間の「有効なら使える機能」の紐付け 1 件分。
+    ///
+    /// 利用側の asmdef に、提供側パッケージが有効なあいだだけ Define を注入する。
+    /// asmdef の defineConstraints では他 asmdef の有無を判定できないので、
+    /// この設定機構が versionDefines を書き換えることで肩代わりする。
+    /// </summary>
+    internal sealed class FeatureLink
+    {
+        /// <summary>提供側パッケージの Id。</summary>
+        public string ProviderId;
+
+        /// <summary>利用側 asmdef に注入するシンボル。</summary>
+        public string Define;
+    }
+
+    /// <summary>
     /// 切り替えの対象になるパッケージ 1 件分の定義。
     /// </summary>
     internal sealed class UtilPackage
@@ -27,6 +43,9 @@ namespace YozoLab.UtilSettings
 
         /// <summary>コンパイルされているときだけ触れる、実行時の ON/OFF。</summary>
         public RuntimeToggle[] Toggles = Array.Empty<RuntimeToggle>();
+
+        /// <summary>このパッケージが利用する、他パッケージ提供の機能。</summary>
+        public FeatureLink[] Consumes = Array.Empty<FeatureLink>();
     }
 
     /// <summary>
@@ -88,10 +107,36 @@ namespace YozoLab.UtilSettings
             {
                 Id = "vrcgizmoaccelerator",
                 DisplayName = "VRC Gizmo Accelerator",
-                Description = "PhysBone ギズモの描画を一括化して軽くする。Harmony を使う。",
+                Description = "PhysBone ギズモを独自の一括描画パスに置き換えて軽くする。Harmony を使う。",
                 AsmdefGuid = "c54f7afe8bca44b5bf2680c2058b79b5",
                 Define = "YOZOLAB_ENABLE_VRCGIZMOACCELERATOR",
                 OpenMenuPath = "YozoLab/VRC Gizmo Accelerator",
+            },
+            new UtilPackage
+            {
+                Id = "pbradiusgizmo",
+                DisplayName = "PhysBone Radius Gizmo",
+                Description = "PhysBone の Collision Radius をシーン上のハンドルで変える。",
+                AsmdefGuid = "98df72da806a4338800e6d264b24df60",
+                Define = "YOZOLAB_ENABLE_PBRADIUSGIZMO",
+                Consumes = new[]
+                {
+                    // Accelerator が有効なら、その代替ギズモパスと連携する
+                    new FeatureLink
+                    {
+                        ProviderId = "vrcgizmoaccelerator",
+                        Define = "YOZOLAB_HAS_VRCGIZMOACC",
+                    },
+                },
+                Toggles = new[]
+                {
+                    new RuntimeToggle
+                    {
+                        Label = "Collision Radius をシーンで操作",
+                        TypeName = "YozoLab.PBRadiusGizmo.PhysBoneRadiusGizmo",
+                        Tooltip = "PhysBone を選ぶと Radius のハンドルが出る。",
+                    },
+                },
             },
             new UtilPackage
             {

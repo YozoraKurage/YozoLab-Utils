@@ -101,7 +101,7 @@ namespace YozoLab.UtilSettings
             var touched = new List<string>();
             foreach (UtilPackage package in UtilsCatalog.Packages)
             {
-                if (SyncOne(package, enabled.Contains(package.Id), out string path))
+                if (SyncOne(package, enabled.Contains(package.Id), enabled, out string path))
                     touched.Add(path);
             }
 
@@ -112,7 +112,7 @@ namespace YozoLab.UtilSettings
         }
 
         /// <summary>1 つの asmdef を整える。実際に書き換えたら true。</summary>
-        private static bool SyncOne(UtilPackage package, bool enable, out string path)
+        private static bool SyncOne(UtilPackage package, bool enable, HashSet<string> enabledIds, out string path)
         {
             path = null;
             try
@@ -151,6 +151,27 @@ namespace YozoLab.UtilSettings
                 {
                     asmdef.versionDefines.RemoveAt(index);
                     changed = true;
+                }
+
+                // 他パッケージ提供の機能への紐付け。提供側が有効なあいだだけ
+                // シンボルを注入する。利用側のコードは #if でこのシンボルを見る。
+                foreach (FeatureLink link in package.Consumes)
+                {
+                    bool want = enabledIds.Contains(link.ProviderId);
+                    int linkIndex = asmdef.versionDefines.FindIndex(
+                        x => x != null && x.define == link.Define);
+
+                    if (want && linkIndex < 0)
+                    {
+                        asmdef.versionDefines.Add(
+                            new VersionDefine(AlwaysTrueVersionDefineName, "", link.Define));
+                        changed = true;
+                    }
+                    else if (!want && linkIndex >= 0)
+                    {
+                        asmdef.versionDefines.RemoveAt(linkIndex);
+                        changed = true;
+                    }
                 }
 
                 if (!changed)

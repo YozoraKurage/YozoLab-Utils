@@ -1,0 +1,32 @@
+{
+    "name": "net.yozolab.pbradiusgizmo.Editor",
+    "rootNamespace": "YozoLab.PBRadiusGizmo",
+    "references": [
+        "net.yozolab.vrcgizmoaccelerator.Editor"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_EDITOR",
+        "YOZOLAB_ENABLE_PBRADIUSGIZMO"
+    ],
+    "versionDefines": [
+        {
+            "name": "com.vrchat.base",
+            "expression": "",
+            "define": "YOZOLAB_PBRADIUS_VRCSDK"
+        },
+        {
+            "name": "Unity",
+            "expression": "",
+            "define": "YOZOLAB_HAS_VRCGIZMOACC"
+        }
+    ],
+    "noEngineReferences": false
+}

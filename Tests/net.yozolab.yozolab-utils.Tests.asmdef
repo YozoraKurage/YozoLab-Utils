@@ -5,7 +5,8 @@
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner",
         "net.yozolab.fbxanimationbaker.Editor",
-        "net.yozolab.vrcgizmoaccelerator.Editor"
+        "net.yozolab.vrcgizmoaccelerator.Editor",
+        "net.yozolab.pbradiusgizmo.Editor"
     ],
     "includePlatforms": [
         "Editor"
