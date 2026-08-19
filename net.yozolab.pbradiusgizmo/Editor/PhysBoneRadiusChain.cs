@@ -31,11 +31,29 @@ namespace YozoLab.PBRadiusGizmo
             public float endRadius;      // 子側の半径（世界座標）
             public bool isSphere;        // true なら end に球を 1 つ描くだけ
 
+            /// <summary>ボーン側のチェーン位置（radiusCurve の横軸）。</summary>
+            public float startRatio;
+
+            /// <summary>子側のチェーン位置。</summary>
+            public float endRatio;
+
+            /// <summary>ボーン側のスケール（lossyScale の最大成分）。</summary>
+            public float startScale;
+
+            /// <summary>子側のスケール。</summary>
+            public float endScale;
+
             /// <summary>ハンドルを置く点。球なら子側、カプセルならボーン側。</summary>
             public Vector3 HandleCenter => isSphere ? end : start;
 
             /// <summary>ハンドルを置く点での半径（世界座標）。</summary>
             public float HandleRadius => isSphere ? endRadius : startRadius;
+
+            /// <summary>ハンドルの点のチェーン位置。カーブのキーを打つ場所。</summary>
+            public float HandleRatio => isSphere ? endRatio : startRatio;
+
+            /// <summary>ハンドルの点のスケール。カーブ値と世界半径の換算に使う。</summary>
+            public float HandleScale => isSphere ? endScale : startScale;
 
             /// <summary>
             /// その点での「Radius 1 あたりの世界座標での半径」。
@@ -122,32 +140,20 @@ namespace YozoLab.PBRadiusGizmo
                 Quaternion rotation = bone.transform.rotation
                                       * Quaternion.FromToRotation(Vector3.up, direction);
 
-                if (startRadius > 0f)
+                into.Add(new Segment
                 {
-                    into.Add(new Segment
-                    {
-                        start = position,
-                        end = childPosition,
-                        rotation = rotation,
-                        startRadius = startRadius,
-                        endRadius = endRadius,
-                        isSphere = false,
-                        handleFactor = startRadius / radius,
-                    });
-                }
-                else
-                {
-                    into.Add(new Segment
-                    {
-                        start = position,
-                        end = childPosition,
-                        rotation = rotation,
-                        startRadius = 0f,
-                        endRadius = endRadius,
-                        isSphere = true,
-                        handleFactor = endRadius / radius,
-                    });
-                }
+                    start = position,
+                    end = childPosition,
+                    rotation = rotation,
+                    startRadius = Mathf.Max(0f, startRadius),
+                    endRadius = endRadius,
+                    isSphere = startRadius <= 0f,
+                    startRatio = ratio,
+                    endRatio = childRatio,
+                    startScale = boneScale,
+                    endScale = childScale,
+                    handleFactor = (startRadius > 0f ? startRadius : endRadius) / radius,
+                });
             }
         }
 

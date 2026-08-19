@@ -26,6 +26,11 @@
             "name": "Unity",
             "expression": "",
             "define": "YOZOLAB_HAS_VRCGIZMOACC"
+        },
+        {
+            "name": "Unity",
+            "expression": "",
+            "define": "YOZOLAB_ENABLE_PBRADIUSGIZMO"
         }
     ],
     "noEngineReferences": false

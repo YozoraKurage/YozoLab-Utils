@@ -45,6 +45,59 @@ namespace YozoLab.Tests
             Assert.AreEqual(0.1234f, RadiusHandleMath.Snap(0.1234f, 0f), 1e-6f);
         }
 
+        // ---- radiusCurve のキー操作 -------------------------------------------
+
+        [Test]
+        public void BuildPerBoneKeys_PinsEveryBoneAtItsCurrentValue()
+        {
+            // 4 ボーン相当の位置。値は「その位置の現在値」をそのまま写す
+            var ratios = new[] { 0f, 0.25f, 0.5f, 0.75f, 1f };
+            AnimationCurve curve = RadiusHandleMath.BuildPerBoneKeys(ratios, t => 1f - t);
+
+            Assert.AreEqual(5, curve.length);
+            for (int i = 0; i < curve.length; i++)
+                Assert.That(curve[i].value, Is.EqualTo(1f - curve[i].time).Within(1e-5f));
+        }
+
+        [Test]
+        public void BuildPerBoneKeys_MergesSharedPositions()
+        {
+            // 枝分かれでは複数のボーンが同じチェーン位置を共有する。
+            // 同じ位置に重複キーを打ってはいけない。
+            var ratios = new[] { 0f, 0.5f, 0.5f + 1e-6f, 1f, 0f };
+            AnimationCurve curve = RadiusHandleMath.BuildPerBoneKeys(ratios, _ => 1f);
+
+            Assert.AreEqual(3, curve.length);
+        }
+
+        [Test]
+        public void WithKeyValue_MovesOnlyTheGrabbedKey()
+        {
+            var ratios = new[] { 0f, 0.5f, 1f };
+            AnimationCurve curve = RadiusHandleMath.BuildPerBoneKeys(ratios, _ => 1f);
+
+            int index = RadiusHandleMath.FindKeyIndex(curve, 0.5f);
+            AnimationCurve edited = RadiusHandleMath.WithKeyValue(curve, index, 0.25f);
+
+            // 掴んだキーだけが動き、他のキー位置の評価値は変わらない
+            Assert.That(edited.Evaluate(0.5f), Is.EqualTo(0.25f).Within(1e-5f));
+            Assert.That(edited.Evaluate(0f), Is.EqualTo(1f).Within(1e-5f));
+            Assert.That(edited.Evaluate(1f), Is.EqualTo(1f).Within(1e-5f));
+
+            // 元のカーブは触らない
+            Assert.That(curve.Evaluate(0.5f), Is.EqualTo(1f).Within(1e-5f));
+        }
+
+        [Test]
+        public void FindKeyIndex_ToleratesFloatNoise()
+        {
+            var ratios = new[] { 0f, 0.5f, 1f };
+            AnimationCurve curve = RadiusHandleMath.BuildPerBoneKeys(ratios, _ => 1f);
+
+            Assert.AreEqual(1, RadiusHandleMath.FindKeyIndex(curve, 0.5f + 5e-5f));
+            Assert.AreEqual(-1, RadiusHandleMath.FindKeyIndex(curve, 0.4f));
+        }
+
         [Test]
         public void PickHandleDirection_AvoidsTheAxisAlignedWithTheView()
         {
