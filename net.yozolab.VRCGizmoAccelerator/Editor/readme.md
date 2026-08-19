@@ -1,135 +1,65 @@
 # VRC Gizmo Accelerator
 
-VRChat SDK のシーンビュー描画（PhysBone / PhysBone Collider / Contact / Constraint /
-Avatar Descriptor のコライダー）を Harmony で横取りし、見た目はそのままに高速化する
-エディタ拡張です。
+PhysBone の SDK ギズモを止め、**選択に関連する PhysBone だけ**を独自の
+一括バッチ描画パスで描き直すエディタ拡張です。
 
 **既定では何もしません。** `YozoLab > VRC Gizmo Accelerator` でウィンドウを開き、
-「有効にする」を入れたときだけパッチを当てます。OFF に戻せばパッチを全て外して
-SDK 本来の描画に戻ります。
+「有効にする」を入れたときだけ動きます。OFF に戻せばパッチを外して SDK 本来の
+描画に戻ります。
 
-## 何が遅かったのか（すべて実測）
+## 仕組み
 
-### 1. ボーン構造の作り直し
+### 1. SDK のギズモを Harmony で止める
 
-`VRCPhysBoneEditor.Draw` は毎フレーム `script.InitTransforms(!Application.isPlaying)` を
-呼びます。エディタでは force = true になるので早期 return が効かず、次が丸ごと走ります。
+`VRCPhysBoneEditor.OnDrawGizmos` は [DrawGizmo] で呼ばれる唯一の入口です。
+ここに prefix を当てて false を返すと、`InitTransforms`（PhysBone 1 本ごとに
+アバター全体を走査する、一番重い前処理）ごと丸ごと飛びます。
+
+`showGizmos` フィールドには触れません。あれはシリアライズされるユーザーの設定で、
+インスペクタの Show Gizmos はこれまでどおり効きます。代替パスは
+その値を読んで「描くかどうか」を判断するだけです。
+
+### 2. 代替パスで描き直す
+
+SDK は全 PhysBone を毎フレーム描きますが、実際に見たいのは選択まわりだけです。
+シーンビューの Repaint ごとに
+
+- 選択階層の配下にある PhysBone 全て（選択 GameObject の真上のものだけ不透明、他は半透明）
+- ボーンを直接つまんでいるときは、そのチェーンを持つ上位の PhysBone も（半透明）
+
+だけを組み立て、頂点を 1 つのメッシュに溜めて SetPass 1 回で描きます。
+選択が無ければ何も描きません。
+
+表示の可否は SDK のギズモが従う条件をそのまま踏襲します:
+シーンビューの Gizmos トグル、Gizmos メニュー内の PhysBone の個別 ON/OFF、
+各コンポーネントの Show Gizmos。どれかが OFF ならこちらも描きません。
+キャッシュは持ちません。即時描画の**発行回数**（SetPass と GL 呼び出し）が
+負荷の正体なので、対象を絞って 1 回で流せば毎回組み立てても十分軽くなります。
+
+形は SDK のギズモに合わせてあり、ボーン線・Collision Radius の
+先細りカプセル／球・角度制限（Angle のコーン / Hinge の扇 / Polar の枠）が
+同じ位置・同じ大きさ・同じ色で出ます。
+
+「選択していない PhysBone も描く」を入れると SDK 互換の常時表示になります
+（その分のコストは掛かります）。
+
+## 他のエディタ拡張から描画に介入する
+
+`IPhysBoneGizmoExtension` を実装して `PhysBoneGizmoPass.Register` すると、
+PhysBone ごとの組み立て（Repaint ごと）に割り込めます。
 
 ```csharp
-bones.Clear();
-var all = transform.root.GetComponentsInChildren<VRCPhysBoneBase>(true);  // 階層全体
-GetTransforms(...);                                                       // 全ボーンを作り直す
+class MyExtension : IPhysBoneGizmoExtension
+{
+    public int Order => 0;
+
+    public void Build(Component physBone, PhysBoneGizmoCanvas canvas)
+    {
+        // canvas.AddLine / AddWireSphere / AddTaperedCapsule ... で描き足す。
+        // canvas.SuppressDefault = true で、この PhysBone の既定形状を消せる。
+    }
+}
 ```
 
-**PhysBone 1 本ごとにアバター全体を走査**するので、本数 × 階層規模で効きます。
-実測で `Draw` 全体 2.3ms のうち 1.7ms がここでした。
-
-### 2. 発行の粒度
-
-`HandlesUtil.DrawLineBatched` は名前に反して、**線 1 本ごとに**
-`GL.PushMatrix → GL.Begin → 頂点 2 個 → GL.End → GL.PopMatrix` を発行し、
-そのたびに `ApplyWireMaterial()`（= SetPass、しかも毎回 `MethodInfo.Invoke` 経由）を
-呼びます。球は 25 点リング × 3、カプセルは 110 点を、それぞれリング単位で発行します。
-
-即時描画は 1 発行ごとに SetPass が入り、UIToolkit のレンダラはそのたびに溜めていた
-ものを吐き出してレンダーターゲットを貼り直します。**頂点数ではなく発行回数**が効きます。
-
-### 3. 描画イベント以外での描画
-
-`OnSceneGUI` は毎フレーム Layout → Repaint（さらに MouseMove）と複数回呼ばれます。
-SDK はどのイベントでも同じように描きに行きますが、Repaint 以外では何も表示されません。
-
-## どう直したか
-
-**1. 描いたものを取っておく** — 変化が無い間は SDK の `Draw()` ごと飛ばし、
-前回作ったメッシュをそのまま描きます。作り直すのは次のいずれかのときだけです。
-
-- ボーンが動いた（階層の局所 TRS から指紋を取って毎フレーム比較）
-- カメラが動いた（`HandleUtility.GetHandleSize` を使った＝カメラ依存の描画のみ）
-- 階層変更 / `ObjectChangeEvents` / Undo / 選択変更 / Play モード / シーン開閉 /
-  Prefab ステージ（`InvalidationVersion` に集約）
-- 上を取りこぼしたときの保険として 2 秒
-
-**2. 1 リペイントにまとめる** — ギズモのコールバックはコンポーネントごとに呼ばれます。
-そこで発行すると「コンポーネント数 × 2」になる（実測 3,000 回/秒）ので、パスの先頭で
-前のパスぶんを 1 枚に束ねて発行します。表示は 1 フレーム遅れます。
-
-**3. 即時描画をやめる** — 束ねたメッシュはカメラのコマンドバッファへ積みます
-（`CameraEvent.AfterEverything`）。積んだ内容は中身が変わるまでカメラが実行し続けるので、
-**動かない限り毎フレームの CPU はゼロ**です。マテリアルは Handles が内部で使うのと同じ
-`Hidden/Internal-Colored`（頂点色をそのまま出す）で、`zTest` は `Handles.zTest` に
-追従させています。
-
-**4. 描画イベント以外は捨てる** — 区間の中では、イベントに応じて 3 通りに分かれます。
-
-| 状況 | どうするか |
-| --- | --- |
-| 区間の外 | 元の実装をそのまま走らせる |
-| 区間の中・Repaint（およびギズモのコールバック） | 横取りする |
-| 区間の中・Layout / MouseMove など | **何もしない**（描いても出ないため） |
-
-捨てる場合でも `Draw*Batched` の**返り値（呼び出し側が進めるカーソル）は元と同じ値**を
-返します。ここがずれると以降の図形が全部ずれるため、テストで固定しています。
-
-## 実測（PhysBone 20 本 / 600 ボーン、ギズモ入口 1 パス）
-
-```
-最初            3.83 ms / 95.7 KB
-静止時          0.18 ms /  1.0 KB
-1 本だけ動く    0.26 ms
-全部動く        1.25 ms
-
-SetPass         図形数ぶん  →  1 回/パス
-```
-
-「全部動く」に残っている 1.25ms は、その 8 割強が SDK の `Draw()` 自身です
-（1 ボーンあたり Transform への 14 回のネイティブアクセスと、約 25 回の行列・
-クォータニオン演算）。ここから先を削るには `Draw()` の全代替が要ります。
-
-## 互換性のために守っていること
-
-| 項目 | どうしているか |
-| --- | --- |
-| 図形の形 | 頂点は SDK / Handles 由来のものをそのまま使う |
-| 円弧の分割 | Unity 本体と同じ 60 分割・同じ点列（テストで本体の実装と一致を確認） |
-| 色 | 追加時点の `Handles.color`（SDK が渡す色）をそのまま頂点色にする |
-| 座標変換 | 追加時点の `Handles.matrix` を適用してワールド座標で持つ |
-| 描画順 | 塗りを先・線を後（塗りは線の下敷きなので元の見え方に近い） |
-| 区間の外 | 横取りしない。他ツールや Inspector の Handles 呼び出しは素通り |
-| 例外時 | 区間の終了は Harmony の finalizer で閉じる。送出で例外が出たら以後は即時描画へ戻す |
-
-## 設定
-
-| 項目 | 既定 | 内容 |
-| --- | --- | --- |
-| 有効にする | **OFF** | ON にするまでパッチを当てません |
-| 描画方式 | CommandBuffer | カメラに積む。他に GizmoLines（Unity のギズモレンダラ）/ Immediate（GL 即時） |
-| 1 リペイントにまとめて発行する | ON | 表示が 1 フレーム遅れます |
-| 描画結果を使い回す | ON | メモリと引き換え（上限 200 万頂点、超えたら古いものから破棄） |
-| ボーン構造の作り直しを省く | ON | CPU 側で最も効きます |
-| 描画イベント以外の描画呼び出しを捨てる | ON | Layout / MouseMove ぶん |
-| Unity の Handles も横取りする | OFF | Unity がネイティブでやっている円弧の分割を C# で肩代わりします。図形数が多い環境では得。Avatar Descriptor のコライダーはこちら側 |
-| プロファイラにマーカーを出す | ON | `YozoLab ...` として階層に出ます |
-
-## 調べ方
-
-- ウィンドウの「直近の 1 区間」に、図形数・頂点数・ドローコール・SetPass が出ます
-- 「即時描画の発行回数」で、**誰が**即時描画を出しているかを数えられます
-  （このツールの担当かどうかも分かります）
-- プロファイラの階層に `YozoLab ...` として入口ごとの時間が出ます
-
-## 前提と制限
-
-- **Harmony は VRChat SDK 同梱の `0Harmony.dll` を使います**。SDK が無ければ何もしません。
-  このパッケージ自体は SDK にも Harmony にもコンパイル時依存を持たないので、
-  SDK 無しのプロジェクトでもコンパイルは通ります
-- SDK 側の内部実装（メソッド名・引数名・点列の食い方）に依存しています。更新で変わった
-  場合は、合わなくなったものだけ自動的に素通しになり、ウィンドウの「詳細」に何が外れたかが
-  出ます。**壊れた状態で描画されることはありません**
-- 表示は 1 フレーム遅れます（まとめて発行する都合）
-- 選択を外した直後にギズモが 1 フレーム残ることがあります
-
-## 疑わしいときは
-
-「有効にする」を OFF にすれば、パッチを全て外して SDK 本来の描画に戻ります。
-見た目や速度に差が出た場合は、この ON/OFF で切り分けてください。
+PhysBone Radius Gizmo（同リポジトリ）が最初の利用者で、ドラッグ中に
+`SuppressDefault` で既定形状を消し、自前のハンドル表示だけを残しています。
