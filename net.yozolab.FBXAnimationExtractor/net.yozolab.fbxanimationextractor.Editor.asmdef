@@ -14,12 +14,6 @@
         "UNITY_EDITOR",
         "YOZOLAB_ENABLE_FBXANIMATIONEXTRACTOR"
     ],
-    "versionDefines": [
-        {
-            "name": "Unity",
-            "expression": "",
-            "define": "YOZOLAB_ENABLE_FBXANIMATIONEXTRACTOR"
-        }
-    ],
+    "versionDefines": [],
     "noEngineReferences": false
 }
