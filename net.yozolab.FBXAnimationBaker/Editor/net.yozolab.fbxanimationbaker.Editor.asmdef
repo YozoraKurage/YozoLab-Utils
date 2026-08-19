@@ -1,0 +1,25 @@
+{
+    "name": "net.yozolab.fbxanimationbaker.Editor",
+    "rootNamespace": "YozoLab.FBXAnimationBaker",
+    "references": [],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_EDITOR",
+        "YOZOLAB_ENABLE_FBXANIMATIONBAKER"
+    ],
+    "versionDefines": [
+        {
+            "name": "Unity",
+            "expression": "",
+            "define": "YOZOLAB_ENABLE_FBXANIMATIONBAKER"
+        }
+    ],
+    "noEngineReferences": false
+}

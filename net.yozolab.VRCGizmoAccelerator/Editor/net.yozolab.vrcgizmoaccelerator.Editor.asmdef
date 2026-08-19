@@ -1,0 +1,30 @@
+{
+    "name": "net.yozolab.vrcgizmoaccelerator.Editor",
+    "rootNamespace": "YozoLab.VRCGizmoAccelerator",
+    "references": [],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_EDITOR",
+        "YOZOLAB_ENABLE_VRCGIZMOACCELERATOR"
+    ],
+    "versionDefines": [
+        {
+            "name": "com.vrchat.base",
+            "expression": "",
+            "define": "YOZOLAB_VRCGIZMOACC_VRCSDK"
+        },
+        {
+            "name": "Unity",
+            "expression": "",
+            "define": "YOZOLAB_ENABLE_VRCGIZMOACCELERATOR"
+        }
+    ],
+    "noEngineReferences": false
+}

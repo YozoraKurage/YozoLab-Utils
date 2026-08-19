@@ -11,8 +11,15 @@
     "precompiledReferences": [],
     "autoReferenced": false,
     "defineConstraints": [
-        "UNITY_EDITOR"
+        "UNITY_EDITOR",
+        "YOZOLAB_ENABLE_FBXANIMATIONEXTRACTOR"
     ],
-    "versionDefines": [],
+    "versionDefines": [
+        {
+            "name": "Unity",
+            "expression": "",
+            "define": "YOZOLAB_ENABLE_FBXANIMATIONEXTRACTOR"
+        }
+    ],
     "noEngineReferences": false
 }

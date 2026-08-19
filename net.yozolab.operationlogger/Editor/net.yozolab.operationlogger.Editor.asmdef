@@ -10,7 +10,9 @@
     "overrideReferences": false,
     "precompiledReferences": [],
     "autoReferenced": false,
-    "defineConstraints": [],
+    "defineConstraints": [
+        "YOZOLAB_ENABLE_OPERATIONLOGGER"
+    ],
     "versionDefines": [
         {
             "name": "com.vrchat.base",

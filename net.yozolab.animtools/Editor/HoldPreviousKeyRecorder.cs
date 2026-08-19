@@ -201,6 +201,12 @@ namespace YozoLab.AnimTools
                 if (binding.isPPtrCurve) return; // オブジェクト参照カーブは対象外
                 if (state == null) return;
 
+                // 擬似レイヤーでロックされているバインディングには何も書かない。
+                // 本体の AddKey は HumanoidLayerFilter の Prefix が握り潰すが、こちらの
+                // Postfix は独立して走るため、ここで降りないと前フレームキーだけが
+                // ロック対象へ書き込まれてしまう。
+                if (HumanoidLayerFilter.IsLocked(binding)) return;
+
                 AnimationClip clip = GetClip(state);
                 if (clip == null) return;
 

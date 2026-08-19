@@ -1,0 +1,20 @@
+# ユーザー提供データ・一時ファイルの置き場。末尾のチルダは Unity にインポート
+# させないための慣習（Documentation~ / Samples~ と同じ）。このリポジトリは
+# テスト用プロジェクトからローカルパッケージとして参照されるので、チルダ無しの
+# temp/ に .cs や .fbx を置くと丸ごとインポート対象になってしまう。
+temp
+temp.meta
+temp~
+
+# Unity（テストプロジェクトはボリューム側にあるので普通は出ないが、念のため）
+Library/
+Temp/
+Logs/
+obj/
+*.csproj
+*.sln
+
+# PhysBoneLab を切り出した先の組み立て場（別リポジトリへ移したら消す）
+physbonelab~
+.distillery/
+.claude/
