@@ -23,11 +23,6 @@
             "name": "net.nekobako.editor-patcher",
             "expression": "",
             "define": "YOZOLAB_ANIMTOOLS_EDITORPATCHER"
-        },
-        {
-            "name": "Unity",
-            "expression": "",
-            "define": "YOZOLAB_ENABLE_ANIMTOOLS"
         }
     ],
     "noEngineReferences": false

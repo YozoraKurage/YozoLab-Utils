@@ -52,7 +52,8 @@ namespace YozoLab.VRCGizmoAccelerator
             EditorGUILayout.LabelField(
                 "PhysBone の SDK ギズモを Harmony で止め、選択に関連するものだけを\n"
                 + "軽量な一括描画パスで描き直します。\n"
-                + "既定では何もしません（下のチェックを入れるまでパッチを当てません）。",
+                + "このパッケージをコンパイルする設定にした時点で有効になります\n"
+                + "（YozoLab Utils ウィンドウが入口。ここの OFF は再コンパイル無しの退避用）。",
                 EditorStyles.wordWrappedLabel);
             EditorGUILayout.Space();
 

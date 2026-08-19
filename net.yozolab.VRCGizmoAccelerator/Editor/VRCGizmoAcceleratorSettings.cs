@@ -12,8 +12,8 @@ namespace YozoLab.VRCGizmoAccelerator
     [FilePath("ProjectSettings/VRCGizmoAcceleratorSettings.asset", FilePathAttribute.Location.ProjectFolder)]
     public class VRCGizmoAcceleratorSettings : ScriptableSingleton<VRCGizmoAcceleratorSettings>
     {
-        [Tooltip("Master switch. OFF by default: nothing is patched and the SDK draws its gizmos as usual")]
-        public bool enabled = false;
+        [Tooltip("Master switch. ON by default: compiling this package in (via the YozoLab Utils window) is the opt-in. Turn this off to fall back to the SDK's own gizmo drawing without recompiling")]
+        public bool enabled = true;
 
         [Tooltip("Also draw PhysBones unrelated to the selection, at half opacity (matches the SDK's always-on drawing). Costs proportionally more")]
         public bool drawUnselected = false;

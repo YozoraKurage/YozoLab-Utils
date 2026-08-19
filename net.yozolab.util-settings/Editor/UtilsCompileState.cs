@@ -23,7 +23,7 @@ namespace YozoLab.UtilSettings
     /// asmdef の中だけで有効。
     ///
     /// 設定の正本は asmdef ではなく <c>ProjectSettings/</c> 側に置く。asmdef は
-    /// パッケージを入れ直すと出荷時の状態（全て有効）へ戻ってしまうため、
+    /// パッケージを入れ直すと出荷時の状態（全て無効）へ戻ってしまうため、
     /// 起動時に正本から復元する。
     /// </summary>
     [InitializeOnLoad]
@@ -45,7 +45,12 @@ namespace YozoLab.UtilSettings
         // 設定の読み書き
         // ---------------------------------------------------------------
 
-        /// <summary>有効なパッケージ Id の集合を読む。設定が無ければ「全て有効」を書き出して返す。</summary>
+        /// <summary>
+        /// 有効なパッケージ Id の集合を読む。設定が無ければ「全て無効」を書き出して返す。
+        ///
+        /// 既定を無効にしてあるのは、入れただけで Harmony のパッチや常駐処理が
+        /// 動き出さないようにするため。使う機能だけを設定ウィンドウで有効にする。
+        /// </summary>
         public static HashSet<string> LoadEnabledIds()
         {
             try
@@ -60,12 +65,12 @@ namespace YozoLab.UtilSettings
             }
             catch (Exception e)
             {
-                Debug.LogWarning($"[YozoLab Utils] 設定の読み込みに失敗しました（全て有効として扱います）: {e.Message}");
+                Debug.LogWarning($"[YozoLab Utils] 設定の読み込みに失敗しました（全て無効として扱います）: {e.Message}");
             }
 
-            var all = new HashSet<string>(UtilsCatalog.Packages.Select(x => x.Id));
-            SaveEnabledIds(all);
-            return all;
+            var none = new HashSet<string>();
+            SaveEnabledIds(none);
+            return none;
         }
 
         public static void SaveEnabledIds(HashSet<string> enabled)
