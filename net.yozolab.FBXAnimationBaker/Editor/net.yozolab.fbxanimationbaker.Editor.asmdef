@@ -14,6 +14,12 @@
         "UNITY_EDITOR",
         "YOZOLAB_ENABLE_FBXANIMATIONBAKER"
     ],
-    "versionDefines": [],
+    "versionDefines": [
+        {
+            "name": "com.unity.formats.fbx",
+            "expression": "",
+            "define": "YOZOLAB_ENABLE_FBXANIMATIONBAKER"
+        }
+    ],
     "noEngineReferences": false
 }
