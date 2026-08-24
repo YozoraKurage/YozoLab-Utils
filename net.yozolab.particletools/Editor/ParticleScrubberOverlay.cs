@@ -206,7 +206,7 @@ namespace YozoLab.ParticleTools
                         concatenated, InternalEditorUtility.layers);
                     if (EditorGUI.EndChangeCheck())
                     {
-                        BuiltinPreviewBridge.PreviewLayers = unchecked((uint)
+                        BuiltinPreviewBridge.PreviewLayers = unchecked((uint)(int)
                             InternalEditorUtility.ConcatenatedLayersMaskToLayerMask(newConcatenated));
                         ParticleScrubController.RequestResync();
                     }
