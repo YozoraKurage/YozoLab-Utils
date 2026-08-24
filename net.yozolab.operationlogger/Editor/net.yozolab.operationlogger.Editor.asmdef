@@ -18,6 +18,11 @@
             "name": "com.vrchat.base",
             "expression": "",
             "define": "YOZOLAB_OPLOG_HARMONY"
+        },
+        {
+            "name": "Unity",
+            "expression": "",
+            "define": "YOZOLAB_ENABLE_OPERATIONLOGGER"
         }
     ],
     "noEngineReferences": false

@@ -15,6 +15,12 @@
     "defineConstraints": [
         "YOZOLAB_ENABLE_MESHBAKER"
     ],
-    "versionDefines": [],
+    "versionDefines": [
+        {
+            "name": "Unity",
+            "expression": "",
+            "define": "YOZOLAB_ENABLE_MESHBAKER"
+        }
+    ],
     "noEngineReferences": false
 }

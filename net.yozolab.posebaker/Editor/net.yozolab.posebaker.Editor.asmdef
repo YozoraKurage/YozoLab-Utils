@@ -20,6 +20,11 @@
             "name": "nadena.dev.ndmf",
             "expression": "",
             "define": "YOZOLAB_NDMF"
+        },
+        {
+            "name": "Unity",
+            "expression": "",
+            "define": "YOZOLAB_ENABLE_POSEBAKER"
         }
     ],
     "noEngineReferences": false
