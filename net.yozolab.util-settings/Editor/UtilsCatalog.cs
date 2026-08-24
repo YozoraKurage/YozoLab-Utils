@@ -209,6 +209,15 @@ namespace YozoLab.UtilSettings
                 Define = "YOZOLAB_ENABLE_SCENEUTILS",
                 OpenMenuPath = "Window/Window Switcher",
             },
+            new UtilPackage
+            {
+                Id = "particletimescrubber",
+                DisplayName = "Particle Time Scrubber",
+                Description = "パーティクルの再生位置を Edit モードのまま時間バーで行き来する。",
+                AsmdefGuid = "998afc256cc14f59adb8fb9bd4245156",
+                Define = "YOZOLAB_ENABLE_PARTICLETIMESCRUBBER",
+                OpenMenuPath = "YozoLab/Particle Time Scrubber",
+            },
         };
     }
 }
