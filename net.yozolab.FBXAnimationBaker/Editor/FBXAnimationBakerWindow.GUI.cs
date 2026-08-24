@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEditor;
+using System;
 using System.Linq;
 using System.Collections.Generic;
 
@@ -63,12 +64,15 @@ namespace YozoLab.FBXAnimationBaker
                 EditorGUILayout.EndHorizontal();
             }
 
-            EditorGUILayout.PropertyField(outputDirectoryProp, new GUIContent("Output Directory",
-                L10n.T("生成した FBX の保存先フォルダ", "Output folder for the generated FBX files")));
-
-            if (outputDirectoryProp.objectReferenceValue == null)
+            // 出力先はフォルダごとの設定。共通の Output Directory は持たない。
+            if (CountExecutableFolders() == 0)
             {
-                EditorGUILayout.HelpBox(L10n.T("Output Directoryを設定してください。", "Please set Output Directory."), MessageType.Warning);
+                EditorGUILayout.HelpBox(
+                    L10n.T("Output Directory はフォルダごとに設定します。"
+                           + "「New Folder」でフォルダを作り、その見出しの下で指定してください。",
+                           "Output Directory is set per folder. Create one with \"New Folder\" "
+                           + "and set it under the folder header."),
+                    MessageType.Info);
             }
 
             EditorGUILayout.Space();
@@ -84,6 +88,7 @@ namespace YozoLab.FBXAnimationBaker
             EditorGUILayout.BeginVertical("box", GUILayout.ExpandHeight(true));
             EnsureSelectedEntryIndex();
             DrawEntryToolbar();
+            DrawTemplateToolbar();
 
             EditorGUILayout.Space(4);
 
@@ -136,7 +141,71 @@ namespace YozoLab.FBXAnimationBaker
                 if (GUILayout.Button("Delete", GUILayout.Width(70)))
                 {
                     bakeEntriesProp.DeleteArrayElementAtIndex(selectedEntryIndex);
+                    checkedEntryIndices.Clear();
                     selectedEntryIndex = Mathf.Clamp(selectedEntryIndex, 0, bakeEntriesProp.arraySize - 1);
+                }
+            }
+
+            if (GUILayout.Button(new GUIContent("New Folder",
+                    L10n.T("Entry Listに新しいフォルダを作成します", "Create a new folder in the Entry List")),
+                GUILayout.Width(90)))
+            {
+                FolderNamePromptWindow.Open(
+                    L10n.T("新規フォルダ", "New Folder"),
+                    name => CreateFolder(name, null));
+            }
+
+            List<int> folderTargets = GetBatchTargetIndices();
+            using (new EditorGUI.DisabledScope(folderTargets.Count == 0))
+            {
+                if (GUILayout.Button(new GUIContent($"Folder ({folderTargets.Count}) ▾",
+                        L10n.T("チェック済みエントリ(未チェックなら選択中エントリ)をフォルダへ移動",
+                               "Move checked entries (or the selected entry when none are checked) to a folder")),
+                    GUILayout.Width(95)))
+                {
+                    ShowFolderAssignMenu(folderTargets);
+                }
+            }
+
+            EditorGUILayout.EndHorizontal();
+        }
+
+        private void DrawTemplateToolbar()
+        {
+            EditorGUILayout.BeginHorizontal();
+
+            string source = entryTemplate == null
+                ? L10n.T("(未設定)", "(empty)")
+                : $"\"{entryTemplate.sourceEntryName}\"";
+            EditorGUILayout.LabelField(new GUIContent(
+                $"Template: {source}",
+                L10n.T("選択中エントリのベイク設定をコピーし、複数のエントリに貼り付けできます(FBX/クリップ/名前は除く)",
+                       "Copy the selected entry's bake settings and paste them to several entries (excluding FBX, clips and name)")),
+                EditorStyles.miniBoldLabel);
+
+            GUILayout.FlexibleSpace();
+
+            using (new EditorGUI.DisabledScope(!IsEntryIndexValid(selectedEntryIndex)))
+            {
+                if (GUILayout.Button(new GUIContent("Copy Template",
+                        L10n.T("選択中エントリからテンプレートをコピー(FBX/クリップ/名前を除く)",
+                               "Capture the selected entry as a template (excluding FBX, clips and name)")),
+                    GUILayout.Width(130)))
+                {
+                    CopySelectedEntryToTemplate();
+                }
+            }
+
+            List<int> pasteTargets = GetBatchTargetIndices();
+            using (new EditorGUI.DisabledScope(entryTemplate == null || pasteTargets.Count == 0))
+            {
+                if (GUILayout.Button(new GUIContent(
+                        $"Paste ({pasteTargets.Count})",
+                        L10n.T("チェック済みエントリにペースト(未チェックなら選択中エントリ)",
+                               "Paste to checked entries (or the selected entry when none are checked)")),
+                    GUILayout.Width(110)))
+                {
+                    PasteTemplateToEntries(pasteTargets);
                 }
             }
 
@@ -146,35 +215,118 @@ namespace YozoLab.FBXAnimationBaker
         private void DrawEntryListPane()
         {
             EditorGUILayout.BeginVertical(GUILayout.Width(EntryListWidth), GUILayout.ExpandHeight(true));
+
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField("Entry List", EditorStyles.miniBoldLabel);
+            GUILayout.FlexibleSpace();
+            EditorGUILayout.LabelField($"Checked: {checkedEntryIndices.Count}", EditorStyles.miniLabel, GUILayout.Width(80));
+            EditorGUILayout.EndHorizontal();
+
+            // エントリが 0 でも、フォルダがあれば見出しと出力先の設定を出す必要がある
+            // (フォルダを作った直後がこの状態)。
+            bool hasFolder = settings.bakeFolders != null && settings.bakeFolders.Count > 0;
+            if (bakeEntriesProp.arraySize == 0 && !hasFolder)
+            {
+                EditorGUILayout.HelpBox(
+                    L10n.T("フォルダもエントリもありません。「New Folder」でフォルダを作り、Output Directory を設定してください。",
+                           "No folders or entries yet. Create one with \"New Folder\" and set its Output Directory."),
+                    MessageType.Info);
+                EditorGUILayout.EndVertical();
+                return;
+            }
+
+            SyncBakeFolders();
+
             entryListScrollPosition = EditorGUILayout.BeginScrollView(entryListScrollPosition, "box");
 
-            bool hasSearch = !string.IsNullOrWhiteSpace(entrySearchText);
-            int visibleCount = 0;
+            string normalizedSearch = string.IsNullOrWhiteSpace(entrySearchText)
+                ? string.Empty
+                : entrySearchText.Trim().ToLowerInvariant();
+            bool searching = !string.IsNullOrEmpty(normalizedSearch);
 
+            // フォルダごとに index をグループ化(エントリの並び順は維持)
+            var rootIndices = new List<int>();
+            var folderBuckets = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
             for (int i = 0; i < bakeEntriesProp.arraySize; i++)
             {
-                SerializedProperty entryProp = bakeEntriesProp.GetArrayElementAtIndex(i);
-                string label = GetEntryLabel(entryProp);
+                string folderName = GetEntryFolderName(i);
+                if (string.IsNullOrEmpty(folderName))
+                {
+                    rootIndices.Add(i);
+                    continue;
+                }
 
-                if (hasSearch && label.IndexOf(entrySearchText.Trim(), System.StringComparison.OrdinalIgnoreCase) < 0)
+                if (!folderBuckets.TryGetValue(folderName, out List<int> bucket))
+                {
+                    bucket = new List<int>();
+                    folderBuckets.Add(folderName, bucket);
+                }
+                bucket.Add(i);
+            }
+
+            // フォルダなしのエントリ。出力先はフォルダが持つようになったので、
+            // ここに置かれたエントリは Execute では走らない。黙って外れると気付けないため明示する。
+            var visibleRootIndices = new List<int>();
+            foreach (int i in rootIndices)
+            {
+                if (EntryMatchesSearch(i, normalizedSearch)) visibleRootIndices.Add(i);
+            }
+
+            if (visibleRootIndices.Count > 0)
+            {
+                EditorGUILayout.HelpBox(
+                    L10n.T("以下のエントリはフォルダに属していないため、Executeでは処理されません。"
+                           + "「Folder ▾」でフォルダへ移動してください。",
+                           "The entries below belong to no folder, so Execute skips them. "
+                           + "Move them into a folder with \"Folder ▾\"."),
+                    MessageType.Warning);
+
+                foreach (int i in visibleRootIndices)
+                {
+                    DrawEntryListItem(i);
+                }
+            }
+
+            // フォルダごとのエントリ(空のフォルダも見出しだけ表示する)
+            foreach (BakeFolderState folder in settings.bakeFolders)
+            {
+                if (folder == null || string.IsNullOrWhiteSpace(folder.name))
                 {
                     continue;
                 }
-                visibleCount++;
 
-                EditorGUILayout.BeginHorizontal();
-
-                SerializedProperty enabledProp = entryProp.FindPropertyRelative("enabled");
-                enabledProp.boolValue = EditorGUILayout.Toggle(enabledProp.boolValue, GUILayout.Width(16));
-
-                bool isSelected = i == selectedEntryIndex;
-                GUIStyle style = isSelected ? EditorStyles.miniButtonMid : EditorStyles.label;
-                if (GUILayout.Button(new GUIContent(label, label), style, GUILayout.ExpandWidth(true)))
+                if (!folderBuckets.TryGetValue(folder.name.Trim(), out List<int> indices))
                 {
-                    selectedEntryIndex = i;
-                    GUI.FocusControl(null);
+                    indices = new List<int>();
                 }
 
+                var visibleIndices = new List<int>();
+                foreach (int i in indices)
+                {
+                    if (EntryMatchesSearch(i, normalizedSearch)) visibleIndices.Add(i);
+                }
+
+                // 検索中は一致するエントリが無いフォルダを丸ごと隠し、あるフォルダは強制展開する
+                if (searching && visibleIndices.Count == 0)
+                {
+                    continue;
+                }
+
+                if (!DrawFolderHeader(folder, indices.Count, searching))
+                {
+                    continue;
+                }
+
+                DrawFolderOutputDirectory(folder);
+
+                EditorGUILayout.BeginHorizontal();
+                GUILayout.Space(14);
+                EditorGUILayout.BeginVertical();
+                foreach (int i in visibleIndices)
+                {
+                    DrawEntryListItem(i);
+                }
+                EditorGUILayout.EndVertical();
                 EditorGUILayout.EndHorizontal();
             }
 
@@ -182,13 +334,181 @@ namespace YozoLab.FBXAnimationBaker
             {
                 EditorGUILayout.LabelField(L10n.T("エントリがありません", "No entries"), EditorStyles.centeredGreyMiniLabel);
             }
-            else if (visibleCount == 0)
-            {
-                EditorGUILayout.LabelField(L10n.T("検索に一致しません", "No matches"), EditorStyles.centeredGreyMiniLabel);
-            }
 
             EditorGUILayout.EndScrollView();
+
+            EditorGUILayout.Space(4);
+            EditorGUILayout.BeginHorizontal();
+
+            using (new EditorGUI.DisabledScope(selectedEntryIndex <= 0 || selectedEntryIndex >= bakeEntriesProp.arraySize))
+            {
+                if (GUILayout.Button("Move Up", EditorStyles.miniButton))
+                {
+                    bakeEntriesProp.MoveArrayElement(selectedEntryIndex, selectedEntryIndex - 1);
+                    selectedEntryIndex--;
+                    checkedEntryIndices.Clear();
+                }
+            }
+
+            using (new EditorGUI.DisabledScope(selectedEntryIndex < 0 || selectedEntryIndex >= bakeEntriesProp.arraySize - 1))
+            {
+                if (GUILayout.Button("Move Down", EditorStyles.miniButton))
+                {
+                    bakeEntriesProp.MoveArrayElement(selectedEntryIndex, selectedEntryIndex + 1);
+                    selectedEntryIndex++;
+                    checkedEntryIndices.Clear();
+                }
+            }
+
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.BeginHorizontal();
+            if (GUILayout.Button("Check All Filtered", EditorStyles.miniButton))
+            {
+                CheckAllFiltered(normalizedSearch);
+            }
+            if (GUILayout.Button("Uncheck All", EditorStyles.miniButton))
+            {
+                checkedEntryIndices.Clear();
+            }
+            EditorGUILayout.EndHorizontal();
+
             EditorGUILayout.EndVertical();
+        }
+
+        private void DrawEntryListItem(int i)
+        {
+            SerializedProperty entryProp = bakeEntriesProp.GetArrayElementAtIndex(i);
+            string label = GetEntryLabel(entryProp);
+
+            bool isSelected = selectedEntryIndex == i;
+            Color prevBg = GUI.backgroundColor;
+            if (isSelected)
+            {
+                GUI.backgroundColor = new Color(0.35f, 0.58f, 0.85f, 0.9f);
+            }
+
+            EditorGUILayout.BeginHorizontal();
+
+            bool wasChecked = checkedEntryIndices.Contains(i);
+            bool isChecked = EditorGUILayout.Toggle(wasChecked, GUILayout.Width(16));
+            if (isChecked != wasChecked)
+            {
+                if (isChecked) checkedEntryIndices.Add(i);
+                else checkedEntryIndices.Remove(i);
+            }
+
+            // エントリ個別の実行フラグ。フォルダ側の Bake が OFF ならそちらが優先される。
+            SerializedProperty enabledProp = entryProp.FindPropertyRelative("enabled");
+            enabledProp.boolValue = EditorGUILayout.Toggle(enabledProp.boolValue, GUILayout.Width(16));
+
+            if (GUILayout.Button(new GUIContent(label, label), EditorStyles.miniButton,
+                                 GUILayout.Height(20), GUILayout.ExpandWidth(true)))
+            {
+                selectedEntryIndex = i;
+                GUI.FocusControl(null);
+            }
+
+            EditorGUILayout.EndHorizontal();
+            GUI.backgroundColor = prevBg;
+        }
+
+        /// <summary>
+        /// フォルダ見出し行。折りたたみと「このフォルダをベイクするか」のトグルを持つ。
+        /// 戻り値は中身を描画すべきかどうか(検索中は強制展開)。
+        /// </summary>
+        private bool DrawFolderHeader(BakeFolderState folder, int entryCount, bool searching)
+        {
+            EditorGUILayout.BeginHorizontal("box");
+
+            bool shownExpanded = searching || folder.expanded;
+            bool nowExpanded = EditorGUILayout.Foldout(shownExpanded, $"{folder.name}  ({entryCount})", true,
+                                                       EditorStyles.foldoutHeader);
+            if (!searching && nowExpanded != folder.expanded)
+            {
+                folder.expanded = nowExpanded;
+                EditorUtility.SetDirty(settings);
+            }
+
+            GUILayout.FlexibleSpace();
+
+            // Bake フラグはフォルダ見出しに常時表示して、すぐ切り替えられるようにする
+            Color prevBg = GUI.backgroundColor;
+            if (!folder.bakeEnabled)
+            {
+                GUI.backgroundColor = new Color(1f, 0.55f, 0.45f, 0.9f);
+            }
+            EditorGUI.BeginChangeCheck();
+            bool bake = GUILayout.Toggle(folder.bakeEnabled,
+                new GUIContent(folder.bakeEnabled ? "Bake: ON" : "Bake: OFF",
+                    L10n.T("OFFにすると、このフォルダ内のエントリはExecuteで処理されません",
+                           "When OFF, entries in this folder are skipped by Execute")),
+                EditorStyles.miniButton, GUILayout.Width(72));
+            GUI.backgroundColor = prevBg;
+            if (EditorGUI.EndChangeCheck())
+            {
+                Undo.RecordObject(settings, "Toggle Folder Bake");
+                folder.bakeEnabled = bake;
+                EditorUtility.SetDirty(settings);
+                settings.SaveSettings();
+            }
+
+            if (GUILayout.Button(new GUIContent("✕",
+                    L10n.T("フォルダを削除(中のエントリはフォルダなしに戻ります)",
+                           "Delete this folder (entries inside are moved out of folders)")),
+                EditorStyles.miniButton, GUILayout.Width(20)))
+            {
+                DeleteFolder(folder, entryCount);
+                GUIUtility.ExitGUI(); // リスト構造が変わるので今フレームの描画を打ち切る
+            }
+
+            EditorGUILayout.EndHorizontal();
+            return searching || folder.expanded;
+        }
+
+        /// <summary>
+        /// フォルダの出力先。見出しの直下、エントリの並びより前に置く。
+        /// 見出し行へ押し込むと横幅が足りないので、展開したときだけ縦に並べる。
+        /// </summary>
+        private void DrawFolderOutputDirectory(BakeFolderState folder)
+        {
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Space(14);
+            EditorGUILayout.BeginVertical();
+
+            EditorGUI.BeginChangeCheck();
+            var output = (DefaultAsset)EditorGUILayout.ObjectField(
+                new GUIContent("Output Directory",
+                    L10n.T("このフォルダの既定の出力先。エントリ側で個別に上書きできます",
+                           "Default output folder for this folder. Individual entries can override it")),
+                folder.outputDirectory, typeof(DefaultAsset), false);
+            if (EditorGUI.EndChangeCheck())
+            {
+                serializedSettings.ApplyModifiedProperties();
+                Undo.RecordObject(settings, "Set Folder Output Directory");
+                folder.outputDirectory = output;
+                EditorUtility.SetDirty(settings);
+                serializedSettings.Update();
+                settings.SaveSettings();
+            }
+
+            // フォルダを指していない DefaultAsset(FBX などを放り込んだ場合)は弾く
+            if (folder.outputDirectory != null && !IsValidFolderAsset(folder.outputDirectory))
+            {
+                EditorGUILayout.HelpBox(
+                    L10n.T("Output Directory にはフォルダを指定してください。",
+                           "Output Directory must be a folder."), MessageType.Warning);
+            }
+            else if (folder.outputDirectory == null)
+            {
+                EditorGUILayout.HelpBox(
+                    L10n.T("Output Directory が未設定です。このフォルダは Execute の対象になりません。",
+                           "Output Directory is not set; this folder is skipped by Execute."), MessageType.Warning);
+            }
+
+            EditorGUILayout.Space(2);
+            EditorGUILayout.EndVertical();
+            EditorGUILayout.EndHorizontal();
         }
 
         private void DrawEntryDetailPane()
@@ -350,8 +670,9 @@ namespace YozoLab.FBXAnimationBaker
 
         private void DrawExecuteBar()
         {
+            // 出力先が揃った有効なフォルダが 1 つでもあれば実行できる。
             bool isValid = FbxExporterBridge.IsAvailable
-                && outputDirectoryProp.objectReferenceValue != null
+                && CountExecutableFolders() > 0
                 && bakeEntriesProp.arraySize > 0;
 
             EditorGUILayout.Space(4);
@@ -393,6 +714,22 @@ namespace YozoLab.FBXAnimationBaker
         //  リスト操作
         // ═══════════════════════════════════════════════════════════════
 
+        /// <summary>
+        /// 新しく作るエントリの所属先。選択中エントリのフォルダを引き継ぎ、
+        /// 何も選んでいなければ最初のフォルダへ入れる。
+        /// </summary>
+        private string CurrentFolderForNewEntry()
+        {
+            if (IsEntryIndexValid(selectedEntryIndex))
+            {
+                string folder = GetEntryFolderName(selectedEntryIndex);
+                if (!string.IsNullOrEmpty(folder)) return folder;
+            }
+
+            List<string> names = CollectFolderNames();
+            return names.Count > 0 ? names[0] : string.Empty;
+        }
+
         private bool IsEntryIndexValid(int index)
         {
             return index >= 0 && index < bakeEntriesProp.arraySize;
@@ -418,6 +755,9 @@ namespace YozoLab.FBXAnimationBaker
             // InsertArrayElementAtIndex は直前の要素のコピーを作るため、既定値へ戻す
             entryProp.FindPropertyRelative("displayName").stringValue = string.Empty;
             entryProp.FindPropertyRelative("enabled").boolValue = true;
+            // 追加したエントリは、今選んでいるエントリと同じフォルダへ入れる。
+            // フォルダごとに出力先が違うので、フォルダ無しで生まれると必ず移動が要る。
+            entryProp.FindPropertyRelative("folder").stringValue = CurrentFolderForNewEntry();
             entryProp.FindPropertyRelative("sourceFbx").objectReferenceValue = sourceFbx;
             entryProp.FindPropertyRelative("outputDirectoryOverride").objectReferenceValue = null;
             entryProp.FindPropertyRelative("outputFileName").stringValue = string.Empty;
@@ -461,7 +801,7 @@ namespace YozoLab.FBXAnimationBaker
             var fbxObjects = new List<GameObject>();
             var clips = new List<AnimationClip>();
 
-            foreach (Object selected in Selection.objects)
+            foreach (UnityEngine.Object selected in Selection.objects)
             {
                 string path = AssetDatabase.GetAssetPath(selected);
                 if (string.IsNullOrEmpty(path))
@@ -491,6 +831,375 @@ namespace YozoLab.FBXAnimationBaker
             }
         }
 
+        // ═══════════════════════════════════════════════════════════════
+        //  フォルダ
+        // ═══════════════════════════════════════════════════════════════
+
+        /// <summary>Output Directory が有効なフォルダを指していて、Bake が ON のフォルダ数。</summary>
+        private int CountExecutableFolders()
+        {
+            if (settings?.bakeFolders == null) return 0;
+
+            int count = 0;
+            foreach (BakeFolderState folder in settings.bakeFolders)
+            {
+                if (folder == null || string.IsNullOrWhiteSpace(folder.name) || !folder.bakeEnabled) continue;
+                if (!IsValidFolderAsset(folder.outputDirectory)) continue;
+                count++;
+            }
+            return count;
+        }
+
+        internal static bool IsValidFolderAsset(UnityEngine.Object folderAsset)
+        {
+            if (folderAsset == null) return false;
+            string path = AssetDatabase.GetAssetPath(folderAsset);
+            return !string.IsNullOrEmpty(path) && AssetDatabase.IsValidFolder(path);
+        }
+
+        /// <summary>
+        /// settings.bakeFolders を整える。フォルダは New Folder ボタンで明示的に作成/削除するため
+        /// ここでは削除しない。名前が空・重複のエントリの除去と、エントリ側だけに存在する
+        /// フォルダ名(旧データ等)の補完のみ行う。
+        /// </summary>
+        private void SyncBakeFolders()
+        {
+            if (settings.bakeFolders == null)
+            {
+                settings.bakeFolders = new List<BakeFolderState>();
+            }
+
+            bool changed = false;
+
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            for (int i = settings.bakeFolders.Count - 1; i >= 0; i--)
+            {
+                BakeFolderState folder = settings.bakeFolders[i];
+                if (folder == null || string.IsNullOrWhiteSpace(folder.name))
+                {
+                    settings.bakeFolders.RemoveAt(i);
+                    changed = true;
+                }
+            }
+            for (int i = 0; i < settings.bakeFolders.Count; i++)
+            {
+                if (!seen.Add(settings.bakeFolders[i].name.Trim()))
+                {
+                    settings.bakeFolders.RemoveAt(i);
+                    i--;
+                    changed = true;
+                }
+            }
+
+            if (settings.bakeEntries != null)
+            {
+                foreach (AnimationBakeEntry entry in settings.bakeEntries)
+                {
+                    if (entry == null || string.IsNullOrWhiteSpace(entry.folder)) continue;
+                    string name = entry.folder.Trim();
+                    if (seen.Add(name))
+                    {
+                        settings.bakeFolders.Add(new BakeFolderState { name = name });
+                        changed = true;
+                    }
+                }
+            }
+
+            if (changed)
+            {
+                EditorUtility.SetDirty(settings);
+            }
+        }
+
+        private string GetEntryFolderName(int index)
+        {
+            SerializedProperty folderProp = bakeEntriesProp.GetArrayElementAtIndex(index).FindPropertyRelative("folder");
+            return folderProp == null || string.IsNullOrWhiteSpace(folderProp.stringValue)
+                ? string.Empty
+                : folderProp.stringValue.Trim();
+        }
+
+        /// <summary>作成済みフォルダの名前一覧(重複なし・定義順)を返す。</summary>
+        private List<string> CollectFolderNames()
+        {
+            var names = new List<string>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (settings?.bakeFolders == null) return names;
+
+            foreach (BakeFolderState folder in settings.bakeFolders)
+            {
+                if (folder == null || string.IsNullOrWhiteSpace(folder.name)) continue;
+                string name = folder.name.Trim();
+                if (seen.Add(name)) names.Add(name);
+            }
+            return names;
+        }
+
+        /// <summary>登録済みフォルダを名前(大文字小文字無視)で探す。</summary>
+        internal BakeFolderState FindFolderState(string folderName)
+        {
+            if (string.IsNullOrWhiteSpace(folderName) || settings?.bakeFolders == null)
+            {
+                return null;
+            }
+
+            string key = folderName.Trim();
+            foreach (BakeFolderState folder in settings.bakeFolders)
+            {
+                if (folder != null && string.Equals(folder.name?.Trim(), key, StringComparison.OrdinalIgnoreCase))
+                {
+                    return folder;
+                }
+            }
+            return null;
+        }
+
+        private void ShowFolderAssignMenu(List<int> entryIndices)
+        {
+            var menu = new GenericMenu();
+            menu.AddItem(new GUIContent(L10n.T("(フォルダなし)", "(No Folder)")), false,
+                () => AssignFolderToEntries(entryIndices, string.Empty));
+
+            List<string> names = CollectFolderNames();
+            if (names.Count > 0)
+            {
+                menu.AddSeparator(string.Empty);
+                foreach (string name in names)
+                {
+                    string captured = name;
+                    menu.AddItem(new GUIContent(captured), false, () => AssignFolderToEntries(entryIndices, captured));
+                }
+            }
+
+            menu.AddSeparator(string.Empty);
+            menu.AddItem(new GUIContent(L10n.T("新規フォルダ...", "New Folder...")), false, () =>
+                FolderNamePromptWindow.Open(
+                    L10n.T("新規フォルダ", "New Folder"),
+                    name => CreateFolder(name, entryIndices)));
+
+            menu.ShowAsContext();
+        }
+
+        /// <summary>
+        /// フォルダを作成する。同名(大文字小文字無視)が既にあればそれを使う。
+        /// assignEntryIndices が指定されていれば、そのエントリをフォルダへ移動する。
+        /// </summary>
+        private void CreateFolder(string folderName, List<int> assignEntryIndices)
+        {
+            folderName = folderName?.Trim();
+            if (string.IsNullOrEmpty(folderName)) return;
+
+            BakeFolderState existing = FindFolderState(folderName);
+            if (existing == null)
+            {
+                Undo.RecordObject(settings, "Create Bake Folder");
+                settings.bakeFolders.Add(new BakeFolderState { name = folderName });
+                EditorUtility.SetDirty(settings);
+                settings.SaveSettings();
+                Debug.Log($"{LogPrefix} Created folder \"{folderName}\".");
+            }
+            else
+            {
+                // 既存フォルダ名で作成した場合はそこへ合流させる(見た目の名前は既存側を維持)
+                folderName = existing.name.Trim();
+            }
+
+            if (assignEntryIndices != null && assignEntryIndices.Count > 0)
+            {
+                AssignFolderToEntries(assignEntryIndices, folderName);
+            }
+            else
+            {
+                Repaint();
+            }
+        }
+
+        private void AssignFolderToEntries(List<int> entryIndices, string folderName)
+        {
+            if (entryIndices == null || entryIndices.Count == 0) return;
+
+            serializedSettings.ApplyModifiedProperties();
+            Undo.RecordObject(settings, "Set Entry Folder");
+
+            int applied = 0;
+            foreach (int i in entryIndices)
+            {
+                if (i < 0 || i >= settings.bakeEntries.Count) continue;
+                AnimationBakeEntry entry = settings.bakeEntries[i];
+                if (entry == null) continue;
+                entry.folder = folderName;
+                applied++;
+            }
+
+            EditorUtility.SetDirty(settings);
+            serializedSettings.Update();
+            settings.SaveSettings();
+            Repaint();
+
+            string label = string.IsNullOrEmpty(folderName) ? "(No Folder)" : folderName;
+            Debug.Log($"{LogPrefix} Moved {applied} entry/entries to folder \"{label}\".");
+        }
+
+        /// <summary>フォルダを削除する。中にエントリがある場合は確認のうえ、フォルダなしへ戻す。</summary>
+        private void DeleteFolder(BakeFolderState folder, int entryCount)
+        {
+            if (entryCount > 0)
+            {
+                bool confirmed = EditorUtility.DisplayDialog(
+                    L10n.T("フォルダ削除", "Delete Folder"),
+                    L10n.T(
+                        $"フォルダ \"{folder.name}\" を削除します。\n中の {entryCount} 個のエントリは削除されず、フォルダなしに戻ります。よろしいですか?",
+                        $"Delete folder \"{folder.name}\"?\nThe {entryCount} entry/entries inside are kept and moved out of the folder."),
+                    L10n.T("削除", "Delete"),
+                    L10n.T("キャンセル", "Cancel"));
+                if (!confirmed) return;
+            }
+
+            serializedSettings.ApplyModifiedProperties();
+            Undo.RecordObject(settings, "Delete Bake Folder");
+
+            string key = folder.name.Trim();
+            if (settings.bakeEntries != null)
+            {
+                foreach (AnimationBakeEntry entry in settings.bakeEntries)
+                {
+                    if (entry != null && !string.IsNullOrWhiteSpace(entry.folder)
+                        && string.Equals(entry.folder.Trim(), key, StringComparison.OrdinalIgnoreCase))
+                    {
+                        entry.folder = string.Empty;
+                    }
+                }
+            }
+            settings.bakeFolders.Remove(folder);
+
+            EditorUtility.SetDirty(settings);
+            serializedSettings.Update();
+            settings.SaveSettings();
+            Repaint();
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        //  チェックによる一括選択
+        // ═══════════════════════════════════════════════════════════════
+
+        /// <summary>一括操作の対象。チェックが 1 つも無ければ選択中エントリ 1 つ。</summary>
+        private List<int> GetBatchTargetIndices()
+        {
+            var list = new List<int>();
+            if (bakeEntriesProp.arraySize == 0) return list;
+
+            if (checkedEntryIndices.Count > 0)
+            {
+                foreach (int i in checkedEntryIndices)
+                {
+                    if (i >= 0 && i < bakeEntriesProp.arraySize) list.Add(i);
+                }
+            }
+            else if (IsEntryIndexValid(selectedEntryIndex))
+            {
+                list.Add(selectedEntryIndex);
+            }
+            list.Sort();
+            return list;
+        }
+
+        private void CheckAllFiltered(string normalizedSearch)
+        {
+            for (int i = 0; i < bakeEntriesProp.arraySize; i++)
+            {
+                if (EntryMatchesSearch(i, normalizedSearch))
+                {
+                    checkedEntryIndices.Add(i);
+                }
+            }
+        }
+
+        private bool EntryMatchesSearch(int index, string normalizedSearch)
+        {
+            if (string.IsNullOrEmpty(normalizedSearch))
+            {
+                return true;
+            }
+
+            string label = GetEntryLabel(bakeEntriesProp.GetArrayElementAtIndex(index));
+            return label.ToLowerInvariant().IndexOf(normalizedSearch, StringComparison.Ordinal) >= 0;
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        //  フォルダ名の入力ダイアログ
+        // ═══════════════════════════════════════════════════════════════
+
+        private sealed class FolderNamePromptWindow : EditorWindow
+        {
+            private string folderName = string.Empty;
+            private Action<string> onConfirm;
+            private bool focusRequested = true;
+
+            public static void Open(string title, Action<string> onConfirm)
+            {
+                var window = CreateInstance<FolderNamePromptWindow>();
+                window.titleContent = new GUIContent(title);
+                window.onConfirm = onConfirm;
+                window.minSize = new Vector2(340f, 80f);
+                window.maxSize = new Vector2(340f, 80f);
+                window.ShowModalUtility();
+            }
+
+            private void OnGUI()
+            {
+                Event e = Event.current;
+                if (e.type == EventType.KeyDown)
+                {
+                    if (e.keyCode == KeyCode.Return || e.keyCode == KeyCode.KeypadEnter)
+                    {
+                        e.Use();
+                        Confirm();
+                        return;
+                    }
+                    if (e.keyCode == KeyCode.Escape)
+                    {
+                        e.Use();
+                        Close();
+                        return;
+                    }
+                }
+
+                EditorGUILayout.Space(8);
+                GUI.SetNextControlName("FolderNameField");
+                folderName = EditorGUILayout.TextField(L10n.T("フォルダ名", "Folder Name"), folderName);
+                if (focusRequested)
+                {
+                    EditorGUI.FocusTextInControl("FolderNameField");
+                    focusRequested = false;
+                }
+
+                EditorGUILayout.Space(8);
+                EditorGUILayout.BeginHorizontal();
+                GUILayout.FlexibleSpace();
+                using (new EditorGUI.DisabledScope(string.IsNullOrWhiteSpace(folderName)))
+                {
+                    if (GUILayout.Button(L10n.T("作成", "Create"), GUILayout.Width(90)))
+                    {
+                        Confirm();
+                    }
+                }
+                if (GUILayout.Button(L10n.T("キャンセル", "Cancel"), GUILayout.Width(90)))
+                {
+                    Close();
+                }
+                EditorGUILayout.EndHorizontal();
+            }
+
+            private void Confirm()
+            {
+                if (string.IsNullOrWhiteSpace(folderName)) return;
+                Action<string> callback = onConfirm;
+                string name = folderName.Trim();
+                Close();
+                callback?.Invoke(name);
+            }
+        }
+
         private static string GetEntryLabel(SerializedProperty entryProp)
         {
             string displayName = entryProp.FindPropertyRelative("displayName").stringValue;
@@ -499,7 +1208,7 @@ namespace YozoLab.FBXAnimationBaker
                 return displayName.Trim();
             }
 
-            Object fbx = entryProp.FindPropertyRelative("sourceFbx").objectReferenceValue;
+            UnityEngine.Object fbx = entryProp.FindPropertyRelative("sourceFbx").objectReferenceValue;
             if (fbx != null)
             {
                 int clipCount = entryProp.FindPropertyRelative("clips").arraySize;

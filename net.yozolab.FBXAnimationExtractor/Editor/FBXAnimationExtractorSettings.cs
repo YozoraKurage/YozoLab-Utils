@@ -14,11 +14,19 @@ using System.Collections.Generic;
 [FilePath("ProjectSettings/FBXAnimationExtractorSettings.asset", FilePathAttribute.Location.ProjectFolder)]
 public class FBXAnimationExtractorSettings : ScriptableSingleton<FBXAnimationExtractorSettings>
 {
-    [Tooltip("Folder containing the FBX files to process")]
+    // ── 旧: 全フォルダ共通のディレクトリ ────────────────────────────
+    // Source / Output はルールフォルダごとの設定へ移した。この 2 つは
+    // 既存の設定ファイルを読み込んで移行するためだけに残してある。
+    // 移行が済むと null が入り、以後は参照されない。
+    [HideInInspector]
     public DefaultAsset targetDirectory;
 
-    [Tooltip("Output folder for extracted animation clips")]
+    [HideInInspector]
     public DefaultAsset outputDirectory;
+
+    /// <summary>共通ディレクトリからフォルダ単位の設定への移行を済ませたか。</summary>
+    [HideInInspector]
+    public bool perFolderDirectoriesMigrated;
 
     [Tooltip("List of animation post-process rules")]
     public List<AnimationPostProcessRule> postProcessRules = new List<AnimationPostProcessRule>();
@@ -49,14 +57,23 @@ public class FbxProcessCacheEntry
 }
 
 /// <summary>
-/// Rule List 上のフォルダ。「New Folder」ボタンで明示的に作成・削除され、
-/// 「フォルダ単位で Extract を実行するか」と foldout の開閉状態を保持する。
+/// Rule List 上のフォルダ。「New Folder」ボタンで明示的に作成・削除される。
+///
+/// 入出力のディレクトリはここが持つ。以前は全フォルダ共通の 1 組しか無く、
+/// 別々の場所にある FBX 群を扱うにはウィンドウ上部を差し替えて回す必要があった。
+/// フォルダごとに持たせることで、Execute 一回で全部を処理できる。
 /// 空のフォルダも保持される。名前の一致は大文字小文字を無視する。
 /// </summary>
 [Serializable]
 public class RuleFolderState
 {
     public string name;
+
+    [Tooltip("Folder containing the FBX files this rule folder processes")]
+    public DefaultAsset sourceDirectory;
+
+    [Tooltip("Output folder for clips produced by this rule folder. Individual rules can override it")]
+    public DefaultAsset outputDirectory;
 
     [Tooltip("When OFF, FBX files matching rules in this folder are skipped by Execute")]
     public bool extractEnabled = true;
@@ -90,7 +107,7 @@ public class AnimationPostProcessRule
     [Tooltip("File name of the exported .anim (without extension). Leave empty to use the FBX name")]
     public string outputFileName;
 
-    [Tooltip("Per-rule output folder. When set, clips matched by this rule are written here instead of the global Output Directory")]
+    [Tooltip("Per-rule output folder. When set, clips matched by this rule are written here instead of the rule folder's Output Directory")]
     public DefaultAsset outputDirectoryOverride;
 
     [Tooltip("Enable Use Other Avatar Definition")]

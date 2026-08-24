@@ -15,11 +15,21 @@ namespace YozoLab.FBXAnimationBaker
     [FilePath("ProjectSettings/FBXAnimationBakerSettings.asset", FilePathAttribute.Location.ProjectFolder)]
     public class FBXAnimationBakerSettings : ScriptableSingleton<FBXAnimationBakerSettings>
     {
-        [Tooltip("Default output folder for the generated FBX files")]
+        // ── 旧: 全エントリ共通の Output Directory ──────────────────────
+        // 出力先はフォルダごとの設定へ移した。これは既存の設定ファイルを
+        // 読み込んで移行するためだけに残してある。移行後は null。
+        [HideInInspector]
         public DefaultAsset outputDirectory;
+
+        /// <summary>共通の Output Directory からフォルダ単位の設定への移行を済ませたか。</summary>
+        [HideInInspector]
+        public bool perFolderDirectoriesMigrated;
 
         [Tooltip("List of bake entries (FBX + humanoid animation clips)")]
         public List<AnimationBakeEntry> bakeEntries = new List<AnimationBakeEntry>();
+
+        [Tooltip("Folders for organizing the entry list (per-folder output directory / bake flag / foldout)")]
+        public List<BakeFolderState> bakeFolders = new List<BakeFolderState>();
 
         [HideInInspector]
         public List<BakeCacheEntry> bakeCacheEntries = new List<BakeCacheEntry>();
@@ -29,6 +39,27 @@ namespace YozoLab.FBXAnimationBaker
         {
             Save(true);
         }
+    }
+
+    /// <summary>
+    /// Entry List 上のフォルダ。「New Folder」ボタンで明示的に作成・削除される。
+    ///
+    /// 出力先はここが持つ。以前は全エントリ共通の 1 つしか無く、行き先ごとに
+    /// エントリ側の Output Override を全部埋めて回る必要があった。
+    /// 空のフォルダも保持される。名前の一致は大文字小文字を無視する。
+    /// </summary>
+    [Serializable]
+    public class BakeFolderState
+    {
+        public string name;
+
+        [Tooltip("Output folder for entries in this folder. Individual entries can override it")]
+        public DefaultAsset outputDirectory;
+
+        [Tooltip("When OFF, entries in this folder are skipped by Execute")]
+        public bool bakeEnabled = true;
+
+        public bool expanded = true;
     }
 
     /// <summary>
@@ -66,13 +97,16 @@ namespace YozoLab.FBXAnimationBaker
         [Tooltip("When OFF, this entry is skipped by Execute")]
         public bool enabled = true;
 
+        [Tooltip("Name of the folder this entry belongs to (empty = no folder, case-insensitive)")]
+        public string folder;
+
         [Tooltip("Source FBX (model) the animation is baked onto")]
         public GameObject sourceFbx;
 
         [Tooltip("Humanoid animation clips to bake. One FBX is generated per clip")]
         public List<AnimationClip> clips = new List<AnimationClip>();
 
-        [Tooltip("Per-entry output folder. When set, FBX files are written here instead of the global Output Directory")]
+        [Tooltip("Per-entry output folder. When set, FBX files are written here instead of the folder's Output Directory")]
         public DefaultAsset outputDirectoryOverride;
 
         [Tooltip("File name of the generated FBX (without extension). Leave empty to use the clip name. With multiple clips the clip name is appended")]

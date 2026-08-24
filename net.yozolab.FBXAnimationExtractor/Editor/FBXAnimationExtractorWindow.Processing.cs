@@ -11,94 +11,210 @@ using System.Collections.Generic;
 /// </summary>
 public partial class FBXAnimationExtractorWindow
 {
+    /// <summary>
+    /// Execute 中に処理しているルールフォルダの名前。抽出の途中で呼ばれる
+    /// FindMatchingRule に「どのフォルダの Rule を見るのか」を伝えるために置く。
+    /// 実行中以外は空。
+    /// </summary>
+    private string activeFolderScope = string.Empty;
+
     /// <param name="ignoreCache">true のとき差分キャッシュを無視し、全 FBX を強制的に再エクスポートする。</param>
     private void ProcessFBXFiles(bool ignoreCache = false)
     {
-        string targetPath = AssetDatabase.GetAssetPath(settings.targetDirectory);
-        string defaultOutputPath = AssetDatabase.GetAssetPath(settings.outputDirectory);
-
-        // FBXファイルを取得
-        string[] fbxGuids = AssetDatabase.FindAssets("t:Model", new[] { targetPath });
-        string[] fbxPaths = fbxGuids
-            .Select(AssetDatabase.GUIDToAssetPath)
-            .Where(p => p.ToLower().EndsWith(".fbx"))
-            .ToArray();
-
-        if (fbxPaths.Length == 0)
+        // 入出力はルールフォルダごとに持つ。Execute はフォルダを順に回り、
+        // それぞれの Source Directory を走査する。共通のディレクトリは無い。
+        List<RuleFolderState> folders = CollectExecutableFolders(out int disabledCount, out int misconfiguredCount);
+        if (folders.Count == 0)
         {
-            Debug.LogWarning("[FBX Animation Extractor] No FBX files found in the specified folder.");
+            Debug.LogWarning("[FBX Animation Extractor] No rule folder has a valid Source Directory and Output Directory.");
             return;
         }
 
-        Debug.Log($"[FBX Animation Extractor] Processing started: {fbxPaths.Length} FBX file(s){(ignoreCache ? " (cache ignored: full re-export)" : string.Empty)}");
         int processedCount = 0;
         int skippedCount = 0;
-        int folderDisabledCount = 0;
+        int noRuleSkippedCount = 0;
+        int totalFbxCount = 0;
 
+        // 同じ FBX から同じ .anim を二度書かないための番人。
+        // 複数のフォルダが同じ Source Directory を指していると起こりうる。
+        var writtenClipPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // どのフォルダにも属さない Rule 名。所有者のいる FBX を、たまたま同じ
+        // Source Directory を見ている別フォルダが横取りしないために使う。
+        Dictionary<string, string> ruleOwnerFolder = BuildRuleOwnerMap();
+
+        var plans = new List<(RuleFolderState folder, string sourcePath, string outputPath, string[] fbxPaths)>();
+        foreach (RuleFolderState folder in folders)
+        {
+            string sourcePath = AssetDatabase.GetAssetPath(folder.sourceDirectory);
+            string outputPath = AssetDatabase.GetAssetPath(folder.outputDirectory);
+
+            string[] fbxPaths = AssetDatabase.FindAssets("t:Model", new[] { sourcePath })
+                .Select(AssetDatabase.GUIDToAssetPath)
+                .Where(path => path.ToLower().EndsWith(".fbx"))
+                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            if (fbxPaths.Length == 0)
+            {
+                Debug.LogWarning($"[FBX Animation Extractor] Folder \"{folder.name}\": no FBX files under \"{sourcePath}\".");
+                continue;
+            }
+
+            totalFbxCount += fbxPaths.Length;
+            plans.Add((folder, sourcePath, outputPath, fbxPaths));
+        }
+
+        if (totalFbxCount == 0)
+        {
+            Debug.LogWarning("[FBX Animation Extractor] No FBX files found in any rule folder's Source Directory.");
+            return;
+        }
+
+        Debug.Log($"[FBX Animation Extractor] Processing started: {plans.Count} folder(s), {totalFbxCount} FBX file(s)"
+                  + (ignoreCache ? " (cache ignored: full re-export)" : string.Empty));
+
+        int done = 0;
         try
         {
-            for (int i = 0; i < fbxPaths.Length; i++)
+            foreach ((RuleFolderState folder, string sourcePath, string outputPath, string[] fbxPaths) in plans)
             {
-                string fbxPath = fbxPaths[i];
-                string fbxName = Path.GetFileNameWithoutExtension(fbxPath);
-                AnimationPostProcessRule matchingRule = FindMatchingRule(fbxName);
-                string sourceDependencyHash;
-                string ruleSignature;
+                string folderKey = folder.name.Trim();
+                activeFolderScope = folderKey;
 
-                // Rule の属するフォルダの Extract フラグが OFF なら処理対象から除外
-                if (matchingRule != null && !IsFolderExtractEnabled(matchingRule.folder))
+                foreach (string fbxPath in fbxPaths)
                 {
-                    folderDisabledCount++;
-                    Debug.Log($"[FBX Animation Extractor] Folder \"{matchingRule.folder.Trim()}\" extract is OFF, skipped: {fbxName}");
-                    continue;
+                    done++;
+                    string fbxName = Path.GetFileNameWithoutExtension(fbxPath);
+
+                    EditorUtility.DisplayProgressBar("FBX Animation Extractor",
+                        $"{folder.name}: {fbxName} ({done}/{totalFbxCount})",
+                        (float)done / totalFbxCount);
+
+                    AnimationPostProcessRule matchingRule = FindMatchingRule(fbxName, folderKey);
+
+                    // このフォルダに Rule が無くても、他のフォルダが同じ名前の Rule を
+                    // 持っているならそちらの持ち物。ここでは触らない。
+                    if (matchingRule == null
+                        && ruleOwnerFolder.TryGetValue(fbxName.Trim(), out string owner)
+                        && !string.Equals(owner, folderKey, StringComparison.OrdinalIgnoreCase))
+                    {
+                        noRuleSkippedCount++;
+                        continue;
+                    }
+
+                    WarnIfInvalidOutputOverride(matchingRule);
+                    string ruleOutputPath = GetRuleOutputFolder(matchingRule, outputPath);
+                    string outputName = GetRuleOutputName(matchingRule, fbxName);
+                    string generatedClipPath = $"{ruleOutputPath}/{outputName}.anim";
+
+                    if (!writtenClipPaths.Add(generatedClipPath))
+                    {
+                        Debug.LogWarning($"[FBX Animation Extractor] \"{generatedClipPath}\" was already written in this run; skipped the duplicate from folder \"{folder.name}\".");
+                        continue;
+                    }
+
+                    // out 値(ハッシュ/署名)はキャッシュ更新に必要なため常に計算し、
+                    // スキップ判定だけ ignoreCache で抑止する
+                    bool canSkip = ShouldSkipProcessing(fbxPath, outputName, ruleOutputPath, matchingRule,
+                                                        out string sourceDependencyHash, out string ruleSignature);
+                    if (!ignoreCache && canSkip)
+                    {
+                        skippedCount++;
+                        Debug.Log($"[FBX Animation Extractor] No changes, skipped: {fbxName}");
+                        continue;
+                    }
+
+                    ConfigureModelImporter(fbxPath, matchingRule);
+
+                    // アニメーションクリップを抽出・保存。Separate モード時は generic clip も別途生成。
+                    bool extracted = ExtractAndSaveAnimationClip(fbxPath, ruleOutputPath, fbxName, outputName,
+                                                                 out string generatedGenericClipPath);
+                    if (!extracted)
+                    {
+                        continue;
+                    }
+
+                    UpdateProcessCache(fbxPath, sourceDependencyHash, ruleSignature, generatedClipPath, generatedGenericClipPath);
+                    processedCount++;
+
+                    Debug.Log($"[FBX Animation Extractor] Processed: {fbxName} -> {generatedClipPath}");
                 }
-
-                // Rule に出力先オーバーライドがあればそちらへ、無ければグローバルの Output Directory へ。
-                WarnIfInvalidOutputOverride(matchingRule);
-                string outputPath = GetRuleOutputFolder(matchingRule, defaultOutputPath);
-                string outputName = GetRuleOutputName(matchingRule, fbxName);
-
-                EditorUtility.DisplayProgressBar("FBX Animation Extractor",
-                    $"Processing: {fbxName} ({i + 1}/{fbxPaths.Length})",
-                    (float)i / fbxPaths.Length);
-
-                // out 値（ハッシュ/署名）はキャッシュ更新に必要なため常に計算し、スキップ判定だけ ignoreCache で抑止する
-                bool canSkip = ShouldSkipProcessing(fbxPath, outputName, outputPath, matchingRule, out sourceDependencyHash, out ruleSignature);
-                if (!ignoreCache && canSkip)
-                {
-                    skippedCount++;
-                    Debug.Log($"[FBX Animation Extractor] No changes, skipped: {fbxName}");
-                    continue;
-                }
-
-                // FBXのインポート設定を変更
-                ConfigureModelImporter(fbxPath, matchingRule);
-
-                // アニメーションクリップを抽出・保存。Separate モード時は generic clip も別途生成。
-                string generatedGenericClipPath;
-                bool extracted = ExtractAndSaveAnimationClip(fbxPath, outputPath, fbxName, outputName, out generatedGenericClipPath);
-                if (!extracted)
-                {
-                    continue;
-                }
-
-                string generatedClipPath = $"{outputPath}/{outputName}.anim";
-                UpdateProcessCache(fbxPath, sourceDependencyHash, ruleSignature, generatedClipPath, generatedGenericClipPath);
-                processedCount++;
-
-                Debug.Log($"[FBX Animation Extractor] Processed: {fbxName}");
             }
 
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
             settings.SaveSettings();
 
-            Debug.Log($"[FBX Animation Extractor] All done: total={fbxPaths.Length}, processed={processedCount}, skipped={skippedCount}, folder-off={folderDisabledCount}");
+            Debug.Log($"[FBX Animation Extractor] All done: total={totalFbxCount}, processed={processedCount}, "
+                      + $"skipped={skippedCount}, owned-by-other-folder={noRuleSkippedCount}, "
+                      + $"folder-off={disabledCount}, folder-misconfigured={misconfiguredCount}");
         }
         finally
         {
+            activeFolderScope = string.Empty;
             EditorUtility.ClearProgressBar();
         }
+    }
+
+    /// <summary>
+    /// Execute の対象になるフォルダ(Extract が ON で、Source / Output のどちらも
+    /// 有効なフォルダを指しているもの)を返す。外れたものは数えて呼ぶ側へ返す。
+    /// </summary>
+    private List<RuleFolderState> CollectExecutableFolders(out int disabledCount, out int misconfiguredCount)
+    {
+        var result = new List<RuleFolderState>();
+        disabledCount = 0;
+        misconfiguredCount = 0;
+
+        if (settings?.ruleFolders == null) return result;
+
+        foreach (RuleFolderState folder in settings.ruleFolders)
+        {
+            if (folder == null || string.IsNullOrWhiteSpace(folder.name)) continue;
+
+            if (!folder.extractEnabled)
+            {
+                disabledCount++;
+                continue;
+            }
+
+            if (!IsValidFolderAsset(folder.sourceDirectory) || !IsValidFolderAsset(folder.outputDirectory))
+            {
+                misconfiguredCount++;
+                Debug.LogWarning($"[FBX Animation Extractor] Folder \"{folder.name}\" is skipped: "
+                                 + "Source Directory or Output Directory is not set to a valid folder.");
+                continue;
+            }
+
+            result.Add(folder);
+        }
+        return result;
+    }
+
+    /// <summary>Rule 名 → その Rule が属するフォルダ名。同名 Rule が複数あるときは先勝ち。</summary>
+    private Dictionary<string, string> BuildRuleOwnerMap()
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (settings?.postProcessRules == null) return map;
+
+        foreach (AnimationPostProcessRule rule in settings.postProcessRules)
+        {
+            if (rule == null || string.IsNullOrWhiteSpace(rule.targetName)) continue;
+            string name = rule.targetName.Trim();
+            if (!map.ContainsKey(name))
+            {
+                map.Add(name, rule.folder?.Trim() ?? string.Empty);
+            }
+        }
+        return map;
+    }
+
+    internal static bool IsValidFolderAsset(UnityEngine.Object folderAsset)
+    {
+        if (folderAsset == null) return false;
+        string path = AssetDatabase.GetAssetPath(folderAsset);
+        return !string.IsNullOrEmpty(path) && AssetDatabase.IsValidFolder(path);
     }
 
     private void ConfigureModelImporter(string fbxPath, AnimationPostProcessRule matchingRule)
@@ -402,19 +518,26 @@ public partial class FBXAnimationExtractorWindow
     // ═══════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// Rule の出力先フォルダを解決する。グローバルの Output Directory を既定値として用いる。
+    /// Rule の出力先フォルダを解決する。既定値は Rule が属するルールフォルダの
+    /// Output Directory。
     /// </summary>
     private string GetRuleOutputFolder(AnimationPostProcessRule rule)
     {
-        string defaultOutputPath = settings != null && settings.outputDirectory != null
-            ? AssetDatabase.GetAssetPath(settings.outputDirectory)
+        return GetRuleOutputFolder(rule, GetFolderOutputPath(rule?.folder));
+    }
+
+    /// <summary>ルールフォルダの Output Directory のパス。無効なら空文字。</summary>
+    private string GetFolderOutputPath(string folderName)
+    {
+        RuleFolderState folder = FindFolderState(folderName);
+        return folder != null && IsValidFolderAsset(folder.outputDirectory)
+            ? AssetDatabase.GetAssetPath(folder.outputDirectory)
             : string.Empty;
-        return GetRuleOutputFolder(rule, defaultOutputPath);
     }
 
     /// <summary>
     /// Rule の outputDirectoryOverride が有効なフォルダならそれを、無効/未設定なら
-    /// 引数の defaultOutputPath(グローバル Output Directory) を返す。
+    /// 引数の defaultOutputPath(ルールフォルダの Output Directory) を返す。
     /// </summary>
     private string GetRuleOutputFolder(AnimationPostProcessRule rule, string defaultOutputPath)
     {
@@ -496,13 +619,13 @@ public partial class FBXAnimationExtractorWindow
         string overridePath = AssetDatabase.GetAssetPath(rule.outputDirectoryOverride);
         if (string.IsNullOrEmpty(overridePath) || !AssetDatabase.IsValidFolder(overridePath))
         {
-            Debug.LogWarning($"[FBX Animation Extractor] Rule '{rule.targetName}' has an invalid Output Directory override; using the global Output Directory instead.");
+            Debug.LogWarning($"[FBX Animation Extractor] Rule '{rule.targetName}' has an invalid Output Directory override; using the rule folder's Output Directory instead.");
         }
     }
 
     /// <summary>
-    /// グローバルの Output Directory と各 Rule の出力先オーバーライドを合わせた、
-    /// 有効なフォルダパスの重複なしリストを返す。
+    /// 各ルールフォルダの Output Directory と、各 Rule の出力先オーバーライドを
+    /// 合わせた、有効なフォルダパスの重複なしリストを返す。
     /// </summary>
     private List<string> CollectAllOutputFolders()
     {
@@ -514,7 +637,16 @@ public partial class FBXAnimationExtractorWindow
             return folders;
         }
 
-        AddValidFolder(settings.outputDirectory, folders, seen);
+        if (settings.ruleFolders != null)
+        {
+            foreach (RuleFolderState folder in settings.ruleFolders)
+            {
+                if (folder != null)
+                {
+                    AddValidFolder(folder.outputDirectory, folders, seen);
+                }
+            }
+        }
 
         if (settings.postProcessRules != null)
         {
@@ -567,11 +699,11 @@ public partial class FBXAnimationExtractorWindow
     }
 
     // ═══════════════════════════════════════════════════════════════
-    //  Refresh: Output Directory以下の .anim を GUID 維持で空アニメ化
+    //  Refresh: 各 Output Directory 以下の .anim を GUID 維持で空アニメ化
     // ═══════════════════════════════════════════════════════════════
     private void RefreshOutputAnimations()
     {
-        // グローバルの Output Directory と各 Rule の出力先オーバーライドをまとめて対象にする。
+        // 各ルールフォルダの Output Directory と、Rule ごとの出力先オーバーライドをまとめて対象にする。
         List<string> outputFolders = CollectAllOutputFolders();
         if (outputFolders.Count == 0)
         {

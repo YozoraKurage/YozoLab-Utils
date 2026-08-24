@@ -95,7 +95,21 @@ public partial class FBXAnimationExtractorWindow
         }
     }
 
+    /// <summary>
+    /// 名前から Rule を引く。Execute 中は <see cref="activeFolderScope"/> が入っているので、
+    /// そのルールフォルダの中だけを見る。フォルダごとに Source Directory を持つように
+    /// なった以上、同じ FBX 名の Rule が別フォルダに並んでいても不思議ではなく、
+    /// 名前だけで引くと別フォルダの設定を掴んでしまう。
+    /// </summary>
     private AnimationPostProcessRule FindMatchingRule(string name)
+    {
+        return FindMatchingRule(name, activeFolderScope);
+    }
+
+    /// <param name="folderScope">
+    /// 探す範囲のルールフォルダ名。空なら全 Rule から名前だけで探す(GUI の重複検査など)。
+    /// </param>
+    private AnimationPostProcessRule FindMatchingRule(string name, string folderScope)
     {
         if (settings.postProcessRules == null || settings.postProcessRules.Count == 0)
             return null;
@@ -104,16 +118,22 @@ public partial class FBXAnimationExtractorWindow
             return null;
 
         string normalizedName = name.Trim();
+        bool scoped = !string.IsNullOrWhiteSpace(folderScope);
+        string scopeKey = scoped ? folderScope.Trim() : null;
 
         foreach (var rule in settings.postProcessRules)
         {
-            if (string.IsNullOrWhiteSpace(rule.targetName))
+            if (rule == null || string.IsNullOrWhiteSpace(rule.targetName))
                 continue;
 
-            if (string.Equals(normalizedName, rule.targetName.Trim(), StringComparison.OrdinalIgnoreCase))
-            {
-                return rule;
-            }
+            if (!string.Equals(normalizedName, rule.targetName.Trim(), StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            if (scoped && !string.Equals(rule.folder?.Trim() ?? string.Empty, scopeKey,
+                                         StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            return rule;
         }
 
         return null;
