@@ -4,11 +4,12 @@ using System.Reflection;
 using UnityEditor;
 using UnityEngine;
 
-namespace YozoLab.ParticleTimeScrubber
+namespace YozoLab.ParticleTools
 {
     /// <summary>
     /// 選択に追従して対象エフェクトを確保し、時刻指定シミュレートを行う本体。
-    /// GUI は持たない。Scene ビューのオーバーレイ(ParticleTimeScrubberOverlay)から操作される。
+    /// GUI は持たない。Scene ビューのオーバーレイ(ParticleScrubberOverlay)と
+    /// 色変更ウィンドウ(ParticleColorWindow)から操作される。
     ///
     /// 決定論の作り方:
     ///   確保時に全 ParticleSystem の useAutoRandomSeed を切り、固定シードを与える。
@@ -30,7 +31,13 @@ namespace YozoLab.ParticleTimeScrubber
         public static bool IsPlaying { get; private set; }
         public static bool LoopPlayback { get; set; } = true;
 
-        /// <summary>時刻・対象・再生状態が変わったとき。オーバーレイが再描画に使う。</summary>
+        /// <summary>再生速度の倍率。標準パネルの Playback Speed に相当する。</summary>
+        public static float PlaybackSpeed { get; set; } = 1f;
+
+        /// <summary>エフェクト全体の境界ボックスを Scene ビューへ描くか。</summary>
+        public static bool ShowBounds { get; set; }
+
+        /// <summary>時刻・対象・再生状態が変わったとき。オーバーレイやウィンドウが再描画に使う。</summary>
         public static event Action Changed;
 
         private static readonly List<SeedRecord> seedRecords = new List<SeedRecord>();
@@ -53,6 +60,7 @@ namespace YozoLab.ParticleTimeScrubber
             AssemblyReloadEvents.beforeAssemblyReload += ReleaseTarget;
             Undo.postprocessModifications += OnPostprocessModifications;
             Undo.undoRedoPerformed += OnUndoRedoPerformed;
+            SceneView.duringSceneGui += OnSceneGUI;
 
             OnSelectionChanged();
         }
@@ -67,6 +75,7 @@ namespace YozoLab.ParticleTimeScrubber
             AssemblyReloadEvents.beforeAssemblyReload -= ReleaseTarget;
             Undo.postprocessModifications -= OnPostprocessModifications;
             Undo.undoRedoPerformed -= OnUndoRedoPerformed;
+            SceneView.duringSceneGui -= OnSceneGUI;
 
             ReleaseTarget();
         }
@@ -147,7 +156,7 @@ namespace YozoLab.ParticleTimeScrubber
             }
 
             MaxTime = EstimateDuration(Root);
-            BuiltinPreview.Pause();
+            BuiltinPreviewBridge.PausePlayback();
             SetTime(0f);
 
             // 選んだ直後から動いて見えるように、既定は再生から入る。
@@ -199,6 +208,17 @@ namespace YozoLab.ParticleTimeScrubber
             return Mathf.Ceil(result * 10f) / 10f;
         }
 
+        /// <summary>今シミュレートされている粒の総数。標準パネルの Particles 表示に相当する。</summary>
+        public static int TotalParticleCount()
+        {
+            if (Root == null) return 0;
+
+            int count = 0;
+            foreach (ParticleSystem ps in Root.GetComponentsInChildren<ParticleSystem>(true))
+                count += ps.particleCount;
+            return count;
+        }
+
         // ---------------------------------------------------------------
         // 再生操作
         // ---------------------------------------------------------------
@@ -235,6 +255,19 @@ namespace YozoLab.ParticleTimeScrubber
             SetTime(CurrentTime);
         }
 
+        /// <summary>標準パネルの Stop に相当。粒を消して時刻 0 で止まる(シミュレートもしない)。</summary>
+        public static void Stop()
+        {
+            IsPlaying = false;
+            CurrentTime = 0f;
+            if (Root != null)
+            {
+                Root.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+                SceneView.RepaintAll();
+            }
+            Changed?.Invoke();
+        }
+
         /// <summary>バー操作用。再生を止めてから指定時刻へ移る(シミュレートは 1 回だけ)。</summary>
         public static void Scrub(float time)
         {
@@ -242,13 +275,14 @@ namespace YozoLab.ParticleTimeScrubber
             SetTime(time);
         }
 
-        public static void ToStart()
+        /// <summary>標準パネルの Restart に相当。先頭から再生し直す。</summary>
+        public static void Restart()
         {
-            IsPlaying = false;
             SetTime(0f);
+            Play();
         }
 
-        /// <summary>Inspector や色パネルでの変更後に呼ぶ。次の update で同時刻へ再シミュレートする。</summary>
+        /// <summary>Inspector や色ウィンドウでの変更後に呼ぶ。次の update で同時刻へ再シミュレートする。</summary>
         public static void RequestResync() => resyncPending = true;
 
         private static void OnEditorUpdate()
@@ -267,12 +301,12 @@ namespace YozoLab.ParticleTimeScrubber
 
             // 対象を選択している間は標準のプレビューが同じエフェクトを動かそうと
             // するので、毎回止めて主導権を取り続ける。
-            BuiltinPreview.Pause();
+            BuiltinPreviewBridge.PausePlayback();
 
             if (IsPlaying)
             {
                 double now = EditorApplication.timeSinceStartup;
-                float delta = (float)(now - lastEditorTime);
+                float delta = (float)(now - lastEditorTime) * Mathf.Max(0f, PlaybackSpeed);
                 lastEditorTime = now;
 
                 CurrentTime += delta;
@@ -303,6 +337,23 @@ namespace YozoLab.ParticleTimeScrubber
             {
                 resyncPending = false;
                 SetTime(CurrentTime);
+            }
+        }
+
+        // ---------------------------------------------------------------
+        // 境界の表示
+        // ---------------------------------------------------------------
+
+        private static void OnSceneGUI(SceneView sceneView)
+        {
+            if (!ShowBounds || Root == null) return;
+
+            Handles.color = new Color(1f, 0.92f, 0.3f, 0.9f);
+            foreach (ParticleSystemRenderer renderer
+                     in Root.GetComponentsInChildren<ParticleSystemRenderer>(true))
+            {
+                Bounds bounds = renderer.bounds;
+                Handles.DrawWireCube(bounds.center, bounds.size);
             }
         }
 
@@ -344,47 +395,101 @@ namespace YozoLab.ParticleTimeScrubber
             };
             return transform != null && transform.IsChildOf(Root.transform);
         }
+    }
 
-        // ---------------------------------------------------------------
-        // 標準プレビューの黙らせ役
-        // ---------------------------------------------------------------
+    /// <summary>言語切替。パッケージ内の GUI で共用する。</summary>
+    internal static class L10n
+    {
+        private const string PrefKey = "YozoLab_ParticleTools_Language";
+
+        public static bool IsEnglish
+        {
+            get => EditorPrefs.GetBool(PrefKey, false);
+            set => EditorPrefs.SetBool(PrefKey, value);
+        }
+
+        public static string T(string jp, string en) => IsEnglish ? en : jp;
+    }
+
+    /// <summary>
+    /// Unity 標準のパーティクルプレビューへの内部 API 橋渡し。
+    ///
+    /// ParticleSystem を選択すると標準の Particle Effect パネルが同じエフェクトの
+    /// プレビュー再生を始め、こちらのシミュレートと毎フレーム取り合いになるため、
+    /// 標準側の再生フラグを落として回避する。あわせて Simulate Layers と
+    /// Show Only Selected(標準パネルにある残り 2 機能)も橋渡しする。
+    /// リフレクションが外れた(将来の改名など)場合は、その機能だけ黙って畳む。
+    /// </summary>
+    internal static class BuiltinPreviewBridge
+    {
+        private static readonly PropertyInfo playbackIsPlaying;
+        private static readonly PropertyInfo previewLayers;
+        private static readonly PropertyInfo renderInSceneView;
+
+        static BuiltinPreviewBridge()
+        {
+            try
+            {
+                Type utils = typeof(Editor).Assembly.GetType("UnityEditor.ParticleSystemEditorUtils");
+                const BindingFlags flags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+                playbackIsPlaying = utils?.GetProperty("playbackIsPlaying", flags)
+                                    ?? utils?.GetProperty("editorIsPlaying", flags);
+                previewLayers = utils?.GetProperty("previewLayers", flags);
+                renderInSceneView = utils?.GetProperty("renderInSceneView", flags);
+            }
+            catch
+            {
+                // 何も掴めなくても機能全体は生かす。
+            }
+        }
+
+        public static void PausePlayback()
+        {
+            try
+            {
+                if (playbackIsPlaying != null && (bool)playbackIsPlaying.GetValue(null))
+                    playbackIsPlaying.SetValue(null, false);
+            }
+            catch
+            {
+                // 内部 API が変わっただけなら巻き込まない。
+            }
+        }
+
+        public static bool HasPreviewLayers => previewLayers != null;
+
+        /// <summary>プレビューをシミュレートするレイヤーのビットマスク。標準パネルの Simulate Layers。</summary>
+        public static uint PreviewLayers
+        {
+            get
+            {
+                try { return (uint)previewLayers.GetValue(null); }
+                catch { return uint.MaxValue; }
+            }
+            set
+            {
+                try { previewLayers.SetValue(null, value); }
+                catch { }
+            }
+        }
+
+        public static bool HasShowOnlySelected => renderInSceneView != null;
 
         /// <summary>
-        /// ParticleSystem を選択すると、Unity 標準の Particle Effect パネルが
-        /// 同じエフェクトのプレビュー再生を始め、こちらのシミュレートと毎フレーム
-        /// 取り合いになる。標準側の再生フラグを内部 API 越しに落として回避する。
-        /// リフレクションが外れた(将来の改名など)場合は、単に何もしない。
+        /// 選択中のエフェクト以外のパーティクルを Scene ビューで隠す。標準パネルの
+        /// Show Only Selected。内部プロパティ renderInSceneView の裏返しとして扱う。
         /// </summary>
-        private static class BuiltinPreview
+        public static bool ShowOnlySelected
         {
-            private static readonly PropertyInfo playbackIsPlaying;
-
-            static BuiltinPreview()
+            get
             {
-                try
-                {
-                    Type utils = typeof(Editor).Assembly.GetType("UnityEditor.ParticleSystemEditorUtils");
-                    const BindingFlags flags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
-                    playbackIsPlaying = utils?.GetProperty("playbackIsPlaying", flags)
-                                        ?? utils?.GetProperty("editorIsPlaying", flags);
-                }
-                catch
-                {
-                    playbackIsPlaying = null;
-                }
+                try { return !(bool)renderInSceneView.GetValue(null); }
+                catch { return false; }
             }
-
-            public static void Pause()
+            set
             {
-                try
-                {
-                    if (playbackIsPlaying != null && (bool)playbackIsPlaying.GetValue(null))
-                        playbackIsPlaying.SetValue(null, false);
-                }
-                catch
-                {
-                    // 内部 API が変わっただけなら機能全体を巻き込まない。
-                }
+                try { renderInSceneView.SetValue(null, !value); }
+                catch { }
             }
         }
     }

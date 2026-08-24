@@ -211,11 +211,12 @@ namespace YozoLab.UtilSettings
             },
             new UtilPackage
             {
-                Id = "particletimescrubber",
-                DisplayName = "Particle Time Scrubber",
-                Description = "パーティクルの再生位置を Edit モードのまま時間バーで行き来する。ParticleSystem を選ぶと Scene ビューに出る。",
+                Id = "particletools",
+                DisplayName = "Particle Tools",
+                Description = "パーティクル制作支援。時間バーでのスクラブ(標準 Particle Effect パネル置き換え)と色の一括編集。",
                 AsmdefGuid = "998afc256cc14f59adb8fb9bd4245156",
-                Define = "YOZOLAB_ENABLE_PARTICLETIMESCRUBBER",
+                Define = "YOZOLAB_ENABLE_PARTICLETOOLS",
+                OpenMenuPath = "YozoLab/Particle Color Editor",
             },
         };
     }

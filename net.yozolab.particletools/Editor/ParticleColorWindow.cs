@@ -3,29 +3,53 @@ using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-namespace YozoLab.ParticleTimeScrubber
+namespace YozoLab.ParticleTools
 {
     /// <summary>
-    /// 「色変更」パネル。対象エフェクトに紐付く色設定を一覧し、その場で編集する。
+    /// 対象エフェクトに紐付く色設定を一覧し、その場で編集する独立ウィンドウ。
+    /// 対象はオーバーレイと同じく選択に追従する(ParticleScrubController.Root)。
     ///
     /// 対象にするのは、各 ParticleSystem の Start Color / Color over Lifetime と、
     /// レンダラーが使うマテリアルの Color 型プロパティ。マテリアルはシーンの
-    /// 一部ではなくアセット本体を書き換える点に注意(パネル内にも注記を出す)。
+    /// 一部ではなくアセット本体を書き換える点に注意(ウィンドウ内にも注記を出す)。
     /// </summary>
-    internal sealed partial class ParticleTimeScrubberOverlay
+    internal sealed class ParticleColorWindow : EditorWindow
     {
-        private const float ColorPanelMaxHeight = 260f;
-
-        private void DrawColorSection(ParticleSystem root)
+        [MenuItem("YozoLab/Particle Color Editor")]
+        public static void ShowWindow()
         {
-            if (!showColors) return;
+            GetWindow<ParticleColorWindow>(L10n.T("パーティクル色編集", "Particle Colors"));
+        }
 
-            EditorGUILayout.Space(2f);
+        private Vector2 scroll;
 
-            using (var scroll = new EditorGUILayout.ScrollViewScope(
-                       colorScroll, GUILayout.MaxHeight(ColorPanelMaxHeight)))
+        private void OnEnable()
+        {
+            ParticleScrubController.Changed += Repaint;
+        }
+
+        private void OnDisable()
+        {
+            ParticleScrubController.Changed -= Repaint;
+        }
+
+        private void OnGUI()
+        {
+            ParticleSystem root = ParticleScrubController.Root;
+            if (root == null)
             {
-                colorScroll = scroll.scrollPosition;
+                EditorGUILayout.HelpBox(
+                    L10n.T("シーン上の ParticleSystem を選択すると、そのエフェクトの色設定が並びます。",
+                           "Select a ParticleSystem in the scene to list its color settings."),
+                    MessageType.Info);
+                return;
+            }
+
+            GUILayout.Label(root.name, EditorStyles.boldLabel);
+
+            using (var scope = new EditorGUILayout.ScrollViewScope(scroll))
+            {
+                scroll = scope.scrollPosition;
 
                 EditorGUI.BeginChangeCheck();
 
@@ -72,7 +96,7 @@ namespace YozoLab.ParticleTimeScrubber
 
         /// <summary>
         /// MinMaxGradient を、今のモードのまま編集できるフィールドとして描く。
-        /// モードの切り替え自体は Inspector に任せる(このパネルは値だけ触る)。
+        /// モードの切り替え自体は Inspector に任せる(このウィンドウは値だけ触る)。
         /// 変更があったときだけ true を返し、result に新しい値を入れる。
         /// </summary>
         private static bool DrawMinMaxGradient(
