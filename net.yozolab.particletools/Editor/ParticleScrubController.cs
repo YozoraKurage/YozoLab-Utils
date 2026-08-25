@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using UnityEditor;
 using UnityEngine;
 
@@ -11,10 +10,17 @@ namespace YozoLab.ParticleTools
     /// GUI は持たない。Scene ビューのオーバーレイ(ParticleScrubberOverlay)と
     /// 色変更ウィンドウ(ParticleColorWindow)から操作される。
     ///
+    /// 動かし方:
+    ///   標準の Particle Effect パネルと同じ内部 API(BuiltinPreviewBridge)へ
+    ///   時刻を渡し、ネイティブ側に積み直させる。ParticleSystem.Simulate を
+    ///   C# から呼ぶ方式は、サブエミッタの受け側にも直接 Simulate をかけてしまい
+    ///   親のイベントで出た粒が壊れるため使わない(内部 API を掴めない環境向けの
+    ///   代替としてだけ残してある。そちらではサブエミッタを親に任せて除外する)。
+    ///
     /// 決定論の作り方:
     ///   確保時に全 ParticleSystem の useAutoRandomSeed を切り、固定シードを与える。
-    ///   時刻指定は常に「先頭から固定タイムステップで再シミュレート」するので、
-    ///   同じ時刻を指定すれば毎回同じ絵になる。元のシード設定は解放時に戻す。
+    ///   時刻指定は常に「先頭から積み直す」ので、同じ時刻を指定すれば毎回同じ絵に
+    ///   なる。元のシード設定は解放時に戻す。
     /// </summary>
     internal static class ParticleScrubController
     {
@@ -40,10 +46,110 @@ namespace YozoLab.ParticleTools
         /// <summary>時刻・対象・再生状態が変わったとき。オーバーレイやウィンドウが再描画に使う。</summary>
         public static event Action Changed;
 
+        // ---------------------------------------------------------------
+        // 設定(EditorPrefs 保存)
+        // ---------------------------------------------------------------
+
+        private const string AutoResimulatePref = "YozoLab_ParticleTools_AutoResimulate";
+        private const string HideBuiltinPanelPref = "YozoLab_ParticleTools_HideBuiltinPanel";
+
+        /// <summary>
+        /// Inspector や色ウィンドウでの変更を、再生位置を保ったまま反映するか。
+        /// 標準パネルの Resimulate に相当するが、こちらは間引いて掛け直す。
+        /// </summary>
+        public static bool AutoResimulate
+        {
+            get => EditorPrefs.GetBool(AutoResimulatePref, true);
+            set => EditorPrefs.SetBool(AutoResimulatePref, value);
+        }
+
+        /// <summary>掴んでいる間、標準の Particle Effect パネルを隠すか。</summary>
+        public static bool HideBuiltinPanel
+        {
+            get => EditorPrefs.GetBool(HideBuiltinPanelPref, true);
+            set => EditorPrefs.SetBool(HideBuiltinPanelPref, value);
+        }
+
+        /// <summary>今このフレーム、標準パネルを隠すべきか(Harmony パッチから読まれる)。</summary>
+        public static bool SuppressesBuiltinPanel => Root != null && HideBuiltinPanel;
+
+        /// <summary>サブエミッタが正しく出る経路で動いているか。false なら代替経路。</summary>
+        public static bool DrivesNativePreview => UsesNativeDriver;
+
+        /// <summary>
+        /// 内部 API 自体は掴めているのに、ネイティブ側が動かないので降りた状態か。
+        /// (掴めていない場合と原因が別なので、表示を分けるために公開する)
+        /// </summary>
+        public static bool NativeDriverGaveUp => BuiltinPreviewBridge.CanDrivePlayback && nativeDriveFailed;
+
+        /// <summary>ネイティブ経路をもう一度試す。オーバーレイの「再試行」から呼ばれる。</summary>
+        public static void RetryNativeDriver()
+        {
+            if (!BuiltinPreviewBridge.CanDrivePlayback) return;
+
+            nativeDriveFailed = false;
+            nativeStallSince = 0.0;
+            if (Root == null) return;
+
+            SetTime(CurrentTime);
+            if (IsPlaying) StartPlayback();
+            NotifyChanged();
+        }
+
+        /// <summary>
+        /// 内部 API を掴めていて、かつ実際にネイティブ側が動いているか。
+        ///
+        /// 掴めていても効かない場合がある。標準のプレビューはエディタの選択から
+        /// 対象エフェクトを決めるので、選択が ParticleSystem そのものではなく
+        /// エフェクト内の別オブジェクトだと、ネイティブ側は何も掴んでいない。
+        /// そのときは時間が進まないので、見張って代替経路へ移る(TickPlayback)。
+        /// </summary>
+        private static bool UsesNativeDriver => BuiltinPreviewBridge.CanDrivePlayback && !nativeDriveFailed;
+
+        // ---------------------------------------------------------------
+        // 再シミュレートの間引き
+        // ---------------------------------------------------------------
+
+        // 変更が止まってからこれだけ待って掛け直す。ドラッグ中の連打を 1 回にまとめる。
+        private const double SettleDelay = 0.06;
+
+        // ただし変更が続いている間も、これだけ経ったら 1 回は掛け直す(反応が死なないように)。
+        private const double MaxResyncInterval = 0.25;
+
+        // 再生中の通知(=オーバーレイの再描画)はこの間隔まで。バーの数字は
+        // 毎フレーム更新しなくても足りるうえ、IMGUI の再描画が重なると効いてくる。
+        private const double NotifyInterval = 1.0 / 20.0;
+
+        // 再生を頼んだのにネイティブ側の時刻がこれだけ動かなければ、掴めていないと見なす。
+        private const double NativeStallTimeout = 1.0;
+
+        // Scene ビューの再描画がこれだけ途切れていたら、シーンの更新自体が
+        // 回っていないと見なす(上の判定を保留する)。
+        private const double SceneIdleGrace = 0.2;
+
+        // 再生開始からこの回数だけ Scene ビューが描かれるまでは失速と判定しない。
+        // 初回のもたつきで誤って代替経路へ落ちないようにするための下駄。
+        private const int MinSceneGuiBeforeStallCheck = 3;
+
         private static readonly List<SeedRecord> seedRecords = new List<SeedRecord>();
+        private static readonly List<ParticleSystem> standaloneSystems = new List<ParticleSystem>();
+        private static ParticleSystem[] systems = Array.Empty<ParticleSystem>();
+        private static ParticleSystemRenderer[] renderers = Array.Empty<ParticleSystemRenderer>();
+
         private static double lastEditorTime;
+        private static double lastModificationTime;
+        private static double lastResyncTime;
+        private static double lastNotifyTime;
+        private static double nativeStallSince;
+        private static double lastSceneGuiTime;
+        private static int sceneGuiSincePlay;
+        private static float lastNativeTimeSample;
+        private static bool nativeDriveFailed;
         private static bool resyncPending;
         private static int attachCount;
+
+        /// <summary>親のサブエミッタとして駆動される(=直接触ってはいけない)システムの数。</summary>
+        public static int SubEmitterCount => systems.Length - standaloneSystems.Count;
 
         // ---------------------------------------------------------------
         // オーバーレイからのライフサイクル
@@ -62,6 +168,7 @@ namespace YozoLab.ParticleTools
             Undo.undoRedoPerformed += OnUndoRedoPerformed;
             SceneView.duringSceneGui += OnSceneGUI;
 
+            BuiltinPanelSuppressor.Install();
             OnSelectionChanged();
         }
 
@@ -78,6 +185,7 @@ namespace YozoLab.ParticleTools
             SceneView.duringSceneGui -= OnSceneGUI;
 
             ReleaseTarget();
+            BuiltinPanelSuppressor.Uninstall();
         }
 
         // ---------------------------------------------------------------
@@ -85,19 +193,34 @@ namespace YozoLab.ParticleTools
         // ---------------------------------------------------------------
 
         /// <summary>
-        /// 選択オブジェクトから対象エフェクトのルートを決める。自分か祖先に
-        /// ParticleSystem があれば、その最上位のものをルートとする。
+        /// 選択オブジェクトから対象エフェクトのルートを決める。自分か祖先で
+        /// 一番近い ParticleSystem を見つけ、そこから「親も ParticleSystem である
+        /// 限り」上へたどった先をルートとする。
+        ///
+        /// この束ね方は Unity 内部の ParticleSystemEditorUtils.GetRoot と同じ。
+        /// ネイティブ側のプレビューに時刻を渡す以上、どこまでを 1 つのエフェクトと
+        /// 見るかが標準とずれていると、掴んだつもりのものと動くものが食い違う。
         /// </summary>
         public static ParticleSystem ResolveEffectRoot(GameObject gameObject)
         {
             if (gameObject == null || !gameObject.scene.IsValid()) return null;
 
-            ParticleSystem topmost = null;
+            Transform nearest = null;
             for (Transform t = gameObject.transform; t != null; t = t.parent)
             {
-                if (t.TryGetComponent(out ParticleSystem ps)) topmost = ps;
+                if (t.TryGetComponent(out ParticleSystem _))
+                {
+                    nearest = t;
+                    break;
+                }
             }
-            return topmost;
+            if (nearest == null) return null;
+
+            while (nearest.parent != null && nearest.parent.TryGetComponent(out ParticleSystem _))
+            {
+                nearest = nearest.parent;
+            }
+            return nearest.GetComponent<ParticleSystem>();
         }
 
         private static void OnSelectionChanged()
@@ -110,7 +233,7 @@ namespace YozoLab.ParticleTools
             if (resolved == null) ReleaseTarget();
             else AcquireTarget(resolved);
 
-            Changed?.Invoke();
+            NotifyChanged();
         }
 
         private static void OnPlayModeStateChanged(PlayModeStateChange change)
@@ -120,7 +243,7 @@ namespace YozoLab.ParticleTools
             if (change == PlayModeStateChange.ExitingEditMode)
             {
                 ReleaseTarget();
-                Changed?.Invoke();
+                NotifyChanged();
             }
         }
 
@@ -132,13 +255,19 @@ namespace YozoLab.ParticleTools
         {
             ReleaseTarget();
 
+            // 対象ごとに見直す。前の対象で掴めなかっただけかもしれない。
+            nativeDriveFailed = false;
+
             Root = newRoot;
+            systems = Root.GetComponentsInChildren<ParticleSystem>(true);
+            renderers = Root.GetComponentsInChildren<ParticleSystemRenderer>(true);
+            CollectStandaloneSystems();
+
             Root.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
 
-            ParticleSystem[] all = Root.GetComponentsInChildren<ParticleSystem>(true);
-            for (int i = 0; i < all.Length; i++)
+            for (int i = 0; i < systems.Length; i++)
             {
-                ParticleSystem ps = all[i];
+                ParticleSystem ps = systems[i];
                 seedRecords.Add(new SeedRecord
                 {
                     Ps = ps,
@@ -156,12 +285,11 @@ namespace YozoLab.ParticleTools
             }
 
             MaxTime = EstimateDuration(Root);
-            BuiltinPreviewBridge.PausePlayback();
+            BuiltinPreviewBridge.BeginOwnership();
             SetTime(0f);
 
             // 選んだ直後から動いて見えるように、既定は再生から入る。
-            lastEditorTime = EditorApplication.timeSinceStartup;
-            IsPlaying = true;
+            StartPlayback();
         }
 
         /// <summary>シードを元へ戻し、シミュレート結果を消して手を放す。何度呼んでも安全。</summary>
@@ -185,7 +313,45 @@ namespace YozoLab.ParticleTools
                 Root.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
                 SceneView.RepaintAll();
             }
+
+            BuiltinPreviewBridge.EndOwnership();
+
+            standaloneSystems.Clear();
+            systems = Array.Empty<ParticleSystem>();
+            renderers = Array.Empty<ParticleSystemRenderer>();
             Root = null;
+        }
+
+        /// <summary>
+        /// 親のサブエミッタとして駆動されるシステムを除いた一覧を作る。
+        ///
+        /// サブエミッタの受け側は「親の粒が条件を満たしたときに親が出す」システムで、
+        /// 自分で再生されることを前提にしていない。ここへ直接 Simulate をかけると
+        /// 親のイベントで生まれた粒が消えたり二重に歳を取ったりするうえ、
+        /// 受け側自身の Emission まで余計に走って粒が増える。
+        /// 代替経路(Simulate 方式)ではこの一覧だけを進め、受け側は親に任せる。
+        /// </summary>
+        private static void CollectStandaloneSystems()
+        {
+            standaloneSystems.Clear();
+
+            var drivenByParent = new HashSet<ParticleSystem>();
+            foreach (ParticleSystem ps in systems)
+            {
+                ParticleSystem.SubEmittersModule sub = ps.subEmitters;
+                if (!sub.enabled) continue;
+
+                for (int i = 0; i < sub.subEmittersCount; i++)
+                {
+                    ParticleSystem emitted = sub.GetSubEmitterSystem(i);
+                    if (emitted != null) drivenByParent.Add(emitted);
+                }
+            }
+
+            foreach (ParticleSystem ps in systems)
+            {
+                if (!drivenByParent.Contains(ps)) standaloneSystems.Add(ps);
+            }
         }
 
         /// <summary>インデックスから決めるだけの固定シード。0 は自動シード扱いになり得るので避ける。</summary>
@@ -211,11 +377,11 @@ namespace YozoLab.ParticleTools
         /// <summary>今シミュレートされている粒の総数。標準パネルの Particles 表示に相当する。</summary>
         public static int TotalParticleCount()
         {
-            if (Root == null) return 0;
-
             int count = 0;
-            foreach (ParticleSystem ps in Root.GetComponentsInChildren<ParticleSystem>(true))
-                count += ps.particleCount;
+            foreach (ParticleSystem ps in systems)
+            {
+                if (ps != null) count += ps.particleCount;
+            }
             return count;
         }
 
@@ -224,34 +390,89 @@ namespace YozoLab.ParticleTools
         // ---------------------------------------------------------------
 
         /// <summary>
-        /// 再生位置を指定時刻へ移す。先頭から固定タイムステップで積み直すので
-        /// 同じ時刻は必ず同じ絵になる。時刻が長いほどコストは伸びる。
+        /// 再生位置を指定時刻へ移す。先頭から積み直すので同じ時刻は必ず同じ絵になる。
+        /// 時刻が長いほどコストは伸びる。
         /// </summary>
         public static void SetTime(float time)
         {
             CurrentTime = Mathf.Clamp(time, 0f, MaxTime);
             if (Root == null) return;
 
-            Root.Simulate(CurrentTime, withChildren: true, restart: true, fixedTimeStep: true);
+            Resimulate();
             SceneView.RepaintAll();
-            Changed?.Invoke();
+            NotifyChanged();
+        }
+
+        /// <summary>CurrentTime の絵を作り直す。経路の違いを吸収するのはここだけ。</summary>
+        private static void Resimulate()
+        {
+            lastResyncTime = EditorApplication.timeSinceStartup;
+
+            if (UsesNativeDriver)
+            {
+                // 標準パネルの Playback Time と同じ手順。停止状態のままだと
+                // ネイティブ側が再シミュレートの要求を捨てるので、
+                // 一度 Play → Pause して「止まっているが生きている」状態にする。
+                if (Root.isStopped)
+                {
+                    Root.Play();
+                    Root.Pause();
+                }
+
+                BuiltinPreviewBridge.IsScrubbing = true;
+                BuiltinPreviewBridge.PlaybackTime = CurrentTime;
+                BuiltinPreviewBridge.Resimulate();
+                return;
+            }
+
+            FallbackResimulate();
         }
 
         public static void Play()
         {
             if (Root == null) return;
             if (CurrentTime >= MaxTime) SetTime(0f);
+            StartPlayback();
+            NotifyChanged();
+        }
+
+        private static void StartPlayback()
+        {
             lastEditorTime = EditorApplication.timeSinceStartup;
             IsPlaying = true;
-            Changed?.Invoke();
+
+            if (!UsesNativeDriver) return;
+
+            // 進んでいるかの見張りをここから数え直す。
+            lastNativeTimeSample = CurrentTime;
+            nativeStallSince = 0.0;
+            sceneGuiSincePlay = 0;
+
+            BuiltinPreviewBridge.SimulationSpeed = Mathf.Max(0f, PlaybackSpeed);
+            BuiltinPreviewBridge.IsScrubbing = false;
+
+            // playbackIsPlaying / playbackIsPaused は書かない。Unity 自身も書かず、
+            // ネイティブ状態の読み取りとして使っている。再生を始めるのは Play() の方。
+            //
+            // ここは無条件に呼ぶ必要がある。直前の積み直しが Play → Pause で
+            // 「止まっているが生きている」状態を作っているので、isStopped は false。
+            // 条件付きにすると一時停止のまま放置され、時刻が一切進まない。
+            if (Root != null) Root.Play();
         }
 
         public static void Pause()
         {
             IsPlaying = false;
-            // 停止時に決定論的な絵へ揃え直す。再生中の逐次シミュレートは
-            // フレーム間隔に依存するので、止まった瞬間の絵を
-            // 「その時刻をバーで指定したときと同じ絵」に保証する。
+
+            if (UsesNativeDriver && Root != null)
+            {
+                // 標準パネルの Pause と同じ: 実体を止めて、スクラブ中の印を立てる。
+                Root.Pause();
+                BuiltinPreviewBridge.IsScrubbing = true;
+            }
+
+            // 停止時に決定論的な絵へ揃え直す。再生中は経過時間なりに進むので、
+            // 止まった瞬間の絵を「その時刻をバーで指定したときと同じ絵」に保証する。
             SetTime(CurrentTime);
         }
 
@@ -260,18 +481,35 @@ namespace YozoLab.ParticleTools
         {
             IsPlaying = false;
             CurrentTime = 0f;
+
             if (Root != null)
             {
+                if (UsesNativeDriver)
+                {
+                    // 標準パネルの Stop と同じ 3 手順。
+                    BuiltinPreviewBridge.IsScrubbing = false;
+                    BuiltinPreviewBridge.PlaybackTime = 0f;
+                    BuiltinPreviewBridge.StopEffect();
+                }
+
                 Root.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
                 SceneView.RepaintAll();
             }
-            Changed?.Invoke();
+            NotifyChanged();
         }
 
-        /// <summary>バー操作用。再生を止めてから指定時刻へ移る(シミュレートは 1 回だけ)。</summary>
+        /// <summary>バー操作用。再生を止めてから指定時刻へ移る(積み直しは 1 回だけ)。</summary>
         public static void Scrub(float time)
         {
-            IsPlaying = false;
+            if (IsPlaying)
+            {
+                IsPlaying = false;
+                if (UsesNativeDriver && Root != null)
+                {
+                    Root.Pause();
+                    BuiltinPreviewBridge.IsScrubbing = true;
+                }
+            }
             SetTime(time);
         }
 
@@ -282,8 +520,12 @@ namespace YozoLab.ParticleTools
             Play();
         }
 
-        /// <summary>Inspector や色ウィンドウでの変更後に呼ぶ。次の update で同時刻へ再シミュレートする。</summary>
-        public static void RequestResync() => resyncPending = true;
+        /// <summary>Inspector や色ウィンドウでの変更後に呼ぶ。間引いたうえで同時刻へ積み直す。</summary>
+        public static void RequestResync()
+        {
+            resyncPending = true;
+            lastModificationTime = EditorApplication.timeSinceStartup;
+        }
 
         private static void OnEditorUpdate()
         {
@@ -295,49 +537,204 @@ namespace YozoLab.ParticleTools
             if (Root == null)
             {
                 ReleaseTarget();
-                Changed?.Invoke();
+                NotifyChanged();
                 return;
             }
 
-            // 対象を選択している間は標準のプレビューが同じエフェクトを動かそうと
-            // するので、毎回止めて主導権を取り続ける。
-            BuiltinPreviewBridge.PausePlayback();
-
             if (IsPlaying)
             {
-                double now = EditorApplication.timeSinceStartup;
-                float delta = (float)(now - lastEditorTime) * Mathf.Max(0f, PlaybackSpeed);
-                lastEditorTime = now;
+                TickPlayback();
+                return;
+            }
 
-                CurrentTime += delta;
-                if (CurrentTime >= MaxTime)
+            TickResync();
+        }
+
+        private static void TickPlayback()
+        {
+            double now = EditorApplication.timeSinceStartup;
+
+            if (UsesNativeDriver)
+            {
+                // 時間を進めるのはネイティブ側。こちらは読むだけで、
+                // バーの上限に達したときだけ折り返しを指示する。
+                BuiltinPreviewBridge.SimulationSpeed = Mathf.Max(0f, PlaybackSpeed);
+
+                float time = BuiltinPreviewBridge.PlaybackTime;
+                if (!CheckNativeAdvance(time, now)) return;
+
+                if (time >= MaxTime)
                 {
                     if (LoopPlayback)
                     {
-                        SetTime(CurrentTime - MaxTime);
+                        CurrentTime = 0f;
+                        Resimulate();
+                        StartPlayback();
                     }
                     else
                     {
                         IsPlaying = false;
+                        Root.Pause();
+                        BuiltinPreviewBridge.IsScrubbing = true;
                         SetTime(MaxTime);
+                        return;
                     }
                 }
                 else
                 {
-                    // 再生中は差分だけ進める。毎フレーム先頭から積み直すと
-                    // 時刻に比例して重くなり、再生が破綻するため。
-                    Root.Simulate(delta, withChildren: true, restart: false, fixedTimeStep: true);
-                    SceneView.RepaintAll();
-                    Changed?.Invoke();
+                    CurrentTime = time;
+                }
+
+                SceneView.RepaintAll();
+                ThrottledNotify(now);
+                return;
+            }
+
+            // 代替経路: 標準の再生と取り合いになるので毎回止めて主導権を取り続ける。
+            BuiltinPreviewBridge.PausePlayback();
+
+            float delta = (float)(now - lastEditorTime) * Mathf.Max(0f, PlaybackSpeed);
+            lastEditorTime = now;
+
+            CurrentTime += delta;
+            if (CurrentTime >= MaxTime)
+            {
+                if (LoopPlayback)
+                {
+                    SetTime(CurrentTime - MaxTime);
+                }
+                else
+                {
+                    IsPlaying = false;
+                    SetTime(MaxTime);
                 }
                 return;
             }
 
-            if (resyncPending)
+            // 再生中は差分だけ進める。毎フレーム先頭から積み直すと
+            // 時刻に比例して重くなり、再生が破綻するため。
+            FallbackAdvance(delta);
+            SceneView.RepaintAll();
+            ThrottledNotify(now);
+        }
+
+        /// <summary>
+        /// 再生を頼んだのにネイティブ側の時刻が動かないなら、標準のプレビューが
+        /// このエフェクトを掴んでいない(選択が ParticleSystem そのものでない等)。
+        /// 気づかないとバーが凍るだけなので、代替経路へ移して true 以外を返す。
+        /// </summary>
+        private static bool CheckNativeAdvance(float time, double now)
+        {
+            // 速度 0 は「止めている」ので、進まなくても異常ではない。
+            if (PlaybackSpeed <= 0f || !Mathf.Approximately(time, lastNativeTimeSample))
+            {
+                lastNativeTimeSample = time;
+                nativeStallSince = 0.0;
+                return true;
+            }
+
+            // Scene ビューが再描画されていない(別タブの裏に回っている等)なら、
+            // シーンの更新自体が回っていないので進まなくて当たり前。判定しない。
+            // 再生を始めた直後の数フレームも同じ理由で見送る。
+            if (now - lastSceneGuiTime > SceneIdleGrace
+                || sceneGuiSincePlay < MinSceneGuiBeforeStallCheck)
+            {
+                nativeStallSince = 0.0;
+                return true;
+            }
+
+            if (nativeStallSince <= 0.0)
+            {
+                nativeStallSince = now;
+                return true;
+            }
+            if (now - nativeStallSince < NativeStallTimeout) return true;
+
+            nativeDriveFailed = true;
+            nativeStallSince = 0.0;
+            BuiltinPreviewBridge.PausePlayback();
+            lastEditorTime = now;
+            Resimulate();
+            SceneView.RepaintAll();
+            NotifyChanged();
+            return false;
+        }
+
+        /// <summary>
+        /// 溜まった変更を、間引いてから 1 回の積み直しにまとめる。
+        ///
+        /// 素直に「変更があったら積み直す」と、Inspector のスライダを掴んでいる間は
+        /// GUI イベントごとに 0 秒目からの全ステップが走る。1 回が数十ミリ秒あるので
+        /// ドラッグしている間ずっとシーンが詰まる。変更が収まるのを少しだけ待ち、
+        /// 待ちきれないときも一定間隔に落とす。
+        /// </summary>
+        private static void TickResync()
+        {
+            if (!resyncPending) return;
+
+            if (!AutoResimulate)
             {
                 resyncPending = false;
-                SetTime(CurrentTime);
+                return;
             }
+
+            double now = EditorApplication.timeSinceStartup;
+            bool settled = now - lastModificationTime >= SettleDelay;
+            bool overdue = now - lastResyncTime >= MaxResyncInterval;
+            if (!settled && !overdue) return;
+
+            resyncPending = false;
+            SetTime(CurrentTime);
+        }
+
+        // ---------------------------------------------------------------
+        // 内部 API を掴めない環境向けの代替
+        // ---------------------------------------------------------------
+
+        private static void FallbackResimulate()
+        {
+            // サブエミッタの受け側も含めて一度きれいに消してから積み直す。
+            Root.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+            SimulateStandalone(CurrentTime, restart: true);
+        }
+
+        private static void FallbackAdvance(float delta)
+        {
+            SimulateStandalone(delta, restart: false);
+        }
+
+        /// <summary>
+        /// 独立して動くシステムだけを個別に進める。withChildren は使わない
+        /// (Unity がサブエミッタの受け側にも Simulate をかけてしまうため)。
+        /// 深い側から進めるのは、親のイベントで生まれた粒がその回のうちに
+        /// もう一度進まないようにするため。
+        /// </summary>
+        private static void SimulateStandalone(float time, bool restart)
+        {
+            for (int i = standaloneSystems.Count - 1; i >= 0; i--)
+            {
+                ParticleSystem ps = standaloneSystems[i];
+                if (ps == null) continue;
+
+                ps.Simulate(time, withChildren: false, restart: restart, fixedTimeStep: true);
+            }
+        }
+
+        // ---------------------------------------------------------------
+        // 通知
+        // ---------------------------------------------------------------
+
+        private static void NotifyChanged()
+        {
+            lastNotifyTime = EditorApplication.timeSinceStartup;
+            Changed?.Invoke();
+        }
+
+        private static void ThrottledNotify(double now)
+        {
+            if (now - lastNotifyTime < NotifyInterval) return;
+            lastNotifyTime = now;
+            Changed?.Invoke();
         }
 
         // ---------------------------------------------------------------
@@ -346,12 +743,18 @@ namespace YozoLab.ParticleTools
 
         private static void OnSceneGUI(SceneView sceneView)
         {
+            // Scene ビューが今も描かれていることの目印。ネイティブ側が時間を
+            // 進めているかの判定(CheckNativeAdvance)で使う。
+            lastSceneGuiTime = EditorApplication.timeSinceStartup;
+            if (sceneGuiSincePlay < MinSceneGuiBeforeStallCheck) sceneGuiSincePlay++;
+
             if (!ShowBounds || Root == null) return;
 
             Handles.color = new Color(1f, 0.92f, 0.3f, 0.9f);
-            foreach (ParticleSystemRenderer renderer
-                     in Root.GetComponentsInChildren<ParticleSystemRenderer>(true))
+            foreach (ParticleSystemRenderer renderer in renderers)
             {
+                if (renderer == null) continue;
+
                 Bounds bounds = renderer.bounds;
                 Handles.DrawWireCube(bounds.center, bounds.size);
             }
@@ -363,13 +766,13 @@ namespace YozoLab.ParticleTools
 
         private static UndoPropertyModification[] OnPostprocessModifications(UndoPropertyModification[] modifications)
         {
-            if (Root != null && !resyncPending)
+            if (Root != null)
             {
                 foreach (UndoPropertyModification modification in modifications)
                 {
                     if (IsRelated(modification.currentValue?.target))
                     {
-                        resyncPending = true;
+                        RequestResync();
                         break;
                     }
                 }
@@ -379,7 +782,7 @@ namespace YozoLab.ParticleTools
 
         private static void OnUndoRedoPerformed()
         {
-            if (Root != null) resyncPending = true;
+            if (Root != null) RequestResync();
         }
 
         /// <summary>そのオブジェクトが対象エフェクトの階層(またはそこで使うマテリアル)か。</summary>
@@ -409,88 +812,5 @@ namespace YozoLab.ParticleTools
         }
 
         public static string T(string jp, string en) => IsEnglish ? en : jp;
-    }
-
-    /// <summary>
-    /// Unity 標準のパーティクルプレビューへの内部 API 橋渡し。
-    ///
-    /// ParticleSystem を選択すると標準の Particle Effect パネルが同じエフェクトの
-    /// プレビュー再生を始め、こちらのシミュレートと毎フレーム取り合いになるため、
-    /// 標準側の再生フラグを落として回避する。あわせて Simulate Layers と
-    /// Show Only Selected(標準パネルにある残り 2 機能)も橋渡しする。
-    /// リフレクションが外れた(将来の改名など)場合は、その機能だけ黙って畳む。
-    /// </summary>
-    internal static class BuiltinPreviewBridge
-    {
-        private static readonly PropertyInfo playbackIsPlaying;
-        private static readonly PropertyInfo previewLayers;
-        private static readonly PropertyInfo renderInSceneView;
-
-        static BuiltinPreviewBridge()
-        {
-            try
-            {
-                Type utils = typeof(Editor).Assembly.GetType("UnityEditor.ParticleSystemEditorUtils");
-                const BindingFlags flags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
-                playbackIsPlaying = utils?.GetProperty("playbackIsPlaying", flags)
-                                    ?? utils?.GetProperty("editorIsPlaying", flags);
-                previewLayers = utils?.GetProperty("previewLayers", flags);
-                renderInSceneView = utils?.GetProperty("renderInSceneView", flags);
-            }
-            catch
-            {
-                // 何も掴めなくても機能全体は生かす。
-            }
-        }
-
-        public static void PausePlayback()
-        {
-            try
-            {
-                if (playbackIsPlaying != null && (bool)playbackIsPlaying.GetValue(null))
-                    playbackIsPlaying.SetValue(null, false);
-            }
-            catch
-            {
-                // 内部 API が変わっただけなら巻き込まない。
-            }
-        }
-
-        public static bool HasPreviewLayers => previewLayers != null;
-
-        /// <summary>プレビューをシミュレートするレイヤーのビットマスク。標準パネルの Simulate Layers。</summary>
-        public static uint PreviewLayers
-        {
-            get
-            {
-                try { return (uint)previewLayers.GetValue(null); }
-                catch { return uint.MaxValue; }
-            }
-            set
-            {
-                try { previewLayers.SetValue(null, value); }
-                catch { }
-            }
-        }
-
-        public static bool HasShowOnlySelected => renderInSceneView != null;
-
-        /// <summary>
-        /// 選択中のエフェクト以外のパーティクルを Scene ビューで隠す。標準パネルの
-        /// Show Only Selected。内部プロパティ renderInSceneView の裏返しとして扱う。
-        /// </summary>
-        public static bool ShowOnlySelected
-        {
-            get
-            {
-                try { return !(bool)renderInSceneView.GetValue(null); }
-                catch { return false; }
-            }
-            set
-            {
-                try { renderInSceneView.SetValue(null, !value); }
-                catch { }
-            }
-        }
     }
 }

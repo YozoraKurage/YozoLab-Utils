@@ -13,6 +13,17 @@
     "defineConstraints": [
         "YOZOLAB_ENABLE_PARTICLETOOLS"
     ],
-    "versionDefines": [],
+    "versionDefines": [
+        {
+            "name": "Unity",
+            "expression": "",
+            "define": "YOZOLAB_ENABLE_PARTICLETOOLS"
+        },
+        {
+            "name": "com.vrchat.base",
+            "expression": "",
+            "define": "YOZOLAB_PARTICLETOOLS_HARMONY"
+        }
+    ],
     "noEngineReferences": false
 }
