@@ -559,9 +559,9 @@ public partial class FBXAnimationExtractorWindow
 
         GUI.backgroundColor = prevBg;
 
-        // 生成済みクリップの解決にも所属フォルダが要る。フォルダごとに出力先が
-        // 違うので、名前だけでは別フォルダのクリップを指してしまう。
-        DrawGeneratedClipShortcut(targetNameProp.stringValue, GetRuleFolderName(i));
+        // 生成済みクリップは Rule 自身から解決する。名前だけで引くと、出力先の違う
+        // 別フォルダの Rule や、同名・出力名違いで並べた Rule が同じクリップを指してしまう。
+        DrawGeneratedClipShortcut(i, targetNameProp.stringValue);
         EditorGUILayout.EndVertical();
     }
 
@@ -919,10 +919,11 @@ public partial class FBXAnimationExtractorWindow
         Debug.Log($"[FBX Animation Extractor] Moved {applied} rule(s) to folder \"{label}\".");
     }
 
-    private void DrawGeneratedClipShortcut(string targetName, string folderName)
+    private void DrawGeneratedClipShortcut(int ruleIndex, string targetName)
     {
-        AnimationClip generatedClip = ResolveGeneratedClipForRule(targetName, folderName);
-        AnimationClip generatedGenericClip = ResolveGeneratedGenericClipForRule(targetName);
+        AnimationPostProcessRule rule = GetRuleAt(ruleIndex);
+        AnimationClip generatedClip = ResolveGeneratedClipForRule(rule, targetName);
+        AnimationClip generatedGenericClip = ResolveGeneratedGenericClipForRule(rule, targetName);
 
         using (new EditorGUI.DisabledScope(true))
         {
@@ -934,86 +935,53 @@ public partial class FBXAnimationExtractorWindow
         }
     }
 
-    private AnimationClip ResolveGeneratedGenericClipForRule(string targetName)
+    private AnimationPostProcessRule GetRuleAt(int index)
     {
-        if (string.IsNullOrWhiteSpace(targetName) || settings.processCacheEntries == null)
-        {
-            return null;
-        }
-
-        string normalizedTargetName = targetName.Trim();
-        foreach (FbxProcessCacheEntry cacheEntry in settings.processCacheEntries)
-        {
-            if (cacheEntry == null || string.IsNullOrEmpty(cacheEntry.fbxAssetPath))
-                continue;
-
-            string fbxName = Path.GetFileNameWithoutExtension(cacheEntry.fbxAssetPath);
-            if (!string.Equals(fbxName, normalizedTargetName, StringComparison.OrdinalIgnoreCase))
-                continue;
-
-            if (!string.IsNullOrEmpty(cacheEntry.generatedGenericClipAssetPath))
-            {
-                return AssetDatabase.LoadAssetAtPath<AnimationClip>(cacheEntry.generatedGenericClipAssetPath);
-            }
-        }
-
-        return null;
+        if (settings?.postProcessRules == null) return null;
+        return index >= 0 && index < settings.postProcessRules.Count ? settings.postProcessRules[index] : null;
     }
 
-    private AnimationClip ResolveGeneratedClipForRule(string targetName, string folderName)
+    /// <summary>
+    /// Rule が書き出す .anim のパス。Rule の出力先 / 出力名から素直に組み立てる。
+    /// 以前は差分キャッシュを FBX 名で引いていたが、同名 Rule が並ぶと全員が
+    /// 同じ 1 本を指してしまうので、Rule 自身から決める。
+    /// </summary>
+    private string BuildExpectedClipPath(AnimationPostProcessRule rule, string targetName, bool generic)
     {
-        string clipPath = ResolveGeneratedClipPathForRule(targetName, folderName);
-        if (string.IsNullOrEmpty(clipPath))
-        {
-            return null;
-        }
-
-        return AssetDatabase.LoadAssetAtPath<AnimationClip>(clipPath);
-    }
-
-    private string ResolveGeneratedClipPathForRule(string targetName, string folderName)
-    {
-        if (string.IsNullOrWhiteSpace(targetName))
+        if (rule == null || string.IsNullOrWhiteSpace(targetName))
         {
             return string.Empty;
         }
 
-        string normalizedTargetName = targetName.Trim();
-
-        if (settings.processCacheEntries != null)
-        {
-            foreach (FbxProcessCacheEntry cacheEntry in settings.processCacheEntries)
-            {
-                if (cacheEntry == null || string.IsNullOrEmpty(cacheEntry.fbxAssetPath))
-                {
-                    continue;
-                }
-
-                string fbxName = Path.GetFileNameWithoutExtension(cacheEntry.fbxAssetPath);
-                if (!string.Equals(fbxName, normalizedTargetName, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                if (!string.IsNullOrEmpty(cacheEntry.generatedClipAssetPath)
-                    && AssetDatabase.LoadAssetAtPath<AnimationClip>(cacheEntry.generatedClipAssetPath) != null)
-                {
-                    return cacheEntry.generatedClipAssetPath;
-                }
-            }
-        }
-
-        AnimationPostProcessRule matchingRule = FindMatchingRule(normalizedTargetName, folderName);
-        string outputPath = GetRuleOutputFolder(matchingRule);
+        string outputPath = GetRuleOutputFolder(rule);
         if (string.IsNullOrEmpty(outputPath))
         {
             return string.Empty;
         }
 
-        string fallbackClipPath = $"{outputPath}/{GetRuleOutputName(matchingRule, normalizedTargetName)}.anim";
-        return AssetDatabase.LoadAssetAtPath<AnimationClip>(fallbackClipPath) != null
-            ? fallbackClipPath
-            : string.Empty;
+        string outputName = GetRuleOutputName(rule, targetName.Trim());
+        return generic ? $"{outputPath}/{outputName}_generic.anim" : $"{outputPath}/{outputName}.anim";
+    }
+
+    private AnimationClip ResolveGeneratedGenericClipForRule(AnimationPostProcessRule rule, string targetName)
+    {
+        if (rule == null || !rule.genericExtract || rule.genericOutputMode != GenericOutputMode.Separate)
+        {
+            return null;
+        }
+
+        string clipPath = BuildExpectedClipPath(rule, targetName, generic: true);
+        return string.IsNullOrEmpty(clipPath)
+            ? null
+            : AssetDatabase.LoadAssetAtPath<AnimationClip>(clipPath);
+    }
+
+    private AnimationClip ResolveGeneratedClipForRule(AnimationPostProcessRule rule, string targetName)
+    {
+        string clipPath = BuildExpectedClipPath(rule, targetName, generic: false);
+        return string.IsNullOrEmpty(clipPath)
+            ? null
+            : AssetDatabase.LoadAssetAtPath<AnimationClip>(clipPath);
     }
 
     private void DrawRuleDetailPane()

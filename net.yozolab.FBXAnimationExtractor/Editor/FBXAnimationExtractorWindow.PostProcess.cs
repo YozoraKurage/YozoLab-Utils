@@ -16,10 +16,14 @@ public partial class FBXAnimationExtractorWindow
     /// Generic Extract が Separate モードのときは、非Humanoidカーブを格納した別クリップ(in-memory)を返す。
     /// Merge モード/未設定時は null を返す。
     /// </summary>
-    private AnimationClip ApplyPostProcessRules(AnimationClip clip, string clipName, string sourceFbxPath)
+    /// <param name="matchingRule">
+    /// 適用する Rule。名前から引き直さずに呼び出し側から渡す。同じ targetName の Rule が
+    /// 複数並ぶ(出力名違いで同じ FBX から複数クリップを作る)構成では、名前で引くと
+    /// 常に先頭の Rule を掴んでしまい、2 本目以降が 1 本目の設定で書き出されてしまう。
+    /// </param>
+    private AnimationClip ApplyPostProcessRules(AnimationClip clip, AnimationPostProcessRule matchingRule,
+                                                string clipName, string sourceFbxPath)
     {
-        AnimationPostProcessRule matchingRule = FindMatchingRule(clipName);
-
         if (matchingRule == null)
             return null;
 
@@ -96,26 +100,24 @@ public partial class FBXAnimationExtractorWindow
     }
 
     /// <summary>
-    /// 名前から Rule を引く。Execute 中は <see cref="activeFolderScope"/> が入っているので、
-    /// そのルールフォルダの中だけを見る。フォルダごとに Source Directory を持つように
-    /// なった以上、同じ FBX 名の Rule が別フォルダに並んでいても不思議ではなく、
-    /// 名前だけで引くと別フォルダの設定を掴んでしまう。
+    /// 名前に一致する Rule を「すべて」定義順に返す。
+    ///
+    /// targetName は一意ではない。同じ FBX から出力名違いで複数のクリップを作るために、
+    /// 同名の Rule を並べる使い方がある。先頭 1 件だけを返していたころは 2 本目以降が
+    /// 素通りし、.anim が 1 本しか出なかった。
     /// </summary>
-    private AnimationPostProcessRule FindMatchingRule(string name)
-    {
-        return FindMatchingRule(name, activeFolderScope);
-    }
-
     /// <param name="folderScope">
-    /// 探す範囲のルールフォルダ名。空なら全 Rule から名前だけで探す(GUI の重複検査など)。
+    /// 探す範囲のルールフォルダ名。空なら全 Rule から名前だけで探す。
     /// </param>
-    private AnimationPostProcessRule FindMatchingRule(string name, string folderScope)
+    private List<AnimationPostProcessRule> FindMatchingRules(string name, string folderScope)
     {
+        var matches = new List<AnimationPostProcessRule>();
+
         if (settings.postProcessRules == null || settings.postProcessRules.Count == 0)
-            return null;
+            return matches;
 
         if (string.IsNullOrWhiteSpace(name))
-            return null;
+            return matches;
 
         string normalizedName = name.Trim();
         bool scoped = !string.IsNullOrWhiteSpace(folderScope);
@@ -133,10 +135,10 @@ public partial class FBXAnimationExtractorWindow
                                          StringComparison.OrdinalIgnoreCase))
                 continue;
 
-            return rule;
+            matches.Add(rule);
         }
 
-        return null;
+        return matches;
     }
 
     // ═══════════════════════════════════════════════════════════════

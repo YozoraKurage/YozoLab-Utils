@@ -11,13 +11,6 @@ using System.Collections.Generic;
 /// </summary>
 public partial class FBXAnimationExtractorWindow
 {
-    /// <summary>
-    /// Execute 中に処理しているルールフォルダの名前。抽出の途中で呼ばれる
-    /// FindMatchingRule に「どのフォルダの Rule を見るのか」を伝えるために置く。
-    /// 実行中以外は空。
-    /// </summary>
-    private string activeFolderScope = string.Empty;
-
     /// <param name="ignoreCache">true のとき差分キャッシュを無視し、全 FBX を強制的に再エクスポートする。</param>
     private void ProcessFBXFiles(bool ignoreCache = false)
     {
@@ -80,7 +73,6 @@ public partial class FBXAnimationExtractorWindow
             foreach ((RuleFolderState folder, string sourcePath, string outputPath, string[] fbxPaths) in plans)
             {
                 string folderKey = folder.name.Trim();
-                activeFolderScope = folderKey;
 
                 foreach (string fbxPath in fbxPaths)
                 {
@@ -91,11 +83,13 @@ public partial class FBXAnimationExtractorWindow
                         $"{folder.name}: {fbxName} ({done}/{totalFbxCount})",
                         (float)done / totalFbxCount);
 
-                    AnimationPostProcessRule matchingRule = FindMatchingRule(fbxName, folderKey);
+                    // 同名 Rule は「同じ FBX から出力名違いで複数のクリップを作る」指定。
+                    // 一致した Rule を全部回す。1 件も無いときは Rule 無しで 1 回だけ回す。
+                    List<AnimationPostProcessRule> matchingRules = FindMatchingRules(fbxName, folderKey);
 
                     // このフォルダに Rule が無くても、他のフォルダが同じ名前の Rule を
                     // 持っているならそちらの持ち物。ここでは触らない。
-                    if (matchingRule == null
+                    if (matchingRules.Count == 0
                         && ruleOwnerFolder.TryGetValue(fbxName.Trim(), out string owner)
                         && !string.Equals(owner, folderKey, StringComparison.OrdinalIgnoreCase))
                     {
@@ -103,42 +97,56 @@ public partial class FBXAnimationExtractorWindow
                         continue;
                     }
 
-                    WarnIfInvalidOutputOverride(matchingRule);
-                    string ruleOutputPath = GetRuleOutputFolder(matchingRule, outputPath);
-                    string outputName = GetRuleOutputName(matchingRule, fbxName);
-                    string generatedClipPath = $"{ruleOutputPath}/{outputName}.anim";
-
-                    if (!writtenClipPaths.Add(generatedClipPath))
+                    if (matchingRules.Count == 0)
                     {
-                        Debug.LogWarning($"[FBX Animation Extractor] \"{generatedClipPath}\" was already written in this run; skipped the duplicate from folder \"{folder.name}\".");
-                        continue;
+                        matchingRules.Add(null);
                     }
 
-                    // out 値(ハッシュ/署名)はキャッシュ更新に必要なため常に計算し、
-                    // スキップ判定だけ ignoreCache で抑止する
-                    bool canSkip = ShouldSkipProcessing(fbxPath, outputName, ruleOutputPath, matchingRule,
-                                                        out string sourceDependencyHash, out string ruleSignature);
-                    if (!ignoreCache && canSkip)
+                    // 依存ハッシュは FBX 単位で、どの Rule の再インポートよりも前に一度だけ採る。
+                    // Rule ごとに採ると、直前の Rule が入れた ModelImporter 設定が混ざって
+                    // 毎回ハッシュが変わり、差分スキップが永久に効かなくなる。
+                    string sourceDependencyHash = AssetDatabase.GetAssetDependencyHash(fbxPath).ToString();
+
+                    foreach (AnimationPostProcessRule matchingRule in matchingRules)
                     {
-                        skippedCount++;
-                        Debug.Log($"[FBX Animation Extractor] No changes, skipped: {fbxName}");
-                        continue;
+                        WarnIfInvalidOutputOverride(matchingRule);
+                        string ruleOutputPath = GetRuleOutputFolder(matchingRule, outputPath);
+                        string outputName = GetRuleOutputName(matchingRule, fbxName);
+                        string generatedClipPath = $"{ruleOutputPath}/{outputName}.anim";
+
+                        if (!writtenClipPaths.Add(generatedClipPath))
+                        {
+                            Debug.LogWarning($"[FBX Animation Extractor] \"{generatedClipPath}\" was already written in this run; "
+                                             + $"skipped the duplicate from folder \"{folder.name}\". "
+                                             + "Give each rule with the same Target Name a different Output File Name.");
+                            continue;
+                        }
+
+                        // 署名はキャッシュ更新に必要なため常に計算し、スキップ判定だけ ignoreCache で抑止する
+                        bool canSkip = ShouldSkipProcessing(fbxPath, generatedClipPath, sourceDependencyHash,
+                                                            matchingRule, out string ruleSignature);
+                        if (!ignoreCache && canSkip)
+                        {
+                            skippedCount++;
+                            Debug.Log($"[FBX Animation Extractor] No changes, skipped: {fbxName} -> {generatedClipPath}");
+                            continue;
+                        }
+
+                        ConfigureModelImporter(fbxPath, matchingRule);
+
+                        // アニメーションクリップを抽出・保存。Separate モード時は generic clip も別途生成。
+                        bool extracted = ExtractAndSaveAnimationClip(fbxPath, ruleOutputPath, fbxName, outputName,
+                                                                     matchingRule, out string generatedGenericClipPath);
+                        if (!extracted)
+                        {
+                            continue;
+                        }
+
+                        UpdateProcessCache(fbxPath, sourceDependencyHash, ruleSignature, generatedClipPath, generatedGenericClipPath);
+                        processedCount++;
+
+                        Debug.Log($"[FBX Animation Extractor] Processed: {fbxName} -> {generatedClipPath}");
                     }
-
-                    ConfigureModelImporter(fbxPath, matchingRule);
-
-                    // アニメーションクリップを抽出・保存。Separate モード時は generic clip も別途生成。
-                    bool extracted = ExtractAndSaveAnimationClip(fbxPath, ruleOutputPath, fbxName, outputName,
-                                                                 out string generatedGenericClipPath);
-                    if (!extracted)
-                    {
-                        continue;
-                    }
-
-                    UpdateProcessCache(fbxPath, sourceDependencyHash, ruleSignature, generatedClipPath, generatedGenericClipPath);
-                    processedCount++;
-
-                    Debug.Log($"[FBX Animation Extractor] Processed: {fbxName} -> {generatedClipPath}");
                 }
             }
 
@@ -152,7 +160,6 @@ public partial class FBXAnimationExtractorWindow
         }
         finally
         {
-            activeFolderScope = string.Empty;
             EditorUtility.ClearProgressBar();
         }
     }
@@ -310,7 +317,8 @@ public partial class FBXAnimationExtractorWindow
         importer.SaveAndReimport();
     }
 
-    private bool ExtractAndSaveAnimationClip(string fbxPath, string outputPath, string fbxName, string outputName, out string generatedGenericClipPath)
+    private bool ExtractAndSaveAnimationClip(string fbxPath, string outputPath, string fbxName, string outputName,
+                                             AnimationPostProcessRule matchingRule, out string generatedGenericClipPath)
     {
         generatedGenericClipPath = string.Empty;
 
@@ -340,7 +348,7 @@ public partial class FBXAnimationExtractorWindow
             EditorUtility.CopySerialized(sourceClip, workingClip);
             workingClip.name = outputName;
 
-            workingGenericClip = ApplyPostProcessRules(workingClip, fbxName, fbxPath);
+            workingGenericClip = ApplyPostProcessRules(workingClip, matchingRule, fbxName, fbxPath);
 
             // --- Humanoid clip 保存 -------------------------------------------------
             if (existingClip != null)
@@ -458,19 +466,22 @@ public partial class FBXAnimationExtractorWindow
         return max;
     }
 
-    private bool ShouldSkipProcessing(string fbxPath, string outputName, string outputPath, AnimationPostProcessRule matchingRule, out string sourceDependencyHash, out string ruleSignature)
+    /// <param name="sourceDependencyHash">
+    /// FBX の依存ハッシュ。同じ FBX を複数の Rule で処理する場合に値がぶれないよう、
+    /// 呼び出し側が FBX 単位で一度だけ採ったものを渡す。
+    /// </param>
+    private bool ShouldSkipProcessing(string fbxPath, string generatedClipPath, string sourceDependencyHash,
+                                      AnimationPostProcessRule matchingRule, out string ruleSignature)
     {
-        sourceDependencyHash = AssetDatabase.GetAssetDependencyHash(fbxPath).ToString();
         ruleSignature = BuildRuleSignature(matchingRule);
 
-        string outputFilePath = $"{outputPath}/{outputName}.anim";
-        AnimationClip outputClip = AssetDatabase.LoadAssetAtPath<AnimationClip>(outputFilePath);
+        AnimationClip outputClip = AssetDatabase.LoadAssetAtPath<AnimationClip>(generatedClipPath);
         if (outputClip == null)
         {
             return false;
         }
 
-        FbxProcessCacheEntry cacheEntry = GetProcessCacheEntry(fbxPath);
+        FbxProcessCacheEntry cacheEntry = GetProcessCacheEntry(fbxPath, generatedClipPath);
         if (cacheEntry == null)
         {
             return false;
@@ -487,7 +498,7 @@ public partial class FBXAnimationExtractorWindow
             settings.processCacheEntries = new List<FbxProcessCacheEntry>();
         }
 
-        FbxProcessCacheEntry cacheEntry = GetProcessCacheEntry(fbxPath);
+        FbxProcessCacheEntry cacheEntry = GetProcessCacheEntry(fbxPath, generatedClipPath);
         if (cacheEntry == null)
         {
             cacheEntry = new FbxProcessCacheEntry();
@@ -502,7 +513,12 @@ public partial class FBXAnimationExtractorWindow
         EditorUtility.SetDirty(settings);
     }
 
-    private FbxProcessCacheEntry GetProcessCacheEntry(string fbxPath)
+    /// <summary>
+    /// キャッシュは (FBX, 出力クリップ) の組で引く。FBX だけを鍵にしていたころは、
+    /// 同じ FBX から 2 本のクリップを作る構成で 1 つのエントリを奪い合い、
+    /// 互いの署名を上書きして差分スキップが壊れていた。
+    /// </summary>
+    private FbxProcessCacheEntry GetProcessCacheEntry(string fbxPath, string generatedClipPath)
     {
         if (settings.processCacheEntries == null)
         {
@@ -510,7 +526,9 @@ public partial class FBXAnimationExtractorWindow
         }
 
         return settings.processCacheEntries.FirstOrDefault(
-            entry => entry != null && string.Equals(entry.fbxAssetPath, fbxPath, StringComparison.OrdinalIgnoreCase));
+            entry => entry != null
+                     && string.Equals(entry.fbxAssetPath, fbxPath, StringComparison.OrdinalIgnoreCase)
+                     && string.Equals(entry.generatedClipAssetPath, generatedClipPath, StringComparison.OrdinalIgnoreCase));
     }
 
     // ═══════════════════════════════════════════════════════════════
