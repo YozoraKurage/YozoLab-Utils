@@ -46,33 +46,91 @@ namespace YozoLab.UtilSettings
         // ---------------------------------------------------------------
 
         /// <summary>
-        /// 有効なパッケージ Id の集合を読む。設定が無ければ「全て無効」を書き出して返す。
+        /// 有効なパッケージ Id の集合を読む。
         ///
-        /// 既定を無効にしてあるのは、入れただけで Harmony のパッチや常駐処理が
-        /// 動き出さないようにするため。使う機能だけを設定ウィンドウで有効にする。
+        /// 設定ファイルに載っていないパッケージは、その asmdef の今の状態を既定として
+        /// 採用し、設定ファイルへ書き足す。「載っていない = 無効」にしていたころは、
+        /// パッケージを新しく追加するたびに出荷時の asmdef（有効）と設定ファイル
+        /// （無効扱い）が食い違い、起動のたびに asmdef を書き換えては再コンパイルが
+        /// 走っていた。
         /// </summary>
         public static HashSet<string> LoadEnabledIds()
         {
+            HashSet<string> enabled = ReadConfig(out HashSet<string> known);
+
+            if (SeedUnlistedPackages(enabled, known))
+            {
+                SaveEnabledIds(enabled);
+            }
+
+            return enabled;
+        }
+
+        /// <summary>
+        /// 設定ファイルを読む。行頭の "-" は明示的な無効。
+        /// </summary>
+        /// <param name="known">
+        /// 有効・無効を問わず、設定ファイルが言及している Id。
+        /// 「無効」と「まだ知らない」を区別するために要る。
+        /// </param>
+        private static HashSet<string> ReadConfig(out HashSet<string> known)
+        {
+            var enabled = new HashSet<string>();
+            known = new HashSet<string>();
+
             try
             {
-                if (File.Exists(ConfigPath))
+                if (!File.Exists(ConfigPath)) return enabled;
+
+                foreach (string raw in File.ReadAllLines(ConfigPath))
                 {
-                    var ids = File.ReadAllLines(ConfigPath)
-                        .Select(x => x.Trim())
-                        .Where(x => x.Length > 0 && !x.StartsWith("#", StringComparison.Ordinal));
-                    return new HashSet<string>(ids);
+                    string line = raw.Trim();
+                    if (line.Length == 0 || line.StartsWith("#", StringComparison.Ordinal)) continue;
+
+                    bool disabled = line.StartsWith("-", StringComparison.Ordinal);
+                    string id = disabled ? line.Substring(1).Trim() : line;
+                    if (id.Length == 0) continue;
+
+                    known.Add(id);
+                    if (!disabled) enabled.Add(id);
                 }
             }
             catch (Exception e)
             {
-                Debug.LogWarning($"[YozoLab Utils] 設定の読み込みに失敗しました（全て無効として扱います）: {e.Message}");
+                Debug.LogWarning($"[YozoLab Utils] 設定の読み込みに失敗しました（asmdef の状態を既定にします）: {e.Message}");
             }
 
-            var none = new HashSet<string>();
-            SaveEnabledIds(none);
-            return none;
+            return enabled;
         }
 
+        /// <summary>
+        /// 設定ファイルが言及していないパッケージを、asmdef の今の状態で埋める。
+        /// 埋めたら true（= 設定ファイルの書き出しが要る）。
+        ///
+        /// これにより、初回導入時も新規パッケージ追加時も、出荷時の asmdef が
+        /// そのまま既定になる。設定と asmdef が最初から一致するので、
+        /// 起動時の同期が何も書かずに済み、余計な再コンパイルが起きない。
+        /// </summary>
+        private static bool SeedUnlistedPackages(HashSet<string> enabled, HashSet<string> known)
+        {
+            bool seeded = false;
+
+            foreach (UtilPackage package in UtilsCatalog.Packages)
+            {
+                if (known.Contains(package.Id)) continue;
+
+                if (IsCompiledIn(package)) enabled.Add(package.Id);
+                seeded = true;
+            }
+
+            return seeded;
+        }
+
+        /// <summary>
+        /// 設定を書き出す。カタログにある全パッケージを、無効なものは "-" 付きで
+        /// 必ず 1 行ずつ書く。有効なものだけを書いていたころは「無効」と
+        /// 「まだ知らない」が区別できなかった。
+        /// </summary>
         public static void SaveEnabledIds(HashSet<string> enabled)
         {
             try
@@ -83,8 +141,10 @@ namespace YozoLab.UtilSettings
                 {
                     "# YozoLab Utils: コンパイルするパッケージの一覧。",
                     "# このファイルが正本。asmdef 側はここから復元される。",
+                    "# 行頭の - は無効。ここに無いパッケージは asmdef の状態が既定になる。",
                 };
-                lines.AddRange(UtilsCatalog.Packages.Where(p => enabled.Contains(p.Id)).Select(p => p.Id));
+                lines.AddRange(UtilsCatalog.Packages.Select(
+                    p => enabled.Contains(p.Id) ? p.Id : "-" + p.Id));
 
                 File.WriteAllLines(ConfigPath, lines);
             }
@@ -149,7 +209,10 @@ namespace YozoLab.UtilSettings
                 int index = asmdef.versionDefines.FindIndex(x => x != null && x.define == package.Define);
                 if (enable && index < 0)
                 {
-                    asmdef.versionDefines.Add(new VersionDefine(AlwaysTrueVersionDefineName, "", package.Define));
+                    // 条件はカタログの Gate。常に "Unity" で足すと、外部パッケージ必須の
+                    // ものを切って戻したときに必須条件が消えてしまう。
+                    string gate = string.IsNullOrEmpty(package.Gate) ? AlwaysTrueVersionDefineName : package.Gate;
+                    asmdef.versionDefines.Add(new VersionDefine(gate, "", package.Define));
                     changed = true;
                 }
                 else if (!enable && index >= 0)

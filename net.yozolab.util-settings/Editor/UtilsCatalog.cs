@@ -38,6 +38,17 @@ namespace YozoLab.UtilSettings
         /// <summary>このパッケージのコンパイル可否を決めるシンボル。</summary>
         public string Define;
 
+        /// <summary>
+        /// <see cref="Define"/> を立てる versionDefines の条件パッケージ名。
+        /// 既定の "Unity" は常に真＝「有効にしたら必ず通す」。
+        ///
+        /// 外部パッケージ必須のものはその名前を入れる。有効にしても相手が
+        /// 入っていなければシンボルが立たず、コンパイルされない。ここを空欄に
+        /// すると、設定ウィンドウで一度切って戻したときに条件が "Unity" へ
+        /// すり替わり、必須パッケージ抜きでコンパイルしようとして壊れる。
+        /// </summary>
+        public string Gate = "Unity";
+
         /// <summary>設定やウィンドウを開くメニュー項目（無ければ null）。</summary>
         public string OpenMenuPath;
 
@@ -162,6 +173,7 @@ namespace YozoLab.UtilSettings
                 Description = "アニメーションを焼き込んだ FBX を書き出す。",
                 AsmdefGuid = "cfe0f2ee4c194abbaee7f96b07cbcefa",
                 Define = "YOZOLAB_ENABLE_FBXANIMATIONBAKER",
+                Gate = "com.unity.formats.fbx",
                 OpenMenuPath = "YozoLab/FBX Animation Baker",
             },
             new UtilPackage
@@ -171,6 +183,7 @@ namespace YozoLab.UtilSettings
                 Description = "FBX からアニメーションを取り出す。",
                 AsmdefGuid = "48aa154317f40c64e9da67181b8b3731",
                 Define = "YOZOLAB_ENABLE_FBXANIMATIONEXTRACTOR",
+                Gate = "com.unity.formats.fbx",
                 OpenMenuPath = "YozoLab/FBX Animation Extractor",
             },
             new UtilPackage
