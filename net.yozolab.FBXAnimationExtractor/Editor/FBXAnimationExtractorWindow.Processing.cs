@@ -32,10 +32,6 @@ public partial class FBXAnimationExtractorWindow
         // 複数のフォルダが同じ Source Directory を指していると起こりうる。
         var writtenClipPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        // どのフォルダにも属さない Rule 名。所有者のいる FBX を、たまたま同じ
-        // Source Directory を見ている別フォルダが横取りしないために使う。
-        Dictionary<string, string> ruleOwnerFolder = BuildRuleOwnerMap();
-
         var plans = new List<(RuleFolderState folder, string sourcePath, string outputPath, string[] fbxPaths)>();
         foreach (RuleFolderState folder in folders)
         {
@@ -83,23 +79,22 @@ public partial class FBXAnimationExtractorWindow
                         $"{folder.name}: {fbxName} ({done}/{totalFbxCount})",
                         (float)done / totalFbxCount);
 
-                    // 同名 Rule は「同じ FBX から出力名違いで複数のクリップを作る」指定。
-                    // 一致した Rule を全部回す。1 件も無いときは Rule 無しで 1 回だけ回す。
+                    // Rule が「何を抽出するか」の指定そのもの。名前の一致する Rule が
+                    // このフォルダに無い FBX は対象外なので、一切触らずに飛ばす。
+                    //
+                    // かつては Rule 無しでも既定設定で 1 回書き出していた。Source Directory に
+                    // 置いてあるだけの FBX まで巻き込まれ、狙っていない .anim が Output
+                    // Directory に増えるうえ、ModelImporter が Humanoid に書き換えられて
+                    // 再インポートまでされてしまう。同じ Source Directory を複数のフォルダが
+                    // 見ていると、どのフォルダの出力先へ落ちるかも並び順任せだった。
+                    //
+                    // 同名 Rule は「同じ FBX から出力名違いで複数のクリップを作る」指定なので、
+                    // 一致した Rule は全部回す。
                     List<AnimationPostProcessRule> matchingRules = FindMatchingRules(fbxName, folderKey);
-
-                    // このフォルダに Rule が無くても、他のフォルダが同じ名前の Rule を
-                    // 持っているならそちらの持ち物。ここでは触らない。
-                    if (matchingRules.Count == 0
-                        && ruleOwnerFolder.TryGetValue(fbxName.Trim(), out string owner)
-                        && !string.Equals(owner, folderKey, StringComparison.OrdinalIgnoreCase))
+                    if (matchingRules.Count == 0)
                     {
                         noRuleSkippedCount++;
                         continue;
-                    }
-
-                    if (matchingRules.Count == 0)
-                    {
-                        matchingRules.Add(null);
                     }
 
                     // 依存ハッシュは FBX 単位で、どの Rule の再インポートよりも前に一度だけ採る。
@@ -155,8 +150,14 @@ public partial class FBXAnimationExtractorWindow
             settings.SaveSettings();
 
             Debug.Log($"[FBX Animation Extractor] All done: total={totalFbxCount}, processed={processedCount}, "
-                      + $"skipped={skippedCount}, owned-by-other-folder={noRuleSkippedCount}, "
+                      + $"skipped={skippedCount}, no-rule={noRuleSkippedCount}, "
                       + $"folder-off={disabledCount}, folder-misconfigured={misconfiguredCount}");
+
+            if (noRuleSkippedCount > 0)
+            {
+                Debug.Log($"[FBX Animation Extractor] {noRuleSkippedCount} FBX file(s) had no matching rule in their folder "
+                          + "and were left untouched. Use \"Collect\" on the folder to register them as rules.");
+            }
         }
         finally
         {
@@ -199,23 +200,6 @@ public partial class FBXAnimationExtractorWindow
         return result;
     }
 
-    /// <summary>Rule 名 → その Rule が属するフォルダ名。同名 Rule が複数あるときは先勝ち。</summary>
-    private Dictionary<string, string> BuildRuleOwnerMap()
-    {
-        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        if (settings?.postProcessRules == null) return map;
-
-        foreach (AnimationPostProcessRule rule in settings.postProcessRules)
-        {
-            if (rule == null || string.IsNullOrWhiteSpace(rule.targetName)) continue;
-            string name = rule.targetName.Trim();
-            if (!map.ContainsKey(name))
-            {
-                map.Add(name, rule.folder?.Trim() ?? string.Empty);
-            }
-        }
-        return map;
-    }
 
     internal static bool IsValidFolderAsset(UnityEngine.Object folderAsset)
     {
