@@ -70,11 +70,23 @@ jobs:
           echo "Bumped to $new_version"
           echo "version=$new_version" >> "$GITHUB_OUTPUT"
 
+          # 配下のフォルダが自分の package.json を持っていることがある（UPM で
+          # サブフォルダ指定して単体導入できるようにするため）。ルートだけ上げると
+          # 中身が同じなのにバージョンだけ食い違うので、まとめて揃える。
+          # 出荷されるのはルートの 1 パッケージなので、こちらは表示上の整合だけの話。
+          while IFS= read -r nested; do
+            tmp="$(mktemp)"
+            jq --arg v "$new_version" '.version = $v' "$nested" > "$tmp"
+            mv "$tmp" "$nested"
+            echo "Synced $nested"
+          done < <(find . -mindepth 2 -maxdepth 2 -name package.json -not -path './node_modules/*')
+
       - name: "Commit version bump to main"
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add package.json
+          git add --update -- '*/package.json'
           git commit -m "chore: release ${{ steps.version.outputs.version }} [skip ci]"
           git push origin HEAD:${{ github.event.pull_request.base.ref || github.ref_name }}
 

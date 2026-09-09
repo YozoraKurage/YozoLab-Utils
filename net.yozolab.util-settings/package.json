@@ -1,0 +1,11 @@
+{
+  "name": "net.yozolab.util-settings",
+  "version": "0.6.0",
+  "displayName": "YozoLab Utils Settings",
+  "description": "同梱アドオンのコンパイル可否を切り替える設定ウィンドウ。無くても各アドオンは単体で動く。",
+  "unity": "2022.3",
+  "author": {
+    "name": "Yozolab"
+  },
+  "keywords": []
+}
