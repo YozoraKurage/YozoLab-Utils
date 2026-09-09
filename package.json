@@ -1,6 +1,6 @@
 {
   "name": "net.yozolab.yozolab-utils",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "displayName": "yozolab-utils",
   "description": "YozoLab's utility package for Unity",
   "unity": "2022.3",
