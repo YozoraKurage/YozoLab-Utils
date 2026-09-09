@@ -166,8 +166,17 @@ namespace YozoLab.UtilSettings
             var touched = new List<string>();
             foreach (UtilPackage package in UtilsCatalog.Packages)
             {
-                if (SyncOne(package, enabled.Contains(package.Id), enabled, out string path))
+                bool enable = enabled.Contains(package.Id);
+
+                if (SyncOne(package, package.AsmdefGuid, enable, enabled, out string path))
                     touched.Add(path);
+
+                // テストアセンブリは対象アセンブリと同じ条件で開け閉めする。
+                // 対象を参照している以上、対象が落ちているのに自分だけ
+                // コンパイルされると参照が解決できない。
+                if (!string.IsNullOrEmpty(package.TestsAsmdefGuid)
+                    && SyncOne(package, package.TestsAsmdefGuid, enable, enabled, out string testsPath))
+                    touched.Add(testsPath);
             }
 
             if (touched.Count == 0) return;
@@ -176,13 +185,19 @@ namespace YozoLab.UtilSettings
                 AssetDatabase.ImportAsset(path);
         }
 
-        /// <summary>1 つの asmdef を整える。実際に書き換えたら true。</summary>
-        private static bool SyncOne(UtilPackage package, bool enable, HashSet<string> enabledIds, out string path)
+        /// <summary>
+        /// asmdef を 1 つ整える。実際に書き換えたら true。
+        ///
+        /// 対象は <paramref name="asmdefGuid"/> で指す。同じパッケージの
+        /// 本体とテストの両方に、同じ制約とシンボルを書き込むために分けてある。
+        /// </summary>
+        private static bool SyncOne(UtilPackage package, string asmdefGuid, bool enable,
+                                    HashSet<string> enabledIds, out string path)
         {
             path = null;
             try
             {
-                path = AssetDatabase.GUIDToAssetPath(package.AsmdefGuid);
+                path = AssetDatabase.GUIDToAssetPath(asmdefGuid);
                 if (string.IsNullOrEmpty(path) || !File.Exists(path))
                 {
                     // パッケージごと入っていない場合もある（分割配布・部分導入）。
@@ -223,7 +238,11 @@ namespace YozoLab.UtilSettings
 
                 // 他パッケージ提供の機能への紐付け。提供側が有効なあいだだけ
                 // シンボルを注入する。利用側のコードは #if でこのシンボルを見る。
-                foreach (FeatureLink link in package.Consumes)
+                // 本体だけでよい。テスト側に足しても使い道が無いうえ、提供側を
+                // 切り替えるたびにテスト asmdef まで書き換わって再コンパイルが増える。
+                foreach (FeatureLink link in asmdefGuid == package.AsmdefGuid
+                                                 ? package.Consumes
+                                                 : Array.Empty<FeatureLink>())
                 {
                     bool want = enabledIds.Contains(link.ProviderId);
                     int linkIndex = asmdef.versionDefines.FindIndex(

@@ -35,6 +35,21 @@ namespace YozoLab.UtilSettings
         /// </summary>
         public string AsmdefGuid;
 
+        /// <summary>
+        /// このパッケージのテストアセンブリの asmdef GUID（無ければ null）。
+        ///
+        /// テスト側は対象アセンブリを参照するので、対象が落ちているのに自分だけ
+        /// コンパイルされると参照が解決できず CS0234 で落ちる。かといって
+        /// defineConstraints に <see cref="Define"/> を書くだけでは駄目で、
+        /// versionDefines はアセンブリごとの設定なので、対象 asmdef で立てた
+        /// シンボルはテスト側からは見えない。制約が永久に満たされず、対象を
+        /// 有効にしてもテストが走らなくなる。
+        ///
+        /// そこで対象 asmdef と同じ内容をテスト asmdef にも書き込み、
+        /// 有効・無効を揃えて動かす。
+        /// </summary>
+        public string TestsAsmdefGuid;
+
         /// <summary>このパッケージのコンパイル可否を決めるシンボル。</summary>
         public string Define;
 
@@ -120,6 +135,7 @@ namespace YozoLab.UtilSettings
                 DisplayName = "VRC Gizmo Accelerator",
                 Description = "PhysBone ギズモを独自の一括描画パスに置き換えて軽くする。Harmony を使う。",
                 AsmdefGuid = "c54f7afe8bca44b5bf2680c2058b79b5",
+                TestsAsmdefGuid = "12a0b490157839ef79a1addefcf8f301",
                 Define = "YOZOLAB_ENABLE_VRCGIZMOACCELERATOR",
                 OpenMenuPath = "YozoLab/VRC Gizmo Accelerator",
             },
@@ -129,6 +145,7 @@ namespace YozoLab.UtilSettings
                 DisplayName = "PhysBone Radius Gizmo",
                 Description = "PhysBone の Collision Radius をシーン上のハンドルで変える。",
                 AsmdefGuid = "98df72da806a4338800e6d264b24df60",
+                TestsAsmdefGuid = "d58808ea513ef82e991b03714d812d34",
                 Define = "YOZOLAB_ENABLE_PBRADIUSGIZMO",
                 Consumes = new[]
                 {
@@ -172,6 +189,7 @@ namespace YozoLab.UtilSettings
                 DisplayName = "FBX Animation Baker",
                 Description = "アニメーションを焼き込んだ FBX を書き出す。",
                 AsmdefGuid = "cfe0f2ee4c194abbaee7f96b07cbcefa",
+                TestsAsmdefGuid = "2dd2f79c2d81fc7a2932776149e3913d",
                 Define = "YOZOLAB_ENABLE_FBXANIMATIONBAKER",
                 Gate = "com.unity.formats.fbx",
                 OpenMenuPath = "YozoLab/FBX Animation Baker",
