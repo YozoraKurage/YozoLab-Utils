@@ -1,6 +1,6 @@
 {
   "name": "net.yozolab.meshbaker",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "displayName": "YozoLab Mesh Baker",
   "description": "メッシュとマテリアルの統合。",
   "unity": "2022.3",

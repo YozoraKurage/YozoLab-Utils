@@ -1,6 +1,6 @@
 {
   "name": "net.yozolab.posebaker",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "displayName": "YozoLab PlayMode Pose Baker",
   "description": "再生中のポーズを焼き込む。NDMF があれば連携する。",
   "unity": "2022.3",

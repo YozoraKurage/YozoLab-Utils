@@ -1,6 +1,6 @@
 {
   "name": "net.yozolab.particletools",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "displayName": "YozoLab Particle Tools",
   "description": "パーティクル制作支援。時間バーでのスクラブ(標準 Particle Effect パネル置き換え)と色の一括編集。",
   "unity": "2022.3",

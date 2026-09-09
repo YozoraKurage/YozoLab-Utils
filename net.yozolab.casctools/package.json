@@ -1,6 +1,6 @@
 {
   "name": "net.yozolab.casctools",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "displayName": "YozoLab Qrigcasc Generator",
   "description": "Humanoid 向けの qrigcasc 生成。",
   "unity": "2022.3",

@@ -1,6 +1,6 @@
 {
   "name": "net.yozolab.pbradiusgizmo",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "displayName": "YozoLab PhysBone Radius Gizmo",
   "description": "PhysBone の Collision Radius をシーン上のハンドルで変える。",
   "unity": "2022.3",

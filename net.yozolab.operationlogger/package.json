@@ -1,6 +1,6 @@
 {
   "name": "net.yozolab.operationlogger",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "displayName": "YozoLab Operation Logger",
   "description": "エディタ操作の記録。Harmony を使う。",
   "unity": "2022.3",

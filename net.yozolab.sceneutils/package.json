@@ -1,6 +1,6 @@
 {
   "name": "net.yozolab.sceneutils",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "displayName": "YozoLab Scene Utils",
   "description": "Window Switcher など、シーン作業まわりの小物。",
   "unity": "2022.3",

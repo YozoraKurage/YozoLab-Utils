@@ -1,6 +1,6 @@
 {
   "name": "net.yozolab.animtools",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "displayName": "YozoLab Animation Tools",
   "description": "Animation ウィンドウまわりの拡張。Harmony を使う。",
   "unity": "2022.3",
