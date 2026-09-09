@@ -58,7 +58,7 @@ namespace YozoLab.UtilSettings
         {
             HashSet<string> enabled = ReadConfig(out HashSet<string> known);
 
-            if (SeedUnlistedPackages(enabled, known))
+            if (HasUnlistedPackages(known))
             {
                 SaveEnabledIds(enabled);
             }
@@ -104,26 +104,21 @@ namespace YozoLab.UtilSettings
         }
 
         /// <summary>
-        /// 設定ファイルが言及していないパッケージを、asmdef の今の状態で埋める。
-        /// 埋めたら true（= 設定ファイルの書き出しが要る）。
+        /// 設定ファイルがまだ知らないパッケージがあるか。
+        /// あれば設定ファイルを書き出す＝そのパッケージは無効として記録される。
         ///
-        /// これにより、初回導入時も新規パッケージ追加時も、出荷時の asmdef が
-        /// そのまま既定になる。設定と asmdef が最初から一致するので、
-        /// 起動時の同期が何も書かずに済み、余計な再コンパイルが起きない。
+        /// 出荷時の asmdef は「誰も切っていない = コンパイルされる」姿なので、
+        /// アドオンだけを取り出せば単体で動く。一方このパッケージをまとめて
+        /// 入れたときは、要るものだけを選んでもらう形にしたい。そこで、この
+        /// 設定機構が初めて動いた時点で全部を無効側へ倒す。
+        ///
+        /// 代償は初回の 1 回だけ。設定ファイルは有効・無効を明示して書き出す
+        /// ので、2 回目からは設定と asmdef が一致し、起動時の同期は何も書かない。
+        /// 新しく増えたパッケージも同じで、初回に 1 度だけ切って以後は無音。
         /// </summary>
-        private static bool SeedUnlistedPackages(HashSet<string> enabled, HashSet<string> known)
+        private static bool HasUnlistedPackages(HashSet<string> known)
         {
-            bool seeded = false;
-
-            foreach (UtilPackage package in UtilsCatalog.Packages)
-            {
-                if (known.Contains(package.Id)) continue;
-
-                if (IsCompiledIn(package)) enabled.Add(package.Id);
-                seeded = true;
-            }
-
-            return seeded;
+            return UtilsCatalog.Packages.Any(package => !known.Contains(package.Id));
         }
 
         /// <summary>
@@ -141,7 +136,8 @@ namespace YozoLab.UtilSettings
                 {
                     "# YozoLab Utils: コンパイルするパッケージの一覧。",
                     "# このファイルが正本。asmdef 側はここから復元される。",
-                    "# 行頭の - は無効。ここに無いパッケージは asmdef の状態が既定になる。",
+                    "# 有効にするには行頭の - を消すか、YozoLab/Utils Settings で選ぶ。",
+                    "# 行頭の - は無効。ここに無いパッケージは無効として書き足される。",
                 };
                 lines.AddRange(UtilsCatalog.Packages.Select(
                     p => enabled.Contains(p.Id) ? p.Id : "-" + p.Id));
@@ -212,24 +208,27 @@ namespace YozoLab.UtilSettings
 
                 bool changed = false;
 
-                // 制約は有効・無効にかかわらず常に置いておく。これが無いと
-                // versionDefines を消しても素通りでコンパイルされてしまう。
-                if (!asmdef.defineConstraints.Contains(package.Define))
+                // 制約は否定形で常に置いておく。誰も Define を立てなければ
+                // コンパイルされる、が出荷時の姿。これが無いと、無効化の
+                // シンボルを足しても素通りでコンパイルされてしまう。
+                string negated = "!" + package.Define;
+                if (!asmdef.defineConstraints.Contains(negated))
                 {
-                    asmdef.defineConstraints.Add(package.Define);
+                    asmdef.defineConstraints.Add(negated);
                     changed = true;
                 }
 
+                // 無効化は versionDefines に常に真の 1 件を足すこと。有効化は
+                // それを消して出荷時の姿へ戻すこと。外部パッケージ必須の条件は
+                // asmdef に常設されていて、ここでは触らない。
                 int index = asmdef.versionDefines.FindIndex(x => x != null && x.define == package.Define);
-                if (enable && index < 0)
+                if (!enable && index < 0)
                 {
-                    // 条件はカタログの Gate。常に "Unity" で足すと、外部パッケージ必須の
-                    // ものを切って戻したときに必須条件が消えてしまう。
-                    string gate = string.IsNullOrEmpty(package.Gate) ? AlwaysTrueVersionDefineName : package.Gate;
-                    asmdef.versionDefines.Add(new VersionDefine(gate, "", package.Define));
+                    asmdef.versionDefines.Add(
+                        new VersionDefine(AlwaysTrueVersionDefineName, "", package.Define));
                     changed = true;
                 }
-                else if (!enable && index >= 0)
+                else if (enable && index >= 0)
                 {
                     asmdef.versionDefines.RemoveAt(index);
                     changed = true;
@@ -252,7 +251,8 @@ namespace YozoLab.UtilSettings
             }
         }
 
-        /// <summary>今この瞬間、asmdef 側で有効になっているか（設定ファイルではなく実状態）。</summary>
+        /// <summary>今この瞬間、asmdef 側で有効になっているか（設定ファイルではなく実状態）。
+        /// 無効化のシンボルが立っていなければ有効。</summary>
         public static bool IsCompiledIn(UtilPackage package)
         {
             try
@@ -261,8 +261,8 @@ namespace YozoLab.UtilSettings
                 if (string.IsNullOrEmpty(path) || !File.Exists(path)) return false;
 
                 var asmdef = JsonUtility.FromJson<AsmdefJson>(File.ReadAllText(path));
-                return asmdef?.versionDefines != null
-                    && asmdef.versionDefines.Any(x => x != null && x.define == package.Define);
+                return asmdef?.versionDefines == null
+                    || !asmdef.versionDefines.Any(x => x != null && x.define == package.Define);
             }
             catch
             {

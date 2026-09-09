@@ -13,7 +13,7 @@
     "precompiledReferences": [],
     "autoReferenced": false,
     "defineConstraints": [
-        "YOZOLAB_ENABLE_CASCTOOLS"
+        "!YOZOLAB_DISABLE_CASCTOOLS"
     ],
     "versionDefines": [],
     "noEngineReferences": false

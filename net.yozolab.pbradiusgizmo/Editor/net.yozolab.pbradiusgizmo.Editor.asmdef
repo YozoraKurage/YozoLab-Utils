@@ -12,7 +12,7 @@
     "autoReferenced": false,
     "defineConstraints": [
         "UNITY_EDITOR",
-        "YOZOLAB_ENABLE_PBRADIUSGIZMO"
+        "!YOZOLAB_DISABLE_PBRADIUSGIZMO"
     ],
     "versionDefines": [
         {

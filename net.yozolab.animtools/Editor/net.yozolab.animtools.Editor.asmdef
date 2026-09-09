@@ -11,7 +11,7 @@
     "precompiledReferences": [],
     "autoReferenced": false,
     "defineConstraints": [
-        "YOZOLAB_ENABLE_ANIMTOOLS"
+        "!YOZOLAB_DISABLE_ANIMTOOLS"
     ],
     "versionDefines": [
         {

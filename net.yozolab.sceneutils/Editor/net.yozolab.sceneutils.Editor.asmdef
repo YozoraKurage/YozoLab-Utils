@@ -13,7 +13,7 @@
     "precompiledReferences": [],
     "autoReferenced": false,
     "defineConstraints": [
-        "YOZOLAB_ENABLE_SCENEUTILS"
+        "!YOZOLAB_DISABLE_SCENEUTILS"
     ],
     "versionDefines": [],
     "noEngineReferences": false
