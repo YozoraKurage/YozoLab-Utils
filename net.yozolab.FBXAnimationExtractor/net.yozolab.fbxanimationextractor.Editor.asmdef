@@ -14,12 +14,6 @@
         "UNITY_EDITOR",
         "YOZOLAB_ENABLE_FBXANIMATIONEXTRACTOR"
     ],
-    "versionDefines": [
-        {
-            "name": "com.unity.formats.fbx",
-            "expression": "",
-            "define": "YOZOLAB_ENABLE_FBXANIMATIONEXTRACTOR"
-        }
-    ],
+    "versionDefines": [],
     "noEngineReferences": false
 }

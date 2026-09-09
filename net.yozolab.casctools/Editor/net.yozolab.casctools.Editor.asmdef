@@ -15,12 +15,6 @@
     "defineConstraints": [
         "YOZOLAB_ENABLE_CASCTOOLS"
     ],
-    "versionDefines": [
-        {
-            "name": "Unity",
-            "expression": "",
-            "define": "YOZOLAB_ENABLE_CASCTOOLS"
-        }
-    ],
+    "versionDefines": [],
     "noEngineReferences": false
 }

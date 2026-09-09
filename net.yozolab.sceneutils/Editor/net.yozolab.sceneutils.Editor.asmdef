@@ -15,12 +15,6 @@
     "defineConstraints": [
         "YOZOLAB_ENABLE_SCENEUTILS"
     ],
-    "versionDefines": [
-        {
-            "name": "Unity",
-            "expression": "",
-            "define": "YOZOLAB_ENABLE_SCENEUTILS"
-        }
-    ],
+    "versionDefines": [],
     "noEngineReferences": false
 }
