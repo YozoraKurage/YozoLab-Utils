@@ -18,7 +18,8 @@ Generic な Transform カーブへ変換したうえで FBX に焼き込みま�
 ## 使い方
 
 1. `YozoLab > FBX Animation Baker` でウィンドウを開く
-2. `Output Directory` に生成 FBX の保存先フォルダを指定する
+2. `New Folder` でフォルダを作り、その見出しの下の `Output Directory` に
+   生成 FBX の保存先を指定する
 3. `Add`（または Project で FBX とクリップを選択して `From Selection`）でエントリを作成する
 4. エントリの `Source FBX` にモデル、`Humanoid Clips` にベイクしたいクリップを指定する
 5. `Execute` を押す
@@ -26,13 +27,37 @@ Generic な Transform カーブへ変換したうえで FBX に焼き込みま�
 クリップ 1 つにつき FBX を 1 つ出力します。`Output File Name` が空ならクリップ名、
 1 エントリに複数クリップがある場合は `<Output File Name>_<クリップ名>.fbx` になります。
 
+## エントリリスト
+
+FBX Animation Extractor の Rule List と同じ操作系です。
+
+- **フォルダ** — `New Folder` で作成し、エントリをまとめる。展開すると見出しの下に
+  そのフォルダの `Output Directory` が出る。**出力先はフォルダが持ちます**
+  （全エントリ共通の Output Directory はありません）。
+  見出しの `Bake: ON/OFF` でフォルダ単位に実行対象から外せる。
+  `✕` で削除（中のエントリは消えず、フォルダなしに戻る）。
+- **フォルダなしのエントリは Execute の対象外**です。出力先はフォルダが持つため
+  行き先が無く、リスト上に警告が出ます。`Folder ▾` でフォルダへ移動してください。
+- **チェックボックス**（左端）で複数選択し、`Folder ▾` での一括移動や
+  テンプレートの一括貼り付けの対象にできる。未チェックのときは選択中エントリ 1 つが対象。
+  `Check All Filtered` / `Uncheck All` で検索結果をまとめて操作できる。
+- **チェックの右のトグル**はエントリ個別の実行フラグ。フォルダ側が OFF ならそちらが優先。
+- **Copy Template / Paste (N)** — 選択中エントリのベイク設定をコピーし、
+  複数エントリへ一括で貼り付ける。同じ設定を何十本ものクリップへ揃えるとき用。
+  名前 / `Source FBX` / `Humanoid Clips` / 所属フォルダ / 実行フラグは
+  エントリの identity なので上書きしません。
+- **Move Up / Move Down** で並び順を変えられる。
+- `Add` で作ったエントリは、選択中エントリと同じフォルダに入ります。
+
+出力先の優先順は `エントリの Output Override` → `フォルダの Output Directory` です。
+
 ## エントリの設定
 
 | 項目 | 説明 |
 | --- | --- |
 | Source FBX | アニメーションをベイクする対象のモデル（.fbx） |
 | Humanoid Clips | ベイクするクリップ。FBX 内蔵クリップも .anim も指定可 |
-| Output Override | このエントリだけ別フォルダへ出力する場合に指定 |
+| Output Override | このエントリだけ別フォルダへ出力する場合に指定（未設定ならフォルダの Output Directory） |
 | Output File Name | 出力ファイル名（拡張子なし）。空ならクリップ名 |
 | Export Content | 生成 FBX に含めるもの。`Skeleton Only` はメッシュ/レンダラーを外し、アニメーションするノード階層だけにする（**FBX が劇的に小さくなる**） |
 | Import Animation Type | 生成 FBX を読み込み直すときの Animation Type（既定は Generic） |

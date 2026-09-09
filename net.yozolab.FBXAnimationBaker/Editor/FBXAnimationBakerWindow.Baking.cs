@@ -57,13 +57,11 @@ namespace YozoLab.FBXAnimationBaker
                 return;
             }
 
-            string defaultOutputPath = settings.outputDirectory != null
-                ? AssetDatabase.GetAssetPath(settings.outputDirectory)
-                : string.Empty;
-
             // 実際に処理する (エントリ, クリップ) の組を先に展開しておくと進捗表示が素直になる
             var jobs = new List<(AnimationBakeEntry entry, AnimationClip clip, bool multiClip)>();
             int disabledCount = 0;
+            int folderDisabledCount = 0;
+            int folderlessCount = 0;
             foreach (AnimationBakeEntry entry in settings.bakeEntries)
             {
                 if (entry == null)
@@ -73,6 +71,20 @@ namespace YozoLab.FBXAnimationBaker
                 if (!entry.enabled)
                 {
                     disabledCount++;
+                    continue;
+                }
+
+                // 出力先はフォルダが持つ。フォルダに属さないエントリは行き先が無い。
+                if (string.IsNullOrWhiteSpace(entry.folder))
+                {
+                    folderlessCount++;
+                    Debug.LogWarning($"{LogPrefix} Entry belongs to no folder, skipped: {GetEntryDisplayName(entry)}");
+                    continue;
+                }
+                if (!IsFolderBakeEnabled(entry.folder))
+                {
+                    folderDisabledCount++;
+                    Debug.Log($"{LogPrefix} Folder \"{entry.folder.Trim()}\" bake is OFF, skipped: {GetEntryDisplayName(entry)}");
                     continue;
                 }
                 if (entry.sourceFbx == null)
@@ -96,7 +108,8 @@ namespace YozoLab.FBXAnimationBaker
 
             if (jobs.Count == 0)
             {
-                Debug.LogWarning($"{LogPrefix} Nothing to bake (enabled entries: {settings.bakeEntries.Count - disabledCount}).");
+                Debug.LogWarning($"{LogPrefix} Nothing to bake "
+                                 + $"(disabled entries: {disabledCount}, folder-off: {folderDisabledCount}, folderless: {folderlessCount}).");
                 return;
             }
 
@@ -118,7 +131,7 @@ namespace YozoLab.FBXAnimationBaker
                 {
                     (AnimationBakeEntry entry, AnimationClip clip, bool multiClip) = jobs[i];
 
-                    string outputFolder = GetEntryOutputFolder(entry, defaultOutputPath);
+                    string outputFolder = GetEntryOutputFolder(entry);
                     if (string.IsNullOrEmpty(outputFolder) || !AssetDatabase.IsValidFolder(outputFolder))
                     {
                         Debug.LogWarning($"{LogPrefix} Output folder is invalid, skipped: {GetEntryDisplayName(entry)} / {clip.name}");
@@ -697,12 +710,31 @@ namespace YozoLab.FBXAnimationBaker
         //  出力先 / 名前の解決
         // ═══════════════════════════════════════════════════════════════
 
+        /// <summary>
+        /// エントリの出力先。既定値は所属フォルダの Output Directory で、
+        /// エントリ側の Output Override があればそちらが勝つ。
+        /// </summary>
         private string GetEntryOutputFolder(AnimationBakeEntry entry)
         {
-            string defaultOutputPath = settings != null && settings.outputDirectory != null
-                ? AssetDatabase.GetAssetPath(settings.outputDirectory)
+            return GetEntryOutputFolder(entry, GetFolderOutputPath(entry?.folder));
+        }
+
+        /// <summary>フォルダの Output Directory のパス。無効なら空文字。</summary>
+        private string GetFolderOutputPath(string folderName)
+        {
+            BakeFolderState folder = FindFolderState(folderName);
+            return folder != null && IsValidFolderAsset(folder.outputDirectory)
+                ? AssetDatabase.GetAssetPath(folder.outputDirectory)
                 : string.Empty;
-            return GetEntryOutputFolder(entry, defaultOutputPath);
+        }
+
+        /// <summary>
+        /// エントリが属するフォルダの Bake フラグ。フォルダ未登録なら true(処理する)。
+        /// </summary>
+        private bool IsFolderBakeEnabled(string folderName)
+        {
+            BakeFolderState folder = FindFolderState(folderName);
+            return folder == null || folder.bakeEnabled;
         }
 
         private string GetEntryOutputFolder(AnimationBakeEntry entry, string defaultOutputPath)

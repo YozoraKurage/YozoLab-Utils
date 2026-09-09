@@ -1,9 +1,7 @@
 {
-    "name": "net.yozolab.posebaker.Editor",
-    "rootNamespace": "",
-    "references": [
-        "nadena.dev.ndmf"
-    ],
+    "name": "net.yozolab.particletools.Editor",
+    "rootNamespace": "YozoLab.ParticleTools",
+    "references": [],
     "includePlatforms": [
         "Editor"
     ],
@@ -13,13 +11,13 @@
     "precompiledReferences": [],
     "autoReferenced": false,
     "defineConstraints": [
-        "YOZOLAB_ENABLE_POSEBAKER"
+        "YOZOLAB_ENABLE_PARTICLETOOLS"
     ],
     "versionDefines": [
         {
-            "name": "nadena.dev.ndmf",
+            "name": "com.vrchat.base",
             "expression": "",
-            "define": "YOZOLAB_NDMF"
+            "define": "YOZOLAB_PARTICLETOOLS_HARMONY"
         }
     ],
     "noEngineReferences": false

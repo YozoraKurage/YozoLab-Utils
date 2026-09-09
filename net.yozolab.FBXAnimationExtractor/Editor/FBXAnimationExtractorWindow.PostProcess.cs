@@ -16,10 +16,14 @@ public partial class FBXAnimationExtractorWindow
     /// Generic Extract が Separate モードのときは、非Humanoidカーブを格納した別クリップ(in-memory)を返す。
     /// Merge モード/未設定時は null を返す。
     /// </summary>
-    private AnimationClip ApplyPostProcessRules(AnimationClip clip, string clipName, string sourceFbxPath)
+    /// <param name="matchingRule">
+    /// 適用する Rule。名前から引き直さずに呼び出し側から渡す。同じ targetName の Rule が
+    /// 複数並ぶ(出力名違いで同じ FBX から複数クリップを作る)構成では、名前で引くと
+    /// 常に先頭の Rule を掴んでしまい、2 本目以降が 1 本目の設定で書き出されてしまう。
+    /// </param>
+    private AnimationClip ApplyPostProcessRules(AnimationClip clip, AnimationPostProcessRule matchingRule,
+                                                string clipName, string sourceFbxPath)
     {
-        AnimationPostProcessRule matchingRule = FindMatchingRule(clipName);
-
         if (matchingRule == null)
             return null;
 
@@ -95,28 +99,46 @@ public partial class FBXAnimationExtractorWindow
         }
     }
 
-    private AnimationPostProcessRule FindMatchingRule(string name)
+    /// <summary>
+    /// 名前に一致する Rule を「すべて」定義順に返す。
+    ///
+    /// targetName は一意ではない。同じ FBX から出力名違いで複数のクリップを作るために、
+    /// 同名の Rule を並べる使い方がある。先頭 1 件だけを返していたころは 2 本目以降が
+    /// 素通りし、.anim が 1 本しか出なかった。
+    /// </summary>
+    /// <param name="folderScope">
+    /// 探す範囲のルールフォルダ名。空なら全 Rule から名前だけで探す。
+    /// </param>
+    private List<AnimationPostProcessRule> FindMatchingRules(string name, string folderScope)
     {
+        var matches = new List<AnimationPostProcessRule>();
+
         if (settings.postProcessRules == null || settings.postProcessRules.Count == 0)
-            return null;
+            return matches;
 
         if (string.IsNullOrWhiteSpace(name))
-            return null;
+            return matches;
 
         string normalizedName = name.Trim();
+        bool scoped = !string.IsNullOrWhiteSpace(folderScope);
+        string scopeKey = scoped ? folderScope.Trim() : null;
 
         foreach (var rule in settings.postProcessRules)
         {
-            if (string.IsNullOrWhiteSpace(rule.targetName))
+            if (rule == null || string.IsNullOrWhiteSpace(rule.targetName))
                 continue;
 
-            if (string.Equals(normalizedName, rule.targetName.Trim(), StringComparison.OrdinalIgnoreCase))
-            {
-                return rule;
-            }
+            if (!string.Equals(normalizedName, rule.targetName.Trim(), StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            if (scoped && !string.Equals(rule.folder?.Trim() ?? string.Empty, scopeKey,
+                                         StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            matches.Add(rule);
         }
 
-        return null;
+        return matches;
     }
 
     // ═══════════════════════════════════════════════════════════════
