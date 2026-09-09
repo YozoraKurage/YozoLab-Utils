@@ -3,22 +3,6 @@ using System;
 namespace YozoLab.UtilSettings
 {
     /// <summary>
-    /// パッケージ間の「有効なら使える機能」の紐付け 1 件分。
-    ///
-    /// 利用側の asmdef に、提供側パッケージが有効なあいだだけ Define を注入する。
-    /// asmdef の defineConstraints では他 asmdef の有無を判定できないので、
-    /// この設定機構が versionDefines を書き換えることで肩代わりする。
-    /// </summary>
-    internal sealed class FeatureLink
-    {
-        /// <summary>提供側パッケージの Id。</summary>
-        public string ProviderId;
-
-        /// <summary>利用側 asmdef に注入するシンボル。</summary>
-        public string Define;
-    }
-
-    /// <summary>
     /// 切り替えの対象になるパッケージ 1 件分の定義。
     /// </summary>
     internal sealed class UtilPackage
@@ -69,9 +53,6 @@ namespace YozoLab.UtilSettings
 
         /// <summary>コンパイルされているときだけ触れる、実行時の ON/OFF。</summary>
         public RuntimeToggle[] Toggles = Array.Empty<RuntimeToggle>();
-
-        /// <summary>このパッケージが利用する、他パッケージ提供の機能。</summary>
-        public FeatureLink[] Consumes = Array.Empty<FeatureLink>();
     }
 
     /// <summary>
@@ -106,6 +87,7 @@ namespace YozoLab.UtilSettings
                 DisplayName = "Animation Tools",
                 Description = "Animation ウィンドウまわりの拡張。Harmony を使う。",
                 AsmdefGuid = "6b8d0f08c02241c78f4bd111ed92fc21",
+                TestsAsmdefGuid = "31d72fe163d8e99bbac8794dd6dd532c",
                 Define = "YOZOLAB_ENABLE_ANIMTOOLS",
                 Toggles = new[]
                 {
@@ -147,15 +129,6 @@ namespace YozoLab.UtilSettings
                 AsmdefGuid = "98df72da806a4338800e6d264b24df60",
                 TestsAsmdefGuid = "d58808ea513ef82e991b03714d812d34",
                 Define = "YOZOLAB_ENABLE_PBRADIUSGIZMO",
-                Consumes = new[]
-                {
-                    // Accelerator が有効なら、その代替ギズモパスと連携する
-                    new FeatureLink
-                    {
-                        ProviderId = "vrcgizmoaccelerator",
-                        Define = "YOZOLAB_HAS_VRCGIZMOACC",
-                    },
-                },
                 Toggles = new[]
                 {
                     new RuntimeToggle
@@ -246,6 +219,7 @@ namespace YozoLab.UtilSettings
                 DisplayName = "Particle Tools",
                 Description = "パーティクル制作支援。時間バーでのスクラブ(標準 Particle Effect パネル置き換え)と色の一括編集。",
                 AsmdefGuid = "998afc256cc14f59adb8fb9bd4245156",
+                TestsAsmdefGuid = "fdb1e1857182a0d938a4c01c93383726",
                 Define = "YOZOLAB_ENABLE_PARTICLETOOLS",
                 OpenMenuPath = "YozoLab/Particle Color Editor",
             },

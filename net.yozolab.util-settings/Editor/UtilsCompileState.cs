@@ -168,14 +168,14 @@ namespace YozoLab.UtilSettings
             {
                 bool enable = enabled.Contains(package.Id);
 
-                if (SyncOne(package, package.AsmdefGuid, enable, enabled, out string path))
+                if (SyncOne(package, package.AsmdefGuid, enable, out string path))
                     touched.Add(path);
 
                 // テストアセンブリは対象アセンブリと同じ条件で開け閉めする。
                 // 対象を参照している以上、対象が落ちているのに自分だけ
                 // コンパイルされると参照が解決できない。
                 if (!string.IsNullOrEmpty(package.TestsAsmdefGuid)
-                    && SyncOne(package, package.TestsAsmdefGuid, enable, enabled, out string testsPath))
+                    && SyncOne(package, package.TestsAsmdefGuid, enable, out string testsPath))
                     touched.Add(testsPath);
             }
 
@@ -191,8 +191,7 @@ namespace YozoLab.UtilSettings
         /// 対象は <paramref name="asmdefGuid"/> で指す。同じパッケージの
         /// 本体とテストの両方に、同じ制約とシンボルを書き込むために分けてある。
         /// </summary>
-        private static bool SyncOne(UtilPackage package, string asmdefGuid, bool enable,
-                                    HashSet<string> enabledIds, out string path)
+        private static bool SyncOne(UtilPackage package, string asmdefGuid, bool enable, out string path)
         {
             path = null;
             try
@@ -234,31 +233,6 @@ namespace YozoLab.UtilSettings
                 {
                     asmdef.versionDefines.RemoveAt(index);
                     changed = true;
-                }
-
-                // 他パッケージ提供の機能への紐付け。提供側が有効なあいだだけ
-                // シンボルを注入する。利用側のコードは #if でこのシンボルを見る。
-                // 本体だけでよい。テスト側に足しても使い道が無いうえ、提供側を
-                // 切り替えるたびにテスト asmdef まで書き換わって再コンパイルが増える。
-                foreach (FeatureLink link in asmdefGuid == package.AsmdefGuid
-                                                 ? package.Consumes
-                                                 : Array.Empty<FeatureLink>())
-                {
-                    bool want = enabledIds.Contains(link.ProviderId);
-                    int linkIndex = asmdef.versionDefines.FindIndex(
-                        x => x != null && x.define == link.Define);
-
-                    if (want && linkIndex < 0)
-                    {
-                        asmdef.versionDefines.Add(
-                            new VersionDefine(AlwaysTrueVersionDefineName, "", link.Define));
-                        changed = true;
-                    }
-                    else if (!want && linkIndex >= 0)
-                    {
-                        asmdef.versionDefines.RemoveAt(linkIndex);
-                        changed = true;
-                    }
                 }
 
                 if (!changed)

@@ -1,9 +1,7 @@
 {
     "name": "net.yozolab.pbradiusgizmo.Editor",
     "rootNamespace": "YozoLab.PBRadiusGizmo",
-    "references": [
-        "net.yozolab.vrcgizmoaccelerator.Editor"
-    ],
+    "references": [],
     "includePlatforms": [
         "Editor"
     ],

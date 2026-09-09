@@ -63,5 +63,13 @@ class MyExtension : IPhysBoneGizmoExtension
 }
 ```
 
-PhysBone Radius Gizmo（同リポジトリ）が最初の利用者で、ドラッグ中に
-`SuppressDefault` で既定形状を消し、自前のハンドル表示だけを残しています。
+### アセンブリ参照を持ちたくない場合
+
+`PhysBoneGizmoPass.SuppressDefaultFor`（`Func<Component, bool>`）に述語を差すと、
+既定形状を伏せるかどうかだけを外から決められます。やり取りする型が
+`Component` と `bool` しかないので、リフレクションで差し込めます。
+
+同リポジトリの PhysBone Radius Gizmo がこちらを使っています。アドオンは
+それぞれ独立して有効・無効にできる必要があり、asmdef で参照してしまうと
+Accelerator を切ったときに Radius Gizmo が道連れでコンパイルできなくなるためです。
+ドラッグ中だけ既定形状を消し、自前のハンドル表示を残しています。
