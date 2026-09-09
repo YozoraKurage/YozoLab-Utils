@@ -596,22 +596,18 @@ namespace YozoLab.PBRadiusGizmo
         /// </summary>
         private static void MuteGizmos(VRCPhysBoneBase pb)
         {
-#if YOZOLAB_HAS_VRCGIZMOACC
             if (RadiusGizmoPassBridge.PassActive)
             {
                 RadiusGizmoPassBridge.InvalidatePass();
                 return;
             }
-#endif
             SdkGizmoMuter.Begin(pb);
         }
 
         private static void UnmuteGizmos()
         {
             SdkGizmoMuter.End();
-#if YOZOLAB_HAS_VRCGIZMOACC
             if (RadiusGizmoPassBridge.PassActive) RadiusGizmoPassBridge.InvalidatePass();
-#endif
         }
 
         // シーンビューのカメラが無い状況（起動直後など）でも落ちないようにしておく。

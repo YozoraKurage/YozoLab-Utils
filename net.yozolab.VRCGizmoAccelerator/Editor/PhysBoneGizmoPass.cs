@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
@@ -46,6 +47,20 @@ namespace YozoLab.VRCGizmoAccelerator
             get { return false; }
 #endif
         }
+
+        /// <summary>
+        /// 既定形状を伏せるかどうかを PhysBone ごとに問う述語。null なら伏せない。
+        ///
+        /// <see cref="IPhysBoneGizmoExtension"/> はこのアセンブリを参照できる相手
+        /// 向けの拡張点。こちらは参照を持ちたくない相手のためにある。やり取りする
+        /// 型が <see cref="Component"/> と bool だけなので、
+        /// <c>Func&lt;Component, bool&gt;</c> としてリフレクションで差し込める。
+        ///
+        /// 同じリポジトリの PhysBone Radius Gizmo がこれを使う。アドオン同士は
+        /// 独立して有効・無効にできる必要があり、片方が他方を asmdef で参照して
+        /// いると、参照先を切ったときに参照元が道連れになる。
+        /// </summary>
+        public static Func<Component, bool> SuppressDefaultFor;
 
         public static void Register(IPhysBoneGizmoExtension extension)
         {
@@ -284,12 +299,30 @@ namespace YozoLab.VRCGizmoAccelerator
                     }
                 }
 
+                if (!Canvas.SuppressDefault) TryExternalSuppressor(target.physBone);
+
                 if (!Canvas.SuppressDefault)
                     PhysBoneGizmoShapes.Build(target.physBone, Canvas);
             }
 
             LastVertexCount = Canvas.VertexCount;
             LastBuildMs = stopwatch.Elapsed.TotalMilliseconds;
+        }
+
+        /// <summary>参照を持たない相手が差した述語を訊く。拡張と同じく失敗は握り潰す。</summary>
+        private static void TryExternalSuppressor(Component physBone)
+        {
+            Func<Component, bool> suppressor = PhysBoneGizmoPass.SuppressDefaultFor;
+            if (suppressor == null) return;
+
+            try
+            {
+                if (suppressor(physBone)) Canvas.SuppressDefault = true;
+            }
+            catch (System.Exception ex)
+            {
+                UnityEngine.Debug.LogException(ex);
+            }
         }
 
         private static void Draw()

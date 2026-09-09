@@ -11,7 +11,7 @@
     "precompiledReferences": [],
     "autoReferenced": false,
     "defineConstraints": [
-        "YOZOLAB_ENABLE_PARTICLETOOLS"
+        "!YOZOLAB_DISABLE_PARTICLETOOLS"
     ],
     "versionDefines": [
         {

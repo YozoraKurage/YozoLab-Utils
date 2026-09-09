@@ -1,10 +1,10 @@
 {
-    "name": "net.yozolab.pbradiusgizmo.Tests",
+    "name": "net.yozolab.fbxanimationbaker.Tests",
     "rootNamespace": "YozoLab.Tests",
     "references": [
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner",
-        "net.yozolab.pbradiusgizmo.Editor"
+        "net.yozolab.fbxanimationbaker.Editor"
     ],
     "includePlatforms": [
         "Editor"
@@ -18,8 +18,15 @@
     "autoReferenced": false,
     "defineConstraints": [
         "UNITY_INCLUDE_TESTS",
-        "YOZOLAB_ENABLE_PBRADIUSGIZMO"
+        "!YOZOLAB_DISABLE_FBXANIMATIONBAKER",
+        "YOZOLAB_HAS_FBXEXPORTER"
     ],
-    "versionDefines": [],
+    "versionDefines": [
+        {
+            "name": "com.unity.formats.fbx",
+            "expression": "",
+            "define": "YOZOLAB_HAS_FBXEXPORTER"
+        }
+    ],
     "noEngineReferences": false
 }

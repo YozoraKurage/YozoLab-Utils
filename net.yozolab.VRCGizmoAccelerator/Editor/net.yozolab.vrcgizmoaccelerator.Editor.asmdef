@@ -12,7 +12,7 @@
     "autoReferenced": false,
     "defineConstraints": [
         "UNITY_EDITOR",
-        "YOZOLAB_ENABLE_VRCGIZMOACCELERATOR"
+        "!YOZOLAB_DISABLE_VRCGIZMOACCELERATOR"
     ],
     "versionDefines": [
         {

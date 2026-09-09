@@ -3,22 +3,6 @@ using System;
 namespace YozoLab.UtilSettings
 {
     /// <summary>
-    /// パッケージ間の「有効なら使える機能」の紐付け 1 件分。
-    ///
-    /// 利用側の asmdef に、提供側パッケージが有効なあいだだけ Define を注入する。
-    /// asmdef の defineConstraints では他 asmdef の有無を判定できないので、
-    /// この設定機構が versionDefines を書き換えることで肩代わりする。
-    /// </summary>
-    internal sealed class FeatureLink
-    {
-        /// <summary>提供側パッケージの Id。</summary>
-        public string ProviderId;
-
-        /// <summary>利用側 asmdef に注入するシンボル。</summary>
-        public string Define;
-    }
-
-    /// <summary>
     /// 切り替えの対象になるパッケージ 1 件分の定義。
     /// </summary>
     internal sealed class UtilPackage
@@ -35,28 +19,41 @@ namespace YozoLab.UtilSettings
         /// </summary>
         public string AsmdefGuid;
 
-        /// <summary>このパッケージのコンパイル可否を決めるシンボル。</summary>
-        public string Define;
+        /// <summary>
+        /// このパッケージのテストアセンブリの asmdef GUID（無ければ null）。
+        ///
+        /// テスト側は対象アセンブリを参照するので、対象が落ちているのに自分だけ
+        /// コンパイルされると参照が解決できず CS0234 で落ちる。かといって
+        /// defineConstraints に <see cref="Define"/> を書くだけでは駄目で、
+        /// versionDefines はアセンブリごとの設定なので、対象 asmdef で立てた
+        /// シンボルはテスト側からは見えない。制約が永久に満たされず、対象を
+        /// 有効にしてもテストが走らなくなる。
+        ///
+        /// そこで対象 asmdef と同じ内容をテスト asmdef にも書き込み、
+        /// 有効・無効を揃えて動かす。
+        /// </summary>
+        public string TestsAsmdefGuid;
 
         /// <summary>
-        /// <see cref="Define"/> を立てる versionDefines の条件パッケージ名。
-        /// 既定の "Unity" は常に真＝「有効にしたら必ず通す」。
+        /// このパッケージを「コンパイルしない」ことを表すシンボル。
         ///
-        /// 外部パッケージ必須のものはその名前を入れる。有効にしても相手が
-        /// 入っていなければシンボルが立たず、コンパイルされない。ここを空欄に
-        /// すると、設定ウィンドウで一度切って戻したときに条件が "Unity" へ
-        /// すり替わり、必須パッケージ抜きでコンパイルしようとして壊れる。
+        /// 対象 asmdef の defineConstraints は否定形（<c>!Define</c>）で書いてある。
+        /// つまり誰も立てなければコンパイルされる。この設定機構はシンボルを
+        /// 立てて「切る」ためだけに使い、有効化とは asmdef を出荷時の姿へ戻すこと。
+        ///
+        /// この向きにしてあるのは、各アドオンが util-settings 抜きでも単体で
+        /// 成立している必要があるため。有効化が必要な形（!無しで ENABLE を要求）
+        /// だと、この設定機構が入っていないプロジェクトでは 1 つもコンパイル
+        /// されず、アドオンだけを取り出して使えない。
         /// </summary>
-        public string Gate = "Unity";
+        public string Define;
+
 
         /// <summary>設定やウィンドウを開くメニュー項目（無ければ null）。</summary>
         public string OpenMenuPath;
 
         /// <summary>コンパイルされているときだけ触れる、実行時の ON/OFF。</summary>
         public RuntimeToggle[] Toggles = Array.Empty<RuntimeToggle>();
-
-        /// <summary>このパッケージが利用する、他パッケージ提供の機能。</summary>
-        public FeatureLink[] Consumes = Array.Empty<FeatureLink>();
     }
 
     /// <summary>
@@ -91,7 +88,8 @@ namespace YozoLab.UtilSettings
                 DisplayName = "Animation Tools",
                 Description = "Animation ウィンドウまわりの拡張。Harmony を使う。",
                 AsmdefGuid = "6b8d0f08c02241c78f4bd111ed92fc21",
-                Define = "YOZOLAB_ENABLE_ANIMTOOLS",
+                TestsAsmdefGuid = "31d72fe163d8e99bbac8794dd6dd532c",
+                Define = "YOZOLAB_DISABLE_ANIMTOOLS",
                 Toggles = new[]
                 {
                     new RuntimeToggle
@@ -120,7 +118,8 @@ namespace YozoLab.UtilSettings
                 DisplayName = "VRC Gizmo Accelerator",
                 Description = "PhysBone ギズモを独自の一括描画パスに置き換えて軽くする。Harmony を使う。",
                 AsmdefGuid = "c54f7afe8bca44b5bf2680c2058b79b5",
-                Define = "YOZOLAB_ENABLE_VRCGIZMOACCELERATOR",
+                TestsAsmdefGuid = "12a0b490157839ef79a1addefcf8f301",
+                Define = "YOZOLAB_DISABLE_VRCGIZMOACCELERATOR",
                 OpenMenuPath = "YozoLab/VRC Gizmo Accelerator",
             },
             new UtilPackage
@@ -129,16 +128,8 @@ namespace YozoLab.UtilSettings
                 DisplayName = "PhysBone Radius Gizmo",
                 Description = "PhysBone の Collision Radius をシーン上のハンドルで変える。",
                 AsmdefGuid = "98df72da806a4338800e6d264b24df60",
-                Define = "YOZOLAB_ENABLE_PBRADIUSGIZMO",
-                Consumes = new[]
-                {
-                    // Accelerator が有効なら、その代替ギズモパスと連携する
-                    new FeatureLink
-                    {
-                        ProviderId = "vrcgizmoaccelerator",
-                        Define = "YOZOLAB_HAS_VRCGIZMOACC",
-                    },
-                },
+                TestsAsmdefGuid = "d58808ea513ef82e991b03714d812d34",
+                Define = "YOZOLAB_DISABLE_PBRADIUSGIZMO",
                 Toggles = new[]
                 {
                     new RuntimeToggle
@@ -155,7 +146,7 @@ namespace YozoLab.UtilSettings
                 DisplayName = "Operation Logger",
                 Description = "エディタ操作の記録。Harmony を使う。",
                 AsmdefGuid = "086be9f94816f2341a7304f955722ab7",
-                Define = "YOZOLAB_ENABLE_OPERATIONLOGGER",
+                Define = "YOZOLAB_DISABLE_OPERATIONLOGGER",
                 Toggles = new[]
                 {
                     new RuntimeToggle
@@ -172,8 +163,8 @@ namespace YozoLab.UtilSettings
                 DisplayName = "FBX Animation Baker",
                 Description = "アニメーションを焼き込んだ FBX を書き出す。",
                 AsmdefGuid = "cfe0f2ee4c194abbaee7f96b07cbcefa",
-                Define = "YOZOLAB_ENABLE_FBXANIMATIONBAKER",
-                Gate = "com.unity.formats.fbx",
+                TestsAsmdefGuid = "2dd2f79c2d81fc7a2932776149e3913d",
+                Define = "YOZOLAB_DISABLE_FBXANIMATIONBAKER",
                 OpenMenuPath = "YozoLab/FBX Animation Baker",
             },
             new UtilPackage
@@ -182,8 +173,7 @@ namespace YozoLab.UtilSettings
                 DisplayName = "FBX Animation Extractor",
                 Description = "FBX からアニメーションを取り出す。",
                 AsmdefGuid = "48aa154317f40c64e9da67181b8b3731",
-                Define = "YOZOLAB_ENABLE_FBXANIMATIONEXTRACTOR",
-                Gate = "com.unity.formats.fbx",
+                Define = "YOZOLAB_DISABLE_FBXANIMATIONEXTRACTOR",
                 OpenMenuPath = "YozoLab/FBX Animation Extractor",
             },
             new UtilPackage
@@ -192,7 +182,7 @@ namespace YozoLab.UtilSettings
                 DisplayName = "Mesh Baker",
                 Description = "メッシュとマテリアルの統合。Editor 側のみ切り替える。",
                 AsmdefGuid = "ebd384c51da070704a56b20b6fee94bb",
-                Define = "YOZOLAB_ENABLE_MESHBAKER",
+                Define = "YOZOLAB_DISABLE_MESHBAKER",
                 OpenMenuPath = "YozoLab/Frozen Avatar Baker",
             },
             new UtilPackage
@@ -201,7 +191,7 @@ namespace YozoLab.UtilSettings
                 DisplayName = "PlayMode Pose Baker",
                 Description = "再生中のポーズを焼き込む。NDMF があれば連携する。",
                 AsmdefGuid = "655ab3eaed5f9e23cf9fa3fc8264b52d",
-                Define = "YOZOLAB_ENABLE_POSEBAKER",
+                Define = "YOZOLAB_DISABLE_POSEBAKER",
                 OpenMenuPath = "YozoLab/PlayMode Pose Baker",
             },
             new UtilPackage
@@ -210,7 +200,7 @@ namespace YozoLab.UtilSettings
                 DisplayName = "Qrigcasc Generator",
                 Description = "Humanoid 向けの qrigcasc 生成。Editor 側のみ切り替える。",
                 AsmdefGuid = "8c8503c02fe24d2fb1ec505103eb4f57",
-                Define = "YOZOLAB_ENABLE_CASCTOOLS",
+                Define = "YOZOLAB_DISABLE_CASCTOOLS",
                 OpenMenuPath = "YozoLab/Qrigcasc Generator",
             },
             new UtilPackage
@@ -219,7 +209,7 @@ namespace YozoLab.UtilSettings
                 DisplayName = "Scene Utils",
                 Description = "Window Switcher など、シーン作業まわりの小物。Editor 側のみ切り替える。",
                 AsmdefGuid = "6892911967af0bf4baa6600634fbae31",
-                Define = "YOZOLAB_ENABLE_SCENEUTILS",
+                Define = "YOZOLAB_DISABLE_SCENEUTILS",
                 OpenMenuPath = "Window/Window Switcher",
             },
             new UtilPackage
@@ -228,7 +218,8 @@ namespace YozoLab.UtilSettings
                 DisplayName = "Particle Tools",
                 Description = "パーティクル制作支援。時間バーでのスクラブ(標準 Particle Effect パネル置き換え)と色の一括編集。",
                 AsmdefGuid = "998afc256cc14f59adb8fb9bd4245156",
-                Define = "YOZOLAB_ENABLE_PARTICLETOOLS",
+                TestsAsmdefGuid = "fdb1e1857182a0d938a4c01c93383726",
+                Define = "YOZOLAB_DISABLE_PARTICLETOOLS",
                 OpenMenuPath = "YozoLab/Particle Color Editor",
             },
         };

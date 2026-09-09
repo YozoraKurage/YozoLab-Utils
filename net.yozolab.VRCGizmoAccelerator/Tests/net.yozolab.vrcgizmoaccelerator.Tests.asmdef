@@ -1,9 +1,10 @@
 {
-    "name": "net.yozolab.yozolab-utils.Tests",
+    "name": "net.yozolab.vrcgizmoaccelerator.Tests",
     "rootNamespace": "YozoLab.Tests",
     "references": [
         "UnityEngine.TestRunner",
-        "UnityEditor.TestRunner"
+        "UnityEditor.TestRunner",
+        "net.yozolab.vrcgizmoaccelerator.Editor"
     ],
     "includePlatforms": [
         "Editor"
@@ -16,7 +17,8 @@
     ],
     "autoReferenced": false,
     "defineConstraints": [
-        "UNITY_INCLUDE_TESTS"
+        "UNITY_INCLUDE_TESTS",
+        "!YOZOLAB_DISABLE_VRCGIZMOACCELERATOR"
     ],
     "versionDefines": [],
     "noEngineReferences": false

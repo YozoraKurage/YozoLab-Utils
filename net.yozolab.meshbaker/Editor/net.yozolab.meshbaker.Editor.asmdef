@@ -13,7 +13,7 @@
     "precompiledReferences": [],
     "autoReferenced": false,
     "defineConstraints": [
-        "YOZOLAB_ENABLE_MESHBAKER"
+        "!YOZOLAB_DISABLE_MESHBAKER"
     ],
     "versionDefines": [],
     "noEngineReferences": false
