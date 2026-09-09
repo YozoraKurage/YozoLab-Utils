@@ -1,0 +1,11 @@
+{
+  "name": "net.yozolab.vrcgizmoaccelerator",
+  "version": "0.6.0",
+  "displayName": "YozoLab VRC Gizmo Accelerator",
+  "description": "PhysBone ギズモを独自の一括描画パスに置き換えて軽くする。Harmony を使う。",
+  "unity": "2022.3",
+  "author": {
+    "name": "Yozolab"
+  },
+  "keywords": []
+}
