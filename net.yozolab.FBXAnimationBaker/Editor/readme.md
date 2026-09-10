@@ -110,10 +110,8 @@ X 以外で最も伸びている軸を上とみなします。判定結果は実
 
 出力ファイル名は `Output File Name`、未設定なら BVH のファイル名になります。
 サンプリングは `Frame Rate` が 0 なら BVH の Frame Time に従います。
-ルートモーションは、既存のクリップ経路と同じ分け方で切り分けます。**水平移動と
-向き（ヨー）はルートノード**へ、上下の揺れは Hips に残します。`Bake Root Motion` を
-OFF にすると水平移動を捨て、その場での動きになります（高さは残します。しゃがみなどが
-潰れるため）。
+`Bake Root Motion` を OFF にすると水平移動を捨て、その場での動きになります
+（高さは残します。しゃがみなどが潰れるため）。
 
 Humanoid に必要なボーン（Hips / Spine / Head / 手足）が BVH から見つからない場合は、
 どれが足りないかを挙げてそのエントリを失敗させます。
@@ -132,7 +130,7 @@ Humanoid に必要なボーン（Hips / Spine / Head / 手足）が BVH から�
 | Save Baked .anim | ベイク済み Transform クリップを .anim としても保存する |
 | Export ASCII | バイナリではなく ASCII FBX で書き出す |
 | Frame Rate | サンプリングのフレームレート。0 で元クリップ（BVH なら Frame Time）のフレームレートを使用 |
-| Bake Root Motion | ルートモーションをルート Transform に焼き込む |
+| Bake Root Motion | ルートモーションを含める。焼き込み先は常に Hips（下記参照）。OFF でその場での動きになる |
 | Bake Scale | スケールカーブもベイクする（既定 OFF） |
 | Bake BlendShapes | クリップが動かすブレンドシェイプもベイクする |
 | Exclude BlendShapes | メッシュからブレンドシェイプデータを取り除いて書き出す。`Bake BlendShapes` が ON のときは無視される |
@@ -154,6 +152,24 @@ Source FBX / クリップの依存ハッシュとエントリ設定の署名を�
 - Humanoid クリップや BVH を指定する場合、Source FBX（または Avatar Definition）が
   Humanoid Avatar を持っている必要があります。持っていない場合は警告が出ます。
 - 出力される Transform カーブは毎フレームのベイク結果で、補間は線形です。
+
+## ルートモーションは Hips に焼きます
+
+生成 FBX の**オブジェクト（モデルのルート／アーマチュア）には一切キーを打ちません**。
+移動も向きも Hips 以下のボーンが持ちます。
+
+Unity の `Animator.applyRootMotion` はルートオブジェクトそのものを動かすため、
+サンプリング結果をそのまま書き出すと「オブジェクトの Transform にキーが打たれた FBX」に
+なります。この形は DCC 側で扱いが悪く、オブジェクトのアニメーションとポーズボーンの
+アニメーションが二重にかかって位置がずれます。
+
+そこでサンプリングの各フレームで、ルートに乗った動きを Hips へ畳み込んでいます。
+Hips のワールド姿勢を取り置いてルートを元の姿勢へ戻し、そのあと Hips を戻す、という
+手順です。見た目は 1 ミリも変わらず、カーブの持ち主だけがルートから Hips へ移ります。
+ルート側のカーブは定数になるので `Remove Constant Curves` で消えます。
+
+Humanoid の Hips を持たないモデル（Generic）では畳み込む先が無いため、この処理は
+行いません。
 
 ## 生成 FBX の基準ポーズ
 

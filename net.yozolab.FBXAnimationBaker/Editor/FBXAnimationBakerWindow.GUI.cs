@@ -841,7 +841,8 @@ namespace YozoLab.FBXAnimationBaker
                 L10n.T("サンプリングのフレームレート(0で元クリップのフレームレート)",
                        "Sampling frame rate (0 = source clip frame rate)")));
             EditorGUILayout.PropertyField(entryProp.FindPropertyRelative("bakeRootMotion"), new GUIContent("Bake Root Motion",
-                L10n.T("ルートモーションをルートTransformにベイクする", "Bake root motion into the root Transform")));
+                L10n.T("ルートモーションを含める。焼き込み先は常に Hips で、モデルのオブジェクト自体にはキーを打ちません。OFFでその場での動きになります",
+                       "Include root motion. It is baked into the Hips bone, never onto the model object itself. Turn it off for an in-place motion")));
             EditorGUILayout.PropertyField(entryProp.FindPropertyRelative("bakeScale"), new GUIContent("Bake Scale",
                 L10n.T("スケールカーブもベイクする", "Bake Transform scale curves as well")));
             SerializedProperty bakeBlendShapesProp = entryProp.FindPropertyRelative("bakeBlendShapes");

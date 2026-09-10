@@ -153,7 +153,7 @@ namespace YozoLab.FBXAnimationBaker
         [Tooltip("Sampling frame rate. 0 = use the source clip frame rate")]
         public float frameRate = 0f;
 
-        [Tooltip("Apply root motion while sampling, so the humanoid root motion is baked into the root Transform")]
+        [Tooltip("Include root motion. It is baked into the Hips bone, never onto the model object itself. Turn it off for an in-place motion")]
         public bool bakeRootMotion = true;
 
         [Tooltip("Bake Transform Scale (m_LocalScale) curves as well")]

@@ -28,7 +28,7 @@ namespace YozoLab.FBXAnimationBaker
         /// ベイク結果が変わる修正を入れたら上げる版数。差分キャッシュの署名に含めており、
         /// パッケージ更新後は設定を触っていなくても Execute で作り直される。
         /// </summary>
-        private const string BakerVersion = "8";
+        private const string BakerVersion = "9";
 
         /// <summary>1 チャンネルが「変化なし」とみなされる振れ幅のしきい値。</summary>
         private const float ConstantEpsilon = 1e-5f;
@@ -956,6 +956,10 @@ namespace YozoLab.FBXAnimationBaker
         private class BakeSampleBuffer
         {
             private readonly Transform root;
+            private Transform hips;
+            private Vector3 rootSourcePosition;
+            private Quaternion rootSourceRotation;
+
             private readonly List<TransformTrack> transformTracks = new List<TransformTrack>();
             private readonly List<BlendShapeTrack> blendShapeTracks = new List<BlendShapeTrack>();
             private readonly List<float> times = new List<float>();
@@ -966,6 +970,37 @@ namespace YozoLab.FBXAnimationBaker
             /// クリップの 0 フレーム目が、元 FBX の姿勢からどれだけ離れているかを返す。
             /// 書き出す姿勢は常に元 FBX の姿勢なので、この差はカーブ側が担う。
             /// </summary>
+            /// <summary>
+            /// ルートオブジェクトに乗った動きを Hips へ移す。見た目は変えない。
+            ///
+            /// Animator の applyRootMotion はルート(=モデルのオブジェクト)そのものを動かす。
+            /// そのまま書き出すと「アーマチュアのオブジェクト Transform にキーが打たれた FBX」
+            /// になり、DCC 側ではオブジェクトのアニメーションとポーズボーンのアニメーションが
+            /// 二重にかかって位置がずれる。DCC でもゲームエンジンでも、モーションは
+            /// ポーズボーン側(Hips 以下)に載っているのが前提の作りが多い。
+            ///
+            /// Hips のワールド姿勢を取り置き、ルートを元の姿勢へ戻してから Hips を
+            /// 戻す。ルート側のカーブは定数になって除去され、動きは Hips が持つ。
+            ///
+            /// Humanoid の Hips が無いモデル(Generic)では畳み込む先が無いので何もしない。
+            /// </summary>
+            private void FoldRootMotionIntoHips()
+            {
+                if (hips == null) return;
+
+                bool moved = root.localPosition != rootSourcePosition
+                             || Quaternion.Angle(root.localRotation, rootSourceRotation) > 0.0001f;
+                if (!moved) return;
+
+                Vector3 hipsPosition = hips.position;
+                Quaternion hipsRotation = hips.rotation;
+
+                root.localPosition = rootSourcePosition;
+                root.localRotation = rootSourceRotation;
+
+                hips.SetPositionAndRotation(hipsPosition, hipsRotation);
+            }
+
             public void GetExportedPoseDeviation(out float maxAngle, out string worstPath)
             {
                 maxAngle = 0f;
@@ -990,6 +1025,14 @@ namespace YozoLab.FBXAnimationBaker
             public BakeSampleBuffer(GameObject instance, bool captureBlendShapes)
             {
                 root = instance.transform;
+                rootSourcePosition = root.localPosition;
+                rootSourceRotation = root.localRotation;
+
+                // ルートに乗る動きの畳み込み先。Humanoid が無ければ null のまま。
+                Animator animator = instance.GetComponent<Animator>();
+                hips = animator != null && animator.avatar != null && animator.avatar.isHuman
+                    ? animator.GetBoneTransform(HumanBodyBones.Hips)
+                    : null;
 
                 foreach (Transform t in instance.GetComponentsInChildren<Transform>(true))
                 {
@@ -1035,6 +1078,8 @@ namespace YozoLab.FBXAnimationBaker
             /// <summary>現在のシーン上の状態を 1 フレーム分記録する。</summary>
             public void Capture(float time)
             {
+                FoldRootMotionIntoHips();
+
                 times.Add(time);
 
                 foreach (TransformTrack track in transformTracks)

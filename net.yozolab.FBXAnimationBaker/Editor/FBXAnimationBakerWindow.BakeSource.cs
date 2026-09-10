@@ -165,14 +165,8 @@ namespace YozoLab.FBXAnimationBaker
             private HumanPose pose;
             private bool applyRootMotion = true;
 
-            // ルートモーションの切り分けに使う基準。フレーム 0 を原点として、
-            // そこからの平面移動とヨーだけをルートへ渡す。
-            private Transform targetRoot;
-            private float targetHumanScale = 1f;
-            private Vector3 rootBasePosition;
-            private Quaternion rootBaseRotation;
+            // 「その場での動き」に落とすときの基準。フレーム 0 の水平位置を保つ。
             private Vector3 baseBodyPosition;
-            private Quaternion baseBodyYaw;
 
             public BvhPoseSource(BvhFile file, string sourceName, float scale, BvhUpAxis upAxis,
                                  List<BvhBoneOverride> boneOverrides)
@@ -231,16 +225,10 @@ namespace YozoLab.FBXAnimationBaker
                 sourceHandler = new HumanPoseHandler(sourceAvatar, skeleton.Root.transform);
                 targetHandler = new HumanPoseHandler(targetAvatar, instance.transform);
 
-                targetRoot = instance.transform;
-                targetHumanScale = animator.humanScale;
-                rootBasePosition = targetRoot.position;
-                rootBaseRotation = targetRoot.rotation;
-
-                // 基準はフレーム 0 の姿勢。書き出したクリップはそこから動き始める。
+                // 基準はフレーム 0 の姿勢。Bake Root Motion を切ったときの立ち位置になる。
                 skeleton.ApplyFrame(0);
                 sourceHandler.GetHumanPose(ref pose);
                 baseBodyPosition = pose.bodyPosition;
-                baseBodyYaw = ExtractYaw(pose.bodyRotation);
             }
 
             public override void SamplePose(GameObject instance, float time)
@@ -252,59 +240,15 @@ namespace YozoLab.FBXAnimationBaker
                 skeleton.ApplyFrame(frame);
                 sourceHandler.GetHumanPose(ref pose);
 
-                // ── ルートモーションの切り分け ────────────────────────────
-                // SetHumanPose はアバターのルート基準で体を置くだけで、ルート自身は
-                // 動かさない。そのまま焼くと移動も旋回も Hips のカーブに乗ってしまい、
-                // 書き出した FBX のルートノードが一切動かない。既存のクリップ経路
-                // (Animator の applyRootMotion) と食い違うので、同じ分け方へ揃える。
-                //
-                // 抜き取りはポーズを当てる「前」に行う。当ててからルートを動かして
-                // 帳尻を合わせる手もあるが、それだと Hips のローカルが移動ぶんを
-                // 打ち消す方向へ伸びるだけで、カーブの持ち主は Hips のまま変わらない。
-                Vector3 planar = new Vector3(
-                    pose.bodyPosition.x - baseBodyPosition.x, 0f,
-                    pose.bodyPosition.z - baseBodyPosition.z);
-
-                Quaternion yaw = ExtractYaw(pose.bodyRotation) * Quaternion.Inverse(baseBodyYaw);
-
-                // 平面移動は必ずポーズから抜く。Bake Root Motion が OFF ならルートへも
-                // 渡さない = その場での動きになる。高さは残す(しゃがみが潰れるため)。
-                pose.bodyPosition = new Vector3(baseBodyPosition.x, pose.bodyPosition.y, baseBodyPosition.z);
-
-                if (applyRootMotion)
-                {
-                    pose.bodyRotation = Quaternion.Inverse(yaw) * pose.bodyRotation;
-                }
-
-                targetRoot.SetPositionAndRotation(rootBasePosition, rootBaseRotation);
-                targetHandler.SetHumanPose(ref pose);
-
+                // 平面移動を落とすと、その場での動きになる。高さは残す(しゃがみが潰れるため)。
+                // ルートオブジェクトは動かさない。SetHumanPose はアバターのルート基準で
+                // 体を置くので、移動も向きも Hips 以下に載る。それが書き出したい形。
                 if (!applyRootMotion)
                 {
-                    return;
+                    pose.bodyPosition = new Vector3(baseBodyPosition.x, pose.bodyPosition.y, baseBodyPosition.z);
                 }
 
-                // bodyPosition は humanScale で正規化された長さ。実寸へ戻して渡す。
-                targetRoot.SetPositionAndRotation(
-                    rootBasePosition + rootBaseRotation * (planar * targetHumanScale),
-                    rootBaseRotation * yaw);
-            }
-
-            /// <summary>
-            /// Y 軸まわりの成分だけを取り出す。向きは前方ベクトルを水平へ潰して決める。
-            /// Hips のローカル回転から取ると、リグごとのボーン軸の取り方に左右される。
-            /// </summary>
-            private static Quaternion ExtractYaw(Quaternion rotation)
-            {
-                Vector3 forward = rotation * Vector3.forward;
-                forward.y = 0f;
-
-                if (forward.sqrMagnitude < 1e-6f)
-                {
-                    return Quaternion.identity;
-                }
-
-                return Quaternion.LookRotation(forward.normalized, Vector3.up);
+                targetHandler.SetHumanPose(ref pose);
             }
 
             public override void Dispose()
