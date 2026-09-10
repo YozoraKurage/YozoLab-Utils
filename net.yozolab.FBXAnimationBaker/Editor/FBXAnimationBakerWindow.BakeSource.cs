@@ -45,8 +45,8 @@ namespace YozoLab.FBXAnimationBaker
             public static BakeJob FromClip(AnimationBakeEntry entry, AnimationClip clip, bool multiOutput)
                 => new BakeJob(entry, clip, null, multiOutput);
 
-            public static BakeJob FromBvh(AnimationBakeEntry entry, string bvhAssetPath)
-                => new BakeJob(entry, null, bvhAssetPath, false);
+            public static BakeJob FromBvh(AnimationBakeEntry entry, string bvhAssetPath, bool multiOutput)
+                => new BakeJob(entry, null, bvhAssetPath, multiOutput);
 
             public bool IsBvh => Clip == null;
 

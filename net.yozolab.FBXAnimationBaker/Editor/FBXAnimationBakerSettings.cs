@@ -26,6 +26,10 @@ namespace YozoLab.FBXAnimationBaker
         [HideInInspector]
         public bool perFolderDirectoriesMigrated;
 
+        /// <summary>エントリごとの clips / bvhFile から motions への統合を済ませたか。</summary>
+        [HideInInspector]
+        public bool motionsMigrated;
+
         [Tooltip("List of bake entries (FBX + humanoid animation clips)")]
         public List<AnimationBakeEntry> bakeEntries = new List<AnimationBakeEntry>();
 
@@ -104,16 +108,26 @@ namespace YozoLab.FBXAnimationBaker
         [Tooltip("Source FBX (model) the animation is baked onto")]
         public GameObject sourceFbx;
 
-        [Tooltip("Humanoid animation clips to bake. One FBX is generated per clip")]
+        /// <summary>
+        /// 焼くモーション。1 つにつき FBX を 1 つ出力する。
+        ///
+        /// AnimationClip（FBX 内蔵でも .anim でも）と .bvh を同じ一覧に混ぜて置ける。
+        /// 以前はクリップ用と BVH 用で欄が分かれていたが、「このエントリは何を
+        /// 変換するのか」がひと目で分からず、どちらが使われるのかも読めなかった。
+        /// </summary>
+        [Tooltip("Motions to bake. Animation clips and .bvh files can be mixed. One FBX is generated per motion")]
+        public List<UnityEngine.Object> motions = new List<UnityEngine.Object>();
+
+        // ── 旧: クリップ用と BVH 用に分かれていた欄 ─────────────────────
+        // motions へ統合した。既存の設定を読み込んで移行するためだけに残してある。
+        // 移行後は空になり、以後は参照されない。
+
+        [HideInInspector]
         public List<AnimationClip> clips = new List<AnimationClip>();
 
-        // ── BVH をモーション元にする場合 ────────────────────────────────
-        // 設定すると、このエントリは BVH のモーションを Source FBX へリターゲットして
-        // 焼く。Humanoid Clips は使われない(片方だけを見る。1 つのエントリが 2 通りの
-        // 意味を持つと、どちらが出たのか読めなくなるため)。
-
-        [Tooltip("BVH motion file. When set, this entry retargets the BVH onto the Source FBX and the humanoid clips above are ignored")]
+        [HideInInspector]
         public DefaultAsset bvhFile;
+
 
         [Tooltip("Which axis the BVH treats as up. Auto reads it from the skeleton's offsets. The spec says Y, but Z is common in practice")]
         public BvhUpAxis bvhUpAxis = BvhUpAxis.Auto;

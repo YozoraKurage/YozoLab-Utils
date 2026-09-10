@@ -94,38 +94,34 @@ namespace YozoLab.FBXAnimationBaker
                     continue;
                 }
 
-                // BVH が指定されているエントリは BVH だけを見る。1 つのエントリが
-                // 「クリップも焼くし BVH も焼く」だと、出力名の衝突も起きるし
-                // ログを見ても何が出たのか読み取れない。
-                if (entry.bvhFile != null)
+                // モーションは 1 つの一覧。AnimationClip と .bvh が混ざる。
+                // 1 つにつき FBX を 1 つ出す。
+                List<UnityEngine.Object> motions = entry.motions?.Where(m => m != null).ToList()
+                                                   ?? new List<UnityEngine.Object>();
+                if (motions.Count == 0)
                 {
-                    string bvhPath = AssetDatabase.GetAssetPath(entry.bvhFile);
-                    if (string.IsNullOrEmpty(bvhPath)
-                        || !bvhPath.EndsWith(".bvh", StringComparison.OrdinalIgnoreCase))
+                    Debug.LogWarning($"{LogPrefix} No motion is set, skipped: {GetEntryDisplayName(entry)}");
+                    continue;
+                }
+
+                bool multi = motions.Count > 1;
+                foreach (UnityEngine.Object motion in motions)
+                {
+                    if (motion is AnimationClip clip)
                     {
-                        Debug.LogWarning($"{LogPrefix} BVH File is not a .bvh asset, skipped: {GetEntryDisplayName(entry)}");
+                        jobs.Add(BakeJob.FromClip(entry, clip, multi));
                         continue;
                     }
 
-                    if (entry.clips != null && entry.clips.Any(c => c != null))
+                    string path = AssetDatabase.GetAssetPath(motion);
+                    if (!string.IsNullOrEmpty(path) && path.EndsWith(".bvh", StringComparison.OrdinalIgnoreCase))
                     {
-                        Debug.LogWarning($"{LogPrefix} BVH File is set, so the humanoid clips on this entry are ignored: {GetEntryDisplayName(entry)}");
+                        jobs.Add(BakeJob.FromBvh(entry, path, multi));
+                        continue;
                     }
 
-                    jobs.Add(BakeJob.FromBvh(entry, bvhPath));
-                    continue;
-                }
-
-                List<AnimationClip> clips = entry.clips?.Where(c => c != null).ToList() ?? new List<AnimationClip>();
-                if (clips.Count == 0)
-                {
-                    Debug.LogWarning($"{LogPrefix} No animation clip or BVH file is set, skipped: {GetEntryDisplayName(entry)}");
-                    continue;
-                }
-
-                foreach (AnimationClip clip in clips)
-                {
-                    jobs.Add(BakeJob.FromClip(entry, clip, clips.Count > 1));
+                    Debug.LogWarning($"{LogPrefix} \"{motion.name}\" is neither an AnimationClip nor a .bvh file, "
+                                     + $"skipped: {GetEntryDisplayName(entry)}");
                 }
             }
 

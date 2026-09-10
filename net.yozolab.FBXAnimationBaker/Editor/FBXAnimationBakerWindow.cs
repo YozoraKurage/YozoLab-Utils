@@ -27,8 +27,21 @@ namespace YozoLab.FBXAnimationBaker
         private int selectedEntryIndex = -1;
         private string entrySearchText = string.Empty;
 
-        /// <summary>一括操作(フォルダ移動 / テンプレート貼り付け)の対象。空なら選択中エントリ 1 つ。</summary>
-        private readonly HashSet<int> checkedEntryIndices = new HashSet<int>();
+        /// <summary>
+        /// リストの選択。<see cref="selectedEntryIndex"/> はそのうち「今おもてに出ている」1 つ。
+        /// フォルダ移動もテンプレート貼り付けも、この選択がそのまま対象になる。
+        /// </summary>
+        private readonly HashSet<int> selectedEntryIndices = new HashSet<int>();
+
+        /// <summary>エントリ 1 行の高さ。</summary>
+        private const float EntryRowHeight = 20f;
+
+        /// <summary>ドラッグ中のエントリ番号を運ぶ鍵。</summary>
+        private const string EntryDragKey = "YozoLab.FBXAnimationBaker.Entries";
+
+        // ドラッグの開始判定。押した位置から少し動くまでは掴んだことにしない。
+        private Vector2 entryDragStart;
+        private int entryDragCandidate = -1;
 
         /// <summary>エントリ設定のコピー / ペースト用テンプレート(ドメイン内で 1 個)。</summary>
         protected static EntryDetailTemplate entryTemplate;
@@ -59,6 +72,7 @@ namespace YozoLab.FBXAnimationBaker
             settings = FBXAnimationBakerSettings.instance;
 
             MigrateGlobalOutputIfNeeded();
+            MigrateMotionsIfNeeded();
 
             serializedSettings = new SerializedObject(settings);
             bakeEntriesProp = serializedSettings.FindProperty("bakeEntries");
@@ -127,6 +141,54 @@ namespace YozoLab.FBXAnimationBaker
             settings.SaveSettings();
 
             Debug.Log($"{LogPrefix} Migrated the shared Output Directory to per-folder Output Directory.");
+        }
+
+        /// <summary>
+        /// 分かれていた Humanoid Clips / BVH File を motions へまとめる。
+        ///
+        /// 並び順は「クリップ群 → BVH」。以前は BVH が指定されていればクリップを
+        /// 無視していたが、移行では捨てずに両方入れる。捨てると設定していたはずの
+        /// ものが黙って消えるので、要らなければ外してもらう方がまだ気付ける。
+        /// </summary>
+        private void MigrateMotionsIfNeeded()
+        {
+            if (settings == null || settings.motionsMigrated)
+            {
+                return;
+            }
+
+            settings.bakeEntries ??= new List<AnimationBakeEntry>();
+
+            int moved = 0;
+            foreach (AnimationBakeEntry entry in settings.bakeEntries)
+            {
+                if (entry == null) continue;
+
+                entry.motions ??= new List<UnityEngine.Object>();
+
+                if (entry.clips != null)
+                {
+                    foreach (AnimationClip clip in entry.clips)
+                    {
+                        if (clip != null && !entry.motions.Contains(clip)) { entry.motions.Add(clip); moved++; }
+                    }
+                    entry.clips.Clear();
+                }
+
+                if (entry.bvhFile != null)
+                {
+                    if (!entry.motions.Contains(entry.bvhFile)) { entry.motions.Add(entry.bvhFile); moved++; }
+                    entry.bvhFile = null;
+                }
+            }
+
+            settings.motionsMigrated = true;
+            settings.SaveSettings();
+
+            if (moved > 0)
+            {
+                Debug.Log($"{LogPrefix} Merged {moved} clip/BVH reference(s) into the unified Motions list.");
+            }
         }
 
         private string MakeUniqueFolderName(string desired)
