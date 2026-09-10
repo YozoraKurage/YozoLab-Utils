@@ -167,12 +167,15 @@ namespace YozoLab.UtilSettings
                 if (SyncOne(package, package.AsmdefGuid, enable, out string path))
                     touched.Add(path);
 
-                // テストアセンブリは対象アセンブリと同じ条件で開け閉めする。
-                // 対象を参照している以上、対象が落ちているのに自分だけ
-                // コンパイルされると参照が解決できない。
-                if (!string.IsNullOrEmpty(package.TestsAsmdefGuid)
-                    && SyncOne(package, package.TestsAsmdefGuid, enable, out string testsPath))
-                    touched.Add(testsPath);
+                // 付随するアセンブリ(テスト、必須パッケージ未導入時の案内)も
+                // 本体と同じ条件で開け閉めする。本体を切ったのに案内だけ残る、
+                // 本体を戻したのにテストが死んだまま、といった食い違いを防ぐ。
+                foreach (string companion in package.CompanionAsmdefGuids)
+                {
+                    if (!string.IsNullOrEmpty(companion)
+                        && SyncOne(package, companion, enable, out string companionPath))
+                        touched.Add(companionPath);
+                }
             }
 
             if (touched.Count == 0) return;
