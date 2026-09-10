@@ -9,6 +9,10 @@ Humanoid クリップはマッスル空間で記録されているため、そ�
 各ボーンのローカル TRS（必要ならブレンドシェイプ）を毎フレーム記録して、
 Generic な Transform カーブへ変換したうえで FBX に焼き込みます。
 
+モーション元にはクリップのほかに **BVH** も指定できます。Humanoid を経由して
+リターゲットするので、BVH の骨格がモデルと違っていても構いません
+（「BVH からベイクする」を参照）。
+
 ## 必要なパッケージ
 
 - **Unity FBX Exporter (`com.unity.formats.fbx`)**
@@ -26,6 +30,7 @@ Generic な Transform カーブへ変換したうえで FBX に焼き込みま�
 
 クリップ 1 つにつき FBX を 1 つ出力します。`Output File Name` が空ならクリップ名、
 1 エントリに複数クリップがある場合は `<Output File Name>_<クリップ名>.fbx` になります。
+BVH を指定した場合は 1 エントリにつき 1 つで、名前は BVH のファイル名になります。
 
 ## エントリリスト
 
@@ -51,12 +56,45 @@ FBX Animation Extractor の Rule List と同じ操作系です。
 
 出力先の優先順は `エントリの Output Override` → `フォルダの Output Directory` です。
 
+## BVH からベイクする
+
+エントリの `BVH File` に .bvh を指定すると、そのモーションを `Source FBX` へ
+リターゲットして焼き込みます。`Humanoid Clips` は使われません（片方だけを見ます）。
+
+BVH のジョイント名や骨の長さは配布元ごとにばらばらで、名前でモデルのボーンへ
+対応付けても合いません。このツールは **BVH の骨格にも Humanoid Avatar を組み**、
+Unity の Humanoid 正規化を経由してポーズを流します。スケール差・軸の取り方・
+回転オーダー・ボーン名の違いは、その正規化が吸収します。
+
+そのため **`Source FBX` の Rig も Humanoid である必要があります**
+（Generic のままだと警告が出て結果が空になります）。
+
+ジョイント名から Humanoid ボーンへの対応は自動で推測します。Mixamo 系
+（`LeftUpLeg`）、CMU 系（`lfemur`）、`mixamorig:` 接頭辞付きなどはそのまま通ります。
+外したものだけ `Bone Overrides` で手当てしてください。`Check Mapping` を押すと、
+どのジョイントがどのボーンに当たったかが Console に出ます。
+
+| 項目 | 説明 |
+| --- | --- |
+| BVH File | モーション元の .bvh。指定するとこのエントリは BVH 側を使う |
+| BVH Scale | 単位換算。BVH の OFFSET は cm が多いので既定は 0.01 |
+| Bone Overrides | 自動推測の手当て。`BVH のジョイント名 → Humanoid ボーン名`。ボーン名を空にするとそのジョイントは割り当てない |
+
+出力ファイル名は `Output File Name`、未設定なら BVH のファイル名になります。
+サンプリングは `Frame Rate` が 0 なら BVH の Frame Time に従います。
+`Bake Root Motion` を OFF にすると水平移動を捨て、その場での動きになります
+（高さは残します。しゃがみなどが潰れるため）。
+
+Humanoid に必要なボーン（Hips / Spine / Head / 手足）が BVH から見つからない場合は、
+どれが足りないかを挙げてそのエントリを失敗させます。
+
 ## エントリの設定
 
 | 項目 | 説明 |
 | --- | --- |
 | Source FBX | アニメーションをベイクする対象のモデル（.fbx） |
-| Humanoid Clips | ベイクするクリップ。FBX 内蔵クリップも .anim も指定可 |
+| Humanoid Clips | ベイクするクリップ。FBX 内蔵クリップも .anim も指定可。`BVH File` 指定時は無視 |
+| BVH File | モーション元の .bvh（上の「BVH からベイクする」を参照） |
 | Output Override | このエントリだけ別フォルダへ出力する場合に指定（未設定ならフォルダの Output Directory） |
 | Output File Name | 出力ファイル名（拡張子なし）。空ならクリップ名 |
 | Export Content | 生成 FBX に含めるもの。`Skeleton Only` はメッシュ/レンダラーを外し、アニメーションするノード階層だけにする（**FBX が劇的に小さくなる**） |
@@ -64,7 +102,7 @@ FBX Animation Extractor の Rule List と同じ操作系です。
 | Fast Import | 生成 FBX のインポート時に不要な処理（マテリアル/カメラ/ライト/タンジェント計算等）を省く（既定 ON）。結果が変わる項目には触れない |
 | Save Baked .anim | ベイク済み Transform クリップを .anim としても保存する |
 | Export ASCII | バイナリではなく ASCII FBX で書き出す |
-| Frame Rate | サンプリングのフレームレート。0 で元クリップのフレームレートを使用 |
+| Frame Rate | サンプリングのフレームレート。0 で元クリップ（BVH なら Frame Time）のフレームレートを使用 |
 | Bake Root Motion | ルートモーションをルート Transform に焼き込む |
 | Bake Scale | スケールカーブもベイクする（既定 OFF） |
 | Bake BlendShapes | クリップが動かすブレンドシェイプもベイクする |
@@ -84,7 +122,7 @@ Source FBX / クリップの依存ハッシュとエントリ設定の署名を�
 
 - ベイク中はシーンに一時的にモデルがインスタンス化され、`AnimationMode` でサンプリングされます。
   処理後にインスタンスは破棄されますが、シーンは編集済み扱いになることがあります。
-- Humanoid クリップを指定する場合、Source FBX（または Avatar Definition）が
+- Humanoid クリップや BVH を指定する場合、Source FBX（または Avatar Definition）が
   Humanoid Avatar を持っている必要があります。持っていない場合は警告が出ます。
 - 出力される Transform カーブは毎フレームのベイク結果で、補間は線形です。
 

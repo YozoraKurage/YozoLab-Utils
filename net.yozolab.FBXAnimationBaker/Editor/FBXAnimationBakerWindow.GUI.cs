@@ -545,9 +545,17 @@ namespace YozoLab.FBXAnimationBaker
                 }
             }
 
-            EditorGUILayout.PropertyField(entryProp.FindPropertyRelative("clips"), new GUIContent("Humanoid Clips",
-                L10n.T("ベイクするHumanoidアニメーションクリップ(1クリップにつきFBXを1つ出力)",
-                       "Humanoid animation clips to bake (one FBX per clip)")), true);
+            SerializedProperty bvhProp = entryProp.FindPropertyRelative("bvhFile");
+            bool usingBvh = bvhProp.objectReferenceValue != null;
+
+            using (new EditorGUI.DisabledScope(usingBvh))
+            {
+                EditorGUILayout.PropertyField(entryProp.FindPropertyRelative("clips"), new GUIContent("Humanoid Clips",
+                    L10n.T("ベイクするHumanoidアニメーションクリップ(1クリップにつきFBXを1つ出力)",
+                           "Humanoid animation clips to bake (one FBX per clip)")), true);
+            }
+
+            DrawBvhSection(entryProp, bvhProp, usingBvh);
 
             EditorGUILayout.Space();
             EditorGUILayout.LabelField(L10n.T("出力", "Output"), EditorStyles.boldLabel);
@@ -631,6 +639,144 @@ namespace YozoLab.FBXAnimationBaker
             EditorGUILayout.EndVertical();
         }
 
+        /// <summary>
+        /// BVH をモーション元にするときの設定。
+        ///
+        /// リターゲットは Humanoid を挟んで Unity にやらせるので、ここで要るのは
+        /// 「BVH をどう読むか」だけ。ジョイント名の対応付けは自動で当てにいき、
+        /// 外したぶんだけ手で直せるようにしてある。
+        /// </summary>
+        private void DrawBvhSection(SerializedProperty entryProp, SerializedProperty bvhProp, bool usingBvh)
+        {
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField(L10n.T("BVH モーション", "BVH Motion"), EditorStyles.boldLabel);
+
+            EditorGUILayout.PropertyField(bvhProp, new GUIContent("BVH File",
+                L10n.T("指定するとBVHのモーションをSource FBXへリターゲットして焼きます(上のHumanoid Clipsは使われません)",
+                       "When set, the BVH motion is retargeted onto the Source FBX and the humanoid clips above are ignored")));
+
+            if (!usingBvh)
+            {
+                return;
+            }
+
+            string bvhPath = AssetDatabase.GetAssetPath(bvhProp.objectReferenceValue);
+            if (!bvhPath.EndsWith(".bvh", System.StringComparison.OrdinalIgnoreCase))
+            {
+                EditorGUILayout.HelpBox(L10n.T(
+                    "BVH File には .bvh を指定してください。",
+                    "BVH File must be a .bvh asset."), MessageType.Warning);
+                return;
+            }
+
+            EditorGUILayout.PropertyField(entryProp.FindPropertyRelative("bvhScale"), new GUIContent("BVH Scale",
+                L10n.T("BVHの単位換算。OFFSETがcmで書かれていることが多いので既定は0.01",
+                       "Unit conversion. BVH offsets are usually centimetres, so 0.01 turns them into metres")));
+
+            EditorGUILayout.HelpBox(L10n.T(
+                "BVHの骨格にもHumanoid Avatarを組み、そのポーズをSource FBXへ流します。"
+                + "スケールやボーン長の違いはHumanoidの正規化が吸収するため、Source FBX側のRigもHumanoidである必要があります。",
+                "A humanoid Avatar is built for the BVH skeleton and its pose is pushed onto the Source FBX. "
+                + "Humanoid normalisation absorbs differences in scale and bone length, so the Source FBX rig must be Humanoid too."),
+                MessageType.Info);
+
+            DrawBvhBoneOverrides(entryProp, bvhPath);
+        }
+
+        /// <summary>
+        /// ジョイント名の自動推測を上書きする表。
+        /// 自動で当たった分も一覧に出さないと、何が外れているのか分からない。
+        /// </summary>
+        private void DrawBvhBoneOverrides(SerializedProperty entryProp, string bvhPath)
+        {
+            SerializedProperty overridesProp = entryProp.FindPropertyRelative("bvhBoneOverrides");
+
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField(L10n.T("ボーン対応の手当て", "Bone Overrides"), EditorStyles.miniBoldLabel);
+            GUILayout.FlexibleSpace();
+
+            if (GUILayout.Button(new GUIContent(L10n.T("推測を確認", "Check Mapping"),
+                    L10n.T("BVHを読んで、どのジョイントがどのHumanoidボーンに当たったかをConsoleへ出します",
+                           "Read the BVH and log which joint mapped to which humanoid bone")),
+                EditorStyles.miniButton, GUILayout.Width(90)))
+            {
+                LogBvhBoneMapping(entryProp, bvhPath);
+            }
+
+            if (GUILayout.Button(new GUIContent("+", L10n.T("手当てを1件追加", "Add one override")),
+                    EditorStyles.miniButton, GUILayout.Width(24)))
+            {
+                overridesProp.InsertArrayElementAtIndex(overridesProp.arraySize);
+            }
+            EditorGUILayout.EndHorizontal();
+
+            for (int i = 0; i < overridesProp.arraySize; i++)
+            {
+                SerializedProperty element = overridesProp.GetArrayElementAtIndex(i);
+
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.PropertyField(element.FindPropertyRelative("jointName"), GUIContent.none);
+                EditorGUILayout.LabelField("→", GUILayout.Width(16));
+                EditorGUILayout.PropertyField(element.FindPropertyRelative("humanBoneName"), GUIContent.none);
+
+                if (GUILayout.Button("✕", EditorStyles.miniButton, GUILayout.Width(24)))
+                {
+                    overridesProp.DeleteArrayElementAtIndex(i);
+                    EditorGUILayout.EndHorizontal();
+                    break;
+                }
+                EditorGUILayout.EndHorizontal();
+            }
+
+            if (overridesProp.arraySize == 0)
+            {
+                EditorGUILayout.LabelField(L10n.T(
+                    "空でよければ自動推測だけで動きます。",
+                    "Leave this empty to rely on the automatic guess."), EditorStyles.miniLabel);
+            }
+        }
+
+        /// <summary>「推測を確認」の中身。読めない BVH はここで分かる。</summary>
+        private void LogBvhBoneMapping(SerializedProperty entryProp, string bvhPath)
+        {
+            try
+            {
+                string absolute = System.IO.Path.GetFullPath(System.IO.Path.Combine(
+                    System.IO.Directory.GetParent(Application.dataPath).FullName, bvhPath));
+
+                Bvh.BvhFile file = Bvh.BvhFile.Load(absolute);
+
+                var overrides = new List<Bvh.BvhBoneOverride>();
+                SerializedProperty overridesProp = entryProp.FindPropertyRelative("bvhBoneOverrides");
+                for (int i = 0; i < overridesProp.arraySize; i++)
+                {
+                    SerializedProperty element = overridesProp.GetArrayElementAtIndex(i);
+                    overrides.Add(new Bvh.BvhBoneOverride
+                    {
+                        jointName = element.FindPropertyRelative("jointName").stringValue,
+                        humanBoneName = element.FindPropertyRelative("humanBoneName").stringValue,
+                    });
+                }
+
+                Dictionary<string, string> map = Bvh.BvhHumanoid.BuildBoneMap(file, overrides);
+
+                var lines = new System.Text.StringBuilder();
+                lines.AppendLine($"{LogPrefix} {System.IO.Path.GetFileName(bvhPath)}: "
+                                 + $"{file.Frames.Count} frame(s) @ {file.FrameRate:F2} fps");
+                lines.AppendLine(Bvh.BvhHumanoid.DescribeBoneMap(file, map));
+                foreach (KeyValuePair<string, string> pair in map)
+                {
+                    lines.AppendLine($"  {pair.Key} → {pair.Value}");
+                }
+
+                Debug.Log(lines.ToString());
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"{LogPrefix} BVH を読めませんでした: {e.Message}");
+            }
+        }
+
         /// <summary>実行前に、どのパスへ書き出されるかを確認できるようにしておく。</summary>
         private void DrawOutputPreview()
         {
@@ -642,13 +788,26 @@ namespace YozoLab.FBXAnimationBaker
             }
 
             AnimationBakeEntry entry = settings.bakeEntries[selectedEntryIndex];
-            if (entry == null || entry.clips == null)
+            if (entry == null)
             {
                 return;
             }
 
-            List<AnimationClip> clips = entry.clips.Where(c => c != null).ToList();
-            if (clips.Count == 0)
+            // BVH が指定されていればそちらが出力元。Humanoid Clips は使われない。
+            var motionNames = new List<string>();
+            bool multiOutput = false;
+
+            if (entry.bvhFile != null)
+            {
+                motionNames.Add(entry.bvhFile.name);
+            }
+            else if (entry.clips != null)
+            {
+                motionNames.AddRange(entry.clips.Where(c => c != null).Select(c => c.name));
+                multiOutput = motionNames.Count > 1;
+            }
+
+            if (motionNames.Count == 0)
             {
                 return;
             }
@@ -662,9 +821,9 @@ namespace YozoLab.FBXAnimationBaker
             EditorGUILayout.Space();
             EditorGUILayout.LabelField(L10n.T("出力プレビュー", "Output Preview"), EditorStyles.boldLabel);
 
-            foreach (AnimationClip clip in clips)
+            foreach (string motionName in motionNames)
             {
-                EditorGUILayout.LabelField($"{folder}/{GetOutputName(entry, clip, clips.Count > 1)}.fbx", EditorStyles.miniLabel);
+                EditorGUILayout.LabelField($"{folder}/{GetOutputName(entry, motionName, multiOutput)}.fbx", EditorStyles.miniLabel);
             }
         }
 

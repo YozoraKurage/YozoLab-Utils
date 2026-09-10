@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Collections.Generic;
+using YozoLab.FBXAnimationBaker.Bvh;
 
 namespace YozoLab.FBXAnimationBaker
 {
@@ -57,8 +58,8 @@ namespace YozoLab.FBXAnimationBaker
                 return;
             }
 
-            // 実際に処理する (エントリ, クリップ) の組を先に展開しておくと進捗表示が素直になる
-            var jobs = new List<(AnimationBakeEntry entry, AnimationClip clip, bool multiClip)>();
+            // 実際に処理する (エントリ, モーション元) の組を先に展開しておくと進捗表示が素直になる
+            var jobs = new List<BakeJob>();
             int disabledCount = 0;
             int folderDisabledCount = 0;
             int folderlessCount = 0;
@@ -93,16 +94,38 @@ namespace YozoLab.FBXAnimationBaker
                     continue;
                 }
 
+                // BVH が指定されているエントリは BVH だけを見る。1 つのエントリが
+                // 「クリップも焼くし BVH も焼く」だと、出力名の衝突も起きるし
+                // ログを見ても何が出たのか読み取れない。
+                if (entry.bvhFile != null)
+                {
+                    string bvhPath = AssetDatabase.GetAssetPath(entry.bvhFile);
+                    if (string.IsNullOrEmpty(bvhPath)
+                        || !bvhPath.EndsWith(".bvh", StringComparison.OrdinalIgnoreCase))
+                    {
+                        Debug.LogWarning($"{LogPrefix} BVH File is not a .bvh asset, skipped: {GetEntryDisplayName(entry)}");
+                        continue;
+                    }
+
+                    if (entry.clips != null && entry.clips.Any(c => c != null))
+                    {
+                        Debug.LogWarning($"{LogPrefix} BVH File is set, so the humanoid clips on this entry are ignored: {GetEntryDisplayName(entry)}");
+                    }
+
+                    jobs.Add(BakeJob.FromBvh(entry, bvhPath));
+                    continue;
+                }
+
                 List<AnimationClip> clips = entry.clips?.Where(c => c != null).ToList() ?? new List<AnimationClip>();
                 if (clips.Count == 0)
                 {
-                    Debug.LogWarning($"{LogPrefix} No animation clip is set, skipped: {GetEntryDisplayName(entry)}");
+                    Debug.LogWarning($"{LogPrefix} No animation clip or BVH file is set, skipped: {GetEntryDisplayName(entry)}");
                     continue;
                 }
 
                 foreach (AnimationClip clip in clips)
                 {
-                    jobs.Add((entry, clip, clips.Count > 1));
+                    jobs.Add(BakeJob.FromClip(entry, clip, clips.Count > 1));
                 }
             }
 
@@ -113,7 +136,7 @@ namespace YozoLab.FBXAnimationBaker
                 return;
             }
 
-            Debug.Log($"{LogPrefix} Baking started: {jobs.Count} clip(s){(ignoreCache ? " (cache ignored: full re-bake)" : string.Empty)}");
+            Debug.Log($"{LogPrefix} Baking started: {jobs.Count} motion(s){(ignoreCache ? " (cache ignored: full re-bake)" : string.Empty)}");
             int bakedCount = 0;
             int skippedCount = 0;
             int failedCount = 0;
@@ -129,17 +152,18 @@ namespace YozoLab.FBXAnimationBaker
             {
                 for (int i = 0; i < jobs.Count; i++)
                 {
-                    (AnimationBakeEntry entry, AnimationClip clip, bool multiClip) = jobs[i];
+                    BakeJob job = jobs[i];
+                    AnimationBakeEntry entry = job.Entry;
 
                     string outputFolder = GetEntryOutputFolder(entry);
                     if (string.IsNullOrEmpty(outputFolder) || !AssetDatabase.IsValidFolder(outputFolder))
                     {
-                        Debug.LogWarning($"{LogPrefix} Output folder is invalid, skipped: {GetEntryDisplayName(entry)} / {clip.name}");
+                        Debug.LogWarning($"{LogPrefix} Output folder is invalid, skipped: {GetEntryDisplayName(entry)} / {job.SourceName}");
                         failedCount++;
                         continue;
                     }
 
-                    string outputName = GetOutputName(entry, clip, multiClip);
+                    string outputName = GetOutputName(entry, job.SourceName, job.MultiOutput);
                     string outputAssetPath = $"{outputFolder}/{outputName}.fbx";
 
                     EditorUtility.DisplayProgressBar("FBX Animation Baker",
@@ -147,7 +171,7 @@ namespace YozoLab.FBXAnimationBaker
                         (float)i / jobs.Count);
 
                     // out 値(ハッシュ/署名)はキャッシュ更新に必要なため常に計算し、スキップ判定だけ ignoreCache で抑止する
-                    bool canSkip = ShouldSkipBake(entry, clip, outputAssetPath,
+                    bool canSkip = ShouldSkipBake(job, outputAssetPath,
                         out string sourceHash, out string clipHash, out string entrySignature);
                     if (!ignoreCache && canSkip)
                     {
@@ -156,7 +180,7 @@ namespace YozoLab.FBXAnimationBaker
                         continue;
                     }
 
-                    if (BakeSingleClip(entry, clip, outputFolder, outputName, outputAssetPath))
+                    if (BakeSingleJob(job, outputFolder, outputName, outputAssetPath))
                     {
                         UpdateBakeCache(outputAssetPath, sourceHash, clipHash, entrySignature);
                         generatedPaths.Add((outputAssetPath, entry));
@@ -191,9 +215,11 @@ namespace YozoLab.FBXAnimationBaker
             }
         }
 
-        /// <summary>1 クリップ分のベイクと FBX 書き出し。成功したら true。</summary>
-        private bool BakeSingleClip(AnimationBakeEntry entry, AnimationClip clip, string outputFolder, string outputName, string outputAssetPath)
+        /// <summary>1 モーション分のベイクと FBX 書き出し。成功したら true。</summary>
+        private bool BakeSingleJob(BakeJob job, string outputFolder, string outputName, string outputAssetPath)
         {
+            AnimationBakeEntry entry = job.Entry;
+            BakePoseSource source = null;
             GameObject instance = null;
             AnimationClip bakedClip = null;
             AnimationClip legacyClip = null;
@@ -237,37 +263,44 @@ namespace YozoLab.FBXAnimationBaker
                     }
                 }
 
-                if (clip.isHumanMotion && (animator.avatar == null || !animator.avatar.isHuman))
+                source = job.CreatePoseSource();
+
+                if (source.RequiresHumanoidAvatar && (animator.avatar == null || !animator.avatar.isHuman))
                 {
-                    Debug.LogWarning($"{LogPrefix} \"{clip.name}\" is a humanoid clip but the model has no humanoid Avatar. The result may be empty: {GetEntryDisplayName(entry)}");
+                    Debug.LogWarning($"{LogPrefix} \"{source.Name}\" needs a humanoid Avatar but the model has none. The result may be empty: {GetEntryDisplayName(entry)}");
                 }
+
+                source.Begin(instance, entry);
 
                 // ── サンプリング ──────────────────────────────────────────
                 var samples = new BakeSampleBuffer(instance, entry.bakeBlendShapes);
-                float fps = ResolveFrameRate(entry, clip);
+                float fps = ResolveFrameRate(entry, source.FrameRate);
                 float dt = 1f / fps;
 
-                // 1 フレームだけのポーズクリップは length が 0 になる。そのまま同じ時刻に
+                // 1 フレームだけのポーズは length が 0 になる。そのまま同じ時刻に
                 // 2 キー打つと壊れたカーブになるので、最低 1 フレーム分の長さを確保する。
-                float duration = Mathf.Max(clip.length, dt);
+                float duration = Mathf.Max(source.Duration, dt);
                 int frameCount = Mathf.Max(2, Mathf.RoundToInt(duration * fps) + 1);
 
-                AnimationMode.StartAnimationMode();
-                animationModeStarted = true;
+                if (source.UsesAnimationMode)
+                {
+                    AnimationMode.StartAnimationMode();
+                    animationModeStarted = true;
+                }
 
                 for (int frame = 0; frame < frameCount; frame++)
                 {
                     float time = Mathf.Min(frame * dt, duration);
 
-                    AnimationMode.BeginSampling();
-                    AnimationMode.SampleAnimationClip(instance, clip, time);
-                    AnimationMode.EndSampling();
-
+                    source.SamplePose(instance, time);
                     samples.Capture(time);
                 }
 
-                AnimationMode.StopAnimationMode();
-                animationModeStarted = false;
+                if (animationModeStarted)
+                {
+                    AnimationMode.StopAnimationMode();
+                    animationModeStarted = false;
+                }
 
                 // ── カーブ生成 ────────────────────────────────────────────
                 bakedClip = samples.BuildClip(entry, fps, entry.removeConstantCurves, out int curveCount);
@@ -279,21 +312,20 @@ namespace YozoLab.FBXAnimationBaker
                 {
                     UnityEngine.Object.DestroyImmediate(bakedClip);
                     bakedClip = samples.BuildClip(entry, fps, false, out curveCount);
-                    Debug.Log($"{LogPrefix} \"{clip.name}\" has no changing curve (static pose). Baked it with Remove Constant Curves disabled.");
+                    Debug.Log($"{LogPrefix} \"{source.Name}\" has no changing curve (static pose). Baked it with Remove Constant Curves disabled.");
                 }
 
                 if (curveCount == 0)
                 {
-                    Debug.LogWarning($"{LogPrefix} No curve was baked for \"{clip.name}\". The generated FBX will have no animation.");
+                    Debug.LogWarning($"{LogPrefix} No curve was baked for \"{source.Name}\". The generated FBX will have no animation.");
                 }
 
                 bakedClip.name = outputName;
 
                 AnimationClipSettings clipSettings = AnimationUtility.GetAnimationClipSettings(bakedClip);
-                AnimationClipSettings sourceClipSettings = AnimationUtility.GetAnimationClipSettings(clip);
                 clipSettings.startTime = 0f;
                 clipSettings.stopTime = Mathf.Max(dt, samples.LastTime);
-                clipSettings.loopTime = sourceClipSettings.loopTime;
+                clipSettings.loopTime = source.LoopTime;
                 AnimationUtility.SetAnimationClipSettings(bakedClip, clipSettings);
 
                 if (entry.saveBakedClipAsset)
@@ -369,6 +401,9 @@ namespace YozoLab.FBXAnimationBaker
                 {
                     AnimationMode.StopAnimationMode();
                 }
+                // BVH 側の一時骨格と Avatar はここで捨てる。捨て損ねるとシーンに
+                // 隠しオブジェクトが残り、次のベイクで名前が衝突する。
+                source?.Dispose();
                 if (instance != null)
                 {
                     UnityEngine.Object.DestroyImmediate(instance);
@@ -697,13 +732,13 @@ namespace YozoLab.FBXAnimationBaker
             return changed;
         }
 
-        private static float ResolveFrameRate(AnimationBakeEntry entry, AnimationClip clip)
+        private static float ResolveFrameRate(AnimationBakeEntry entry, float sourceFrameRate)
         {
             if (entry.frameRate > 0f)
             {
                 return entry.frameRate;
             }
-            return clip.frameRate > 0f ? clip.frameRate : 30f;
+            return sourceFrameRate > 0f ? sourceFrameRate : 30f;
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -753,24 +788,25 @@ namespace YozoLab.FBXAnimationBaker
         }
 
         /// <summary>
-        /// 出力ファイル名(拡張子なし)を解決する。outputFileName 未設定ならクリップ名、
-        /// 1 エントリに複数クリップがある場合は名前の衝突を避けるためクリップ名を後置する。
+        /// 出力ファイル名(拡張子なし)を解決する。outputFileName 未設定ならモーション元の名前
+        /// (クリップ名 / BVH のファイル名)、1 エントリに複数クリップがある場合は
+        /// 名前の衝突を避けるためそれを後置する。
         /// </summary>
-        private static string GetOutputName(AnimationBakeEntry entry, AnimationClip clip, bool multiClip)
+        private static string GetOutputName(AnimationBakeEntry entry, string sourceName, bool multiOutput)
         {
             string requested = SanitizeFileName(entry?.outputFileName);
-            string clipName = SanitizeFileName(clip.name);
-            if (string.IsNullOrEmpty(clipName))
+            string motionName = SanitizeFileName(sourceName);
+            if (string.IsNullOrEmpty(motionName))
             {
-                clipName = "clip";
+                motionName = "clip";
             }
 
             if (string.IsNullOrEmpty(requested))
             {
-                return clipName;
+                return motionName;
             }
 
-            return multiClip ? $"{requested}_{clipName}" : requested;
+            return multiOutput ? $"{requested}_{motionName}" : requested;
         }
 
         private static string SanitizeFileName(string requested)
@@ -818,12 +854,15 @@ namespace YozoLab.FBXAnimationBaker
         //  差分キャッシュ
         // ═══════════════════════════════════════════════════════════════
 
-        private bool ShouldSkipBake(AnimationBakeEntry entry, AnimationClip clip, string outputAssetPath,
+        private bool ShouldSkipBake(BakeJob job, string outputAssetPath,
             out string sourceHash, out string clipHash, out string entrySignature)
         {
+            AnimationBakeEntry entry = job.Entry;
             sourceHash = AssetDatabase.GetAssetDependencyHash(AssetDatabase.GetAssetPath(entry.sourceFbx)).ToString();
-            clipHash = AssetDatabase.GetAssetDependencyHash(AssetDatabase.GetAssetPath(clip)).ToString();
-            entrySignature = BuildEntrySignature(entry, clip);
+
+            // BVH も .bvh アセットとして依存ハッシュを引ける。差し替えれば作り直される。
+            clipHash = AssetDatabase.GetAssetDependencyHash(job.SourceAssetPath).ToString();
+            entrySignature = BuildEntrySignature(job);
 
             if (AssetDatabase.LoadAssetAtPath<GameObject>(outputAssetPath) == null)
             {
@@ -841,14 +880,26 @@ namespace YozoLab.FBXAnimationBaker
                 && string.Equals(cacheEntry.entrySignature, entrySignature, StringComparison.Ordinal);
         }
 
-        private static string BuildEntrySignature(AnimationBakeEntry entry, AnimationClip clip)
+        private static string BuildEntrySignature(BakeJob job)
         {
+            AnimationBakeEntry entry = job.Entry;
             var sb = new StringBuilder();
 
             // ベイク結果が変わる修正を入れたらこれを上げる。
             // 署名が変わることで、設定を触っていなくても Execute で作り直される。
             sb.Append(BakerVersion).Append('|');
-            sb.Append(clip.name).Append('|');
+            sb.Append(job.SourceName).Append('|');
+            sb.Append(job.IsBvh ? "bvh" : "clip").Append('|');
+            if (job.IsBvh)
+            {
+                sb.Append(entry.bvhScale).Append('|');
+                foreach (BvhBoneOverride bone in entry.bvhBoneOverrides ?? new List<BvhBoneOverride>())
+                {
+                    if (bone == null) continue;
+                    sb.Append(bone.jointName).Append('>').Append(bone.humanBoneName).Append(',');
+                }
+                sb.Append('|');
+            }
             sb.Append(entry.frameRate).Append('|');
             sb.Append(entry.bakeRootMotion).Append('|');
             sb.Append(entry.bakeScale).Append('|');

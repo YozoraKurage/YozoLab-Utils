@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEditor;
 using System;
 using System.Collections.Generic;
+using YozoLab.FBXAnimationBaker.Bvh;
 
 namespace YozoLab.FBXAnimationBaker
 {
@@ -105,6 +106,20 @@ namespace YozoLab.FBXAnimationBaker
 
         [Tooltip("Humanoid animation clips to bake. One FBX is generated per clip")]
         public List<AnimationClip> clips = new List<AnimationClip>();
+
+        // ── BVH をモーション元にする場合 ────────────────────────────────
+        // 設定すると、このエントリは BVH のモーションを Source FBX へリターゲットして
+        // 焼く。Humanoid Clips は使われない(片方だけを見る。1 つのエントリが 2 通りの
+        // 意味を持つと、どちらが出たのか読めなくなるため)。
+
+        [Tooltip("BVH motion file. When set, this entry retargets the BVH onto the Source FBX and the humanoid clips above are ignored")]
+        public DefaultAsset bvhFile;
+
+        [Tooltip("Unit conversion for the BVH skeleton. BVH offsets are usually in centimetres, so 0.01 turns them into metres")]
+        public float bvhScale = 0.01f;
+
+        [Tooltip("Fix up how BVH joints map onto Unity humanoid bones. Only needed when the automatic guess misses one")]
+        public List<BvhBoneOverride> bvhBoneOverrides = new List<BvhBoneOverride>();
 
         [Tooltip("Per-entry output folder. When set, FBX files are written here instead of the folder's Output Directory")]
         public DefaultAsset outputDirectoryOverride;
