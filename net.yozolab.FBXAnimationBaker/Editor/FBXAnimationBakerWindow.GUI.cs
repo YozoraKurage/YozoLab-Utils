@@ -11,7 +11,7 @@ namespace YozoLab.FBXAnimationBaker
     /// </summary>
     public partial class FBXAnimationBakerWindow
     {
-        private const float EntryListWidth = 240f;
+        private const float EntryListWidth = 270f;
 
         private void OnGUI()
         {
@@ -44,8 +44,8 @@ namespace YozoLab.FBXAnimationBaker
             EditorGUILayout.Space();
 
             EditorGUILayout.LabelField(L10n.T(
-                "FBX と Humanoid AnimationClip を指定すると、クリップを Transform アニメーションとしてベイクした FBX を書き出します。",
-                "Pick an FBX and humanoid animation clips to export an FBX with the clip baked as Transform animation."),
+                "FBX とモーション(AnimationClip / BVH)を指定すると、それを Transform アニメーションとしてベイクした FBX を書き出します。",
+                "Pick an FBX and motions (animation clips or BVH) to export an FBX with them baked as Transform animation."),
                 EditorStyles.wordWrappedMiniLabel);
 
             if (!FbxExporterBridge.IsAvailable)
@@ -87,11 +87,10 @@ namespace YozoLab.FBXAnimationBaker
         {
             EditorGUILayout.BeginVertical("box", GUILayout.ExpandHeight(true));
             EnsureSelectedEntryIndex();
-            DrawEntryToolbar();
-            DrawTemplateToolbar();
 
-            EditorGUILayout.Space(4);
-
+            // 操作はそれが効く場所の近くへ置く。リストを触るものはリストの中、
+            // 設定を触るものは設定ペインの中。全幅のツールバーに並べると、
+            // リストを操作するボタンが右端(＝詳細ペインの上)に出てしまう。
             EditorGUILayout.BeginHorizontal(GUILayout.ExpandHeight(true));
             DrawEntryListPane();
             DrawEntryDetailPane();
@@ -100,34 +99,41 @@ namespace YozoLab.FBXAnimationBaker
             EditorGUILayout.EndVertical();
         }
 
-        private void DrawEntryToolbar()
+        /// <summary>リストの上に置く操作。エントリを増やす・減らす・フォルダを作る。</summary>
+        private void DrawEntryListToolbar()
         {
             EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField($"Entries: {bakeEntriesProp.arraySize}", EditorStyles.boldLabel, GUILayout.Width(90));
-            GUILayout.FlexibleSpace();
+            EditorGUILayout.LabelField($"Entries: {bakeEntriesProp.arraySize}", EditorStyles.miniBoldLabel,
+                                       GUILayout.Width(70));
+            GUILayout.Label("🔍", GUILayout.Width(16));
+            entrySearchText = EditorGUILayout.TextField(entrySearchText);
+            EditorGUILayout.EndHorizontal();
 
-            GUILayout.Label("Search", GUILayout.Width(45));
-            entrySearchText = EditorGUILayout.TextField(entrySearchText, GUILayout.Width(160));
+            EditorGUILayout.BeginHorizontal();
 
-            if (GUILayout.Button("Add", GUILayout.Width(60)))
+            if (GUILayout.Button(new GUIContent("+ Add", L10n.T("空のエントリを追加", "Add an empty entry")),
+                    EditorStyles.miniButtonLeft))
             {
                 AddEntry(null, null);
             }
 
-            if (GUILayout.Button(new GUIContent("From Selection",
+            if (GUILayout.Button(new GUIContent(L10n.T("選択から", "From Sel."),
                     L10n.T("Projectで選択中のFBXとAnimationClipからエントリを作成します",
                            "Create entries from the FBX models and animation clips selected in the Project window")),
-                GUILayout.Width(110)))
+                EditorStyles.miniButtonMid))
             {
                 AddEntriesFromSelection();
             }
 
             using (new EditorGUI.DisabledScope(!IsEntryIndexValid(selectedEntryIndex)))
             {
-                if (GUILayout.Button("Duplicate", GUILayout.Width(80)))
+                if (GUILayout.Button(new GUIContent(L10n.T("複製", "Duplicate"),
+                        L10n.T("選択中エントリを複製", "Duplicate the selected entry")), EditorStyles.miniButtonMid))
                 {
                     bakeEntriesProp.InsertArrayElementAtIndex(selectedEntryIndex);
                     selectedEntryIndex++;
+                    selectedEntryIndices.Clear();
+                    selectedEntryIndices.Add(selectedEntryIndex);
 
                     SerializedProperty nameProp = bakeEntriesProp
                         .GetArrayElementAtIndex(selectedEntryIndex)
@@ -138,7 +144,8 @@ namespace YozoLab.FBXAnimationBaker
                     }
                 }
 
-                if (GUILayout.Button("Delete", GUILayout.Width(70)))
+                if (GUILayout.Button(new GUIContent(L10n.T("削除", "Delete"),
+                        L10n.T("選択中エントリを削除", "Delete the selected entry")), EditorStyles.miniButtonMid))
                 {
                     bakeEntriesProp.DeleteArrayElementAtIndex(selectedEntryIndex);
                     selectedEntryIndices.Clear();
@@ -146,18 +153,21 @@ namespace YozoLab.FBXAnimationBaker
                 }
             }
 
-            if (GUILayout.Button(new GUIContent("New Folder",
-                    L10n.T("Entry Listに新しいフォルダを作成します", "Create a new folder in the Entry List")),
-                GUILayout.Width(90)))
+            if (GUILayout.Button(new GUIContent(L10n.T("新規フォルダ", "New Folder"),
+                    L10n.T("フォルダを作ります。名前は見出しでそのまま直せます",
+                           "Create a folder. Rename it directly in its header")),
+                EditorStyles.miniButtonRight))
             {
-                // 名前を訊くためだけにウィンドウを出すと、出た先を探す手間の方が大きい。
-                // 重複しない既定名でその場に作り、見出しでそのまま直してもらう。
                 CreateFolder(MakeUniqueFolderName(L10n.T("新しいフォルダ", "New Folder")), null);
             }
 
             EditorGUILayout.EndHorizontal();
         }
 
+        /// <summary>
+        /// 設定ペインの上に置くテンプレート操作。
+        /// 写す元も貼る先もこのペインに映っている設定なので、ここが置き場になる。
+        /// </summary>
         private void DrawTemplateToolbar()
         {
             EditorGUILayout.BeginHorizontal();
@@ -167,18 +177,18 @@ namespace YozoLab.FBXAnimationBaker
                 : $"\"{entryTemplate.sourceEntryName}\"";
             EditorGUILayout.LabelField(new GUIContent(
                 $"Template: {source}",
-                L10n.T("選択中エントリのベイク設定をコピーし、複数のエントリに貼り付けできます(FBX/クリップ/名前は除く)",
-                       "Copy the selected entry's bake settings and paste them to several entries (excluding FBX, clips and name)")),
+                L10n.T("選択中エントリのベイク設定をコピーし、複数のエントリに貼り付けできます(FBX/モーション/名前は除く)",
+                       "Copy the selected entry's bake settings and paste them to several entries (excluding FBX, motions and name)")),
                 EditorStyles.miniBoldLabel);
 
             GUILayout.FlexibleSpace();
 
             using (new EditorGUI.DisabledScope(!IsEntryIndexValid(selectedEntryIndex)))
             {
-                if (GUILayout.Button(new GUIContent("Copy Template",
-                        L10n.T("選択中エントリからテンプレートをコピー(FBX/クリップ/名前を除く)",
-                               "Capture the selected entry as a template (excluding FBX, clips and name)")),
-                    GUILayout.Width(130)))
+                if (GUILayout.Button(new GUIContent(L10n.T("コピー", "Copy"),
+                        L10n.T("選択中エントリからテンプレートをコピー(FBX/モーション/名前を除く)",
+                               "Capture the selected entry as a template (excluding FBX, motions and name)")),
+                    EditorStyles.miniButtonLeft, GUILayout.Width(70)))
                 {
                     CopySelectedEntryToTemplate();
                 }
@@ -188,10 +198,9 @@ namespace YozoLab.FBXAnimationBaker
             using (new EditorGUI.DisabledScope(entryTemplate == null || pasteTargets.Count == 0))
             {
                 if (GUILayout.Button(new GUIContent(
-                        $"Paste ({pasteTargets.Count})",
-                        L10n.T("チェック済みエントリにペースト(未チェックなら選択中エントリ)",
-                               "Paste to checked entries (or the selected entry when none are checked)")),
-                    GUILayout.Width(110)))
+                        $"{L10n.T("貼り付け", "Paste")} ({pasteTargets.Count})",
+                        L10n.T("選択中のエントリすべてに貼り付け", "Paste to every selected entry")),
+                    EditorStyles.miniButtonRight, GUILayout.Width(90)))
                 {
                     PasteTemplateToEntries(pasteTargets);
                 }
@@ -204,12 +213,7 @@ namespace YozoLab.FBXAnimationBaker
         {
             EditorGUILayout.BeginVertical(GUILayout.Width(EntryListWidth), GUILayout.ExpandHeight(true));
 
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Entry List", EditorStyles.miniBoldLabel);
-            GUILayout.FlexibleSpace();
-            EditorGUILayout.LabelField(selectedEntryIndices.Count > 1 ? $"Selected: {selectedEntryIndices.Count}" : string.Empty,
-                                       EditorStyles.miniLabel, GUILayout.Width(80));
-            EditorGUILayout.EndHorizontal();
+            DrawEntryListToolbar();
 
             // エントリが 0 でも、フォルダがあれば見出しと出力先の設定を出す必要がある
             // (フォルダを作った直後がこの状態)。
@@ -328,42 +332,61 @@ namespace YozoLab.FBXAnimationBaker
 
             EditorGUILayout.EndScrollView();
 
-            EditorGUILayout.Space(4);
+            EditorGUILayout.Space(2);
             EditorGUILayout.BeginHorizontal();
 
             using (new EditorGUI.DisabledScope(selectedEntryIndex <= 0 || selectedEntryIndex >= bakeEntriesProp.arraySize))
             {
-                if (GUILayout.Button("Move Up", EditorStyles.miniButton))
+                if (GUILayout.Button(new GUIContent("▲", L10n.T("ひとつ上へ", "Move up")),
+                        EditorStyles.miniButtonLeft, GUILayout.Width(26)))
                 {
                     bakeEntriesProp.MoveArrayElement(selectedEntryIndex, selectedEntryIndex - 1);
                     selectedEntryIndex--;
                     selectedEntryIndices.Clear();
+                    selectedEntryIndices.Add(selectedEntryIndex);
                 }
             }
 
             using (new EditorGUI.DisabledScope(selectedEntryIndex < 0 || selectedEntryIndex >= bakeEntriesProp.arraySize - 1))
             {
-                if (GUILayout.Button("Move Down", EditorStyles.miniButton))
+                if (GUILayout.Button(new GUIContent("▼", L10n.T("ひとつ下へ", "Move down")),
+                        EditorStyles.miniButtonRight, GUILayout.Width(26)))
                 {
                     bakeEntriesProp.MoveArrayElement(selectedEntryIndex, selectedEntryIndex + 1);
                     selectedEntryIndex++;
                     selectedEntryIndices.Clear();
+                    selectedEntryIndices.Add(selectedEntryIndex);
                 }
             }
 
-            EditorGUILayout.EndHorizontal();
+            GUILayout.FlexibleSpace();
 
-            EditorGUILayout.BeginHorizontal();
-            if (GUILayout.Button(new GUIContent(L10n.T("表示中を全選択", "Select Filtered"),
-                    L10n.T("検索で絞り込まれている行をまとめて選択します", "Select every row the search leaves visible")),
-                EditorStyles.miniButton))
+            if (selectedEntryIndices.Count > 1)
             {
-                CheckAllFiltered(normalizedSearch);
+                EditorGUILayout.LabelField($"{selectedEntryIndices.Count} selected", EditorStyles.miniLabel,
+                                           GUILayout.Width(72));
             }
-            if (GUILayout.Button(L10n.T("選択解除", "Clear Selection"), EditorStyles.miniButton))
+
+            using (new EditorGUI.DisabledScope(!searching))
             {
-                selectedEntryIndices.Clear();
+                if (GUILayout.Button(new GUIContent(L10n.T("表示中を全選択", "Select Filtered"),
+                        L10n.T("検索で絞り込まれている行をまとめて選択します", "Select every row the search leaves visible")),
+                    EditorStyles.miniButtonLeft, GUILayout.Width(92)))
+                {
+                    CheckAllFiltered(normalizedSearch);
+                }
             }
+
+            using (new EditorGUI.DisabledScope(selectedEntryIndices.Count == 0))
+            {
+                if (GUILayout.Button(new GUIContent(L10n.T("解除", "Clear"),
+                        L10n.T("選択を解除します", "Clear the selection")),
+                    EditorStyles.miniButtonRight, GUILayout.Width(44)))
+                {
+                    selectedEntryIndices.Clear();
+                }
+            }
+
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.EndVertical();
@@ -679,6 +702,7 @@ namespace YozoLab.FBXAnimationBaker
         private void DrawEntryDetailPane()
         {
             EditorGUILayout.BeginVertical(GUILayout.ExpandHeight(true));
+            DrawTemplateToolbar();
             entryDetailScrollPosition = EditorGUILayout.BeginScrollView(entryDetailScrollPosition, "box");
 
             if (!IsEntryIndexValid(selectedEntryIndex))
