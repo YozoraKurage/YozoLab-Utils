@@ -270,10 +270,14 @@ namespace YozoLab.FBXAnimationBaker
                     Debug.LogWarning($"{LogPrefix} \"{source.Name}\" needs a humanoid Avatar but the model has none. The result may be empty: {GetEntryDisplayName(entry)}");
                 }
 
-                source.Begin(instance, entry);
-
                 // ── サンプリング ──────────────────────────────────────────
+                // 供給元より先に作る。BakeSampleBuffer は生成時点の姿勢を「元 FBX の姿勢」
+                // として控え、書き出し前にそこへ戻す。Begin がモデルにポーズを当てる
+                // 供給元(BVH)もあるので、先にここで素の姿勢を押さえておかないと
+                // フレーム 0 の姿勢が基準ポーズになり、スキンのバインドポーズが狂う。
                 var samples = new BakeSampleBuffer(instance, entry.bakeBlendShapes);
+
+                source.Begin(instance, entry);
                 float fps = ResolveFrameRate(entry, source.FrameRate);
                 float dt = 1f / fps;
 
@@ -893,6 +897,7 @@ namespace YozoLab.FBXAnimationBaker
             if (job.IsBvh)
             {
                 sb.Append(entry.bvhScale).Append('|');
+                sb.Append(entry.bvhUpAxis).Append('|');
                 foreach (BvhBoneOverride bone in entry.bvhBoneOverrides ?? new List<BvhBoneOverride>())
                 {
                     if (bone == null) continue;

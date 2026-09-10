@@ -669,9 +669,13 @@ namespace YozoLab.FBXAnimationBaker
                 return;
             }
 
+            EditorGUILayout.PropertyField(entryProp.FindPropertyRelative("bvhUpAxis"), new GUIContent("Up Axis",
+                L10n.T("BVHがどの軸を上としているか。Autoは骨格のOFFSETから判定します(規格はYですが実際にはZも多い)",
+                       "Which axis the BVH treats as up. Auto reads it from the skeleton's offsets")));
+
             EditorGUILayout.PropertyField(entryProp.FindPropertyRelative("bvhScale"), new GUIContent("BVH Scale",
-                L10n.T("BVHの単位換算。OFFSETがcmで書かれていることが多いので既定は0.01",
-                       "Unit conversion. BVH offsets are usually centimetres, so 0.01 turns them into metres")));
+                L10n.T("BVHの単位換算。リターゲットはHumanoidの正規化を通るため、一様な拡大縮小は結果に影響しません(Avatarが組めないほど極端なときだけ触ってください)",
+                       "Unit conversion. Retargeting goes through humanoid normalisation, so a uniform scale does not change the result")));
 
             EditorGUILayout.HelpBox(L10n.T(
                 "BVHの骨格にもHumanoid Avatarを組み、そのポーズをSource FBXへ流します。"

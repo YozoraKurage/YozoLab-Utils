@@ -67,7 +67,7 @@ namespace YozoLab.FBXAnimationBaker
                     System.IO.Directory.GetParent(Application.dataPath).FullName, BvhAssetPath));
 
                 BvhFile file = BvhFile.Load(absolute);
-                return new BvhPoseSource(file, SourceName, Entry.bvhScale, Entry.bvhBoneOverrides);
+                return new BvhPoseSource(file, SourceName, Entry.bvhScale, Entry.bvhUpAxis, Entry.bvhBoneOverrides);
             }
         }
 
@@ -155,6 +155,7 @@ namespace YozoLab.FBXAnimationBaker
             private readonly BvhFile file;
             private readonly string sourceName;
             private readonly float scale;
+            private readonly BvhUpAxis upAxis;
             private readonly List<BvhBoneOverride> boneOverrides;
 
             private BvhSkeleton skeleton;
@@ -164,11 +165,22 @@ namespace YozoLab.FBXAnimationBaker
             private HumanPose pose;
             private bool applyRootMotion = true;
 
-            public BvhPoseSource(BvhFile file, string sourceName, float scale, List<BvhBoneOverride> boneOverrides)
+            // ルートモーションの切り分けに使う基準。フレーム 0 を原点として、
+            // そこからの平面移動とヨーだけをルートへ渡す。
+            private Transform targetRoot;
+            private float targetHumanScale = 1f;
+            private Vector3 rootBasePosition;
+            private Quaternion rootBaseRotation;
+            private Vector3 baseBodyPosition;
+            private Quaternion baseBodyYaw;
+
+            public BvhPoseSource(BvhFile file, string sourceName, float scale, BvhUpAxis upAxis,
+                                 List<BvhBoneOverride> boneOverrides)
             {
                 this.file = file;
                 this.sourceName = sourceName;
-                this.scale = scale > 0f ? scale : 0.01f;
+                this.scale = scale > 0f ? scale : 1f;
+                this.upAxis = upAxis;
                 this.boneOverrides = boneOverrides;
             }
 
@@ -191,8 +203,11 @@ namespace YozoLab.FBXAnimationBaker
 
                 applyRootMotion = entry.bakeRootMotion;
 
-                skeleton = BvhSkeleton.Build(file, scale, sourceName);
+                skeleton = BvhSkeleton.Build(file, scale, sourceName, upAxis);
                 skeleton.Root.hideFlags = HideFlags.HideAndDontSave;
+
+                Debug.Log($"{LogPrefix} \"{sourceName}\": {file.Frames.Count} frame(s) @ {file.FrameRate:F2} fps, "
+                          + $"up axis = {skeleton.UpAxis}{(upAxis == BvhUpAxis.Auto ? " (auto)" : string.Empty)}, scale = {scale}");
 
                 Dictionary<string, string> boneMap = BvhHumanoid.BuildBoneMap(file, boneOverrides);
                 Debug.Log($"{LogPrefix} {BvhHumanoid.DescribeBoneMap(file, boneMap)}");
@@ -212,8 +227,20 @@ namespace YozoLab.FBXAnimationBaker
                         + "Source FBX の Rig を Humanoid にするか、Use Other Avatar Definition で指定してください。");
                 }
 
+
                 sourceHandler = new HumanPoseHandler(sourceAvatar, skeleton.Root.transform);
                 targetHandler = new HumanPoseHandler(targetAvatar, instance.transform);
+
+                targetRoot = instance.transform;
+                targetHumanScale = animator.humanScale;
+                rootBasePosition = targetRoot.position;
+                rootBaseRotation = targetRoot.rotation;
+
+                // 基準はフレーム 0 の姿勢。書き出したクリップはそこから動き始める。
+                skeleton.ApplyFrame(0);
+                sourceHandler.GetHumanPose(ref pose);
+                baseBodyPosition = pose.bodyPosition;
+                baseBodyYaw = ExtractYaw(pose.bodyRotation);
             }
 
             public override void SamplePose(GameObject instance, float time)
@@ -225,13 +252,59 @@ namespace YozoLab.FBXAnimationBaker
                 skeleton.ApplyFrame(frame);
                 sourceHandler.GetHumanPose(ref pose);
 
-                if (!applyRootMotion)
+                // ── ルートモーションの切り分け ────────────────────────────
+                // SetHumanPose はアバターのルート基準で体を置くだけで、ルート自身は
+                // 動かさない。そのまま焼くと移動も旋回も Hips のカーブに乗ってしまい、
+                // 書き出した FBX のルートノードが一切動かない。既存のクリップ経路
+                // (Animator の applyRootMotion) と食い違うので、同じ分け方へ揃える。
+                //
+                // 抜き取りはポーズを当てる「前」に行う。当ててからルートを動かして
+                // 帳尻を合わせる手もあるが、それだと Hips のローカルが移動ぶんを
+                // 打ち消す方向へ伸びるだけで、カーブの持ち主は Hips のまま変わらない。
+                Vector3 planar = new Vector3(
+                    pose.bodyPosition.x - baseBodyPosition.x, 0f,
+                    pose.bodyPosition.z - baseBodyPosition.z);
+
+                Quaternion yaw = ExtractYaw(pose.bodyRotation) * Quaternion.Inverse(baseBodyYaw);
+
+                // 平面移動は必ずポーズから抜く。Bake Root Motion が OFF ならルートへも
+                // 渡さない = その場での動きになる。高さは残す(しゃがみが潰れるため)。
+                pose.bodyPosition = new Vector3(baseBodyPosition.x, pose.bodyPosition.y, baseBodyPosition.z);
+
+                if (applyRootMotion)
                 {
-                    // 足踏みだけ残して水平移動を捨てる。高さは残す(しゃがみ等が潰れるため)。
-                    pose.bodyPosition = new Vector3(0f, pose.bodyPosition.y, 0f);
+                    pose.bodyRotation = Quaternion.Inverse(yaw) * pose.bodyRotation;
                 }
 
+                targetRoot.SetPositionAndRotation(rootBasePosition, rootBaseRotation);
                 targetHandler.SetHumanPose(ref pose);
+
+                if (!applyRootMotion)
+                {
+                    return;
+                }
+
+                // bodyPosition は humanScale で正規化された長さ。実寸へ戻して渡す。
+                targetRoot.SetPositionAndRotation(
+                    rootBasePosition + rootBaseRotation * (planar * targetHumanScale),
+                    rootBaseRotation * yaw);
+            }
+
+            /// <summary>
+            /// Y 軸まわりの成分だけを取り出す。向きは前方ベクトルを水平へ潰して決める。
+            /// Hips のローカル回転から取ると、リグごとのボーン軸の取り方に左右される。
+            /// </summary>
+            private static Quaternion ExtractYaw(Quaternion rotation)
+            {
+                Vector3 forward = rotation * Vector3.forward;
+                forward.y = 0f;
+
+                if (forward.sqrMagnitude < 1e-6f)
+                {
+                    return Quaternion.identity;
+                }
+
+                return Quaternion.LookRotation(forward.normalized, Vector3.up);
             }
 
             public override void Dispose()

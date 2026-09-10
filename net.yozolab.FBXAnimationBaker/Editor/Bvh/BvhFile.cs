@@ -55,6 +55,20 @@ namespace YozoLab.FBXAnimationBaker.Bvh
     }
 
     /// <summary>
+    /// BVH がどの軸を上としているか。
+    ///
+    /// 規格は Y アップだが、実際には Z アップで書き出すツールが珍しくない。
+    /// 取り違えると骨格が寝たまま組まれ、Humanoid Avatar を作れない。
+    /// </summary>
+    public enum BvhUpAxis
+    {
+        /// <summary>OFFSET の広がりから推測する。</summary>
+        Auto = 0,
+        Y = 1,
+        Z = 2,
+    }
+
+    /// <summary>
     /// 読み込んだ BVH 1 ファイル分。
     ///
     /// パースだけを持ち、Unity のオブジェクトは作らない。座標系の変換もここではしない。
@@ -77,6 +91,23 @@ namespace YozoLab.FBXAnimationBaker.Bvh
         public int ChannelCount { get; private set; }
 
         public float FrameRate => FrameTime > 0f ? 1f / FrameTime : 30f;
+
+        /// <summary>
+        /// OFFSET の広がりから上方向を当てる。
+        ///
+        /// 背骨と脚は上下に伸び、腕は左右に伸びる。つまり X 以外で最も伸びている軸が上。
+        /// 腕は両軸に等しく寄与しないので、Y と Z の総和を比べれば足りる。
+        /// </summary>
+        public BvhUpAxis GuessUpAxis()
+        {
+            float y = 0f, z = 0f;
+            foreach (BvhJoint joint in joints)
+            {
+                y += Mathf.Abs(joint.Offset.y);
+                z += Mathf.Abs(joint.Offset.z);
+            }
+            return z > y ? BvhUpAxis.Z : BvhUpAxis.Y;
+        }
 
         private readonly List<BvhJoint> joints = new List<BvhJoint>();
         private readonly List<float[]> frames = new List<float[]>();

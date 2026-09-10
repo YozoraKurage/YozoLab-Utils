@@ -115,8 +115,11 @@ namespace YozoLab.FBXAnimationBaker
         [Tooltip("BVH motion file. When set, this entry retargets the BVH onto the Source FBX and the humanoid clips above are ignored")]
         public DefaultAsset bvhFile;
 
-        [Tooltip("Unit conversion for the BVH skeleton. BVH offsets are usually in centimetres, so 0.01 turns them into metres")]
-        public float bvhScale = 0.01f;
+        [Tooltip("Which axis the BVH treats as up. Auto reads it from the skeleton's offsets. The spec says Y, but Z is common in practice")]
+        public BvhUpAxis bvhUpAxis = BvhUpAxis.Auto;
+
+        [Tooltip("Unit conversion for the BVH skeleton. Retargeting goes through humanoid normalisation, so this only matters when the values are extreme enough to stop an Avatar being built")]
+        public float bvhScale = 1f;
 
         [Tooltip("Fix up how BVH joints map onto Unity humanoid bones. Only needed when the automatic guess misses one")]
         public List<BvhBoneOverride> bvhBoneOverrides = new List<BvhBoneOverride>();
