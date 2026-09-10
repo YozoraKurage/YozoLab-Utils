@@ -11,7 +11,10 @@ namespace YozoLab.FBXAnimationBaker
     /// </summary>
     public partial class FBXAnimationBakerWindow
     {
-        private const float EntryListWidth = 270f;
+        // リストペインの幅の下限・上限。上限はウィンドウ幅から詳細ペインの取り分を引いて決める。
+        private const float EntryListMinWidth = 170f;
+        private const float EntryDetailMinWidth = 300f;
+        private const float SplitterWidth = 5f;
 
         private void OnGUI()
         {
@@ -93,10 +96,74 @@ namespace YozoLab.FBXAnimationBaker
             // リストを操作するボタンが右端(＝詳細ペインの上)に出てしまう。
             EditorGUILayout.BeginHorizontal(GUILayout.ExpandHeight(true));
             DrawEntryListPane();
+            DrawPaneSplitter();
             DrawEntryDetailPane();
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.EndVertical();
+        }
+
+        /// <summary>
+        /// リストペインの幅。ユーザーごとの見た目の好みなので EditorPrefs に持つ
+        /// （プロジェクト設定に混ぜると、他の人の環境まで動いてしまう）。
+        /// ウィンドウを狭めたときに詳細ペインが潰れないよう、読むたびに現在の幅で丸める。
+        /// </summary>
+        private float EntryListWidth
+        {
+            get
+            {
+                if (entryListWidth < 0f)
+                {
+                    entryListWidth = EditorPrefs.GetFloat(EntryListWidthPrefKey, 270f);
+                }
+
+                float max = Mathf.Max(EntryListMinWidth, position.width - EntryDetailMinWidth - SplitterWidth);
+                return Mathf.Clamp(entryListWidth, EntryListMinWidth, max);
+            }
+        }
+
+        /// <summary>
+        /// リストと設定のあいだの仕切り。掴んで幅を変えられる。
+        /// 幅の決め打ちだと、エントリ名が長い人にも短い人にも合わない。
+        /// </summary>
+        private void DrawPaneSplitter()
+        {
+            Rect rect = GUILayoutUtility.GetRect(SplitterWidth, SplitterWidth, GUILayout.ExpandHeight(true));
+
+            if (Event.current.type == EventType.Repaint)
+            {
+                // 掴めることが分かる程度の線。掴んでいる間は濃くする。
+                var line = new Rect(rect.x + rect.width * 0.5f - 1f, rect.y + 2f, 2f, rect.height - 4f);
+                EditorGUI.DrawRect(line, draggingSplitter
+                    ? new Color(0.35f, 0.58f, 0.85f, 0.9f)
+                    : new Color(0f, 0f, 0f, 0.25f));
+            }
+
+            EditorGUIUtility.AddCursorRect(rect, MouseCursor.ResizeHorizontal);
+
+            Event e = Event.current;
+            switch (e.type)
+            {
+                case EventType.MouseDown when rect.Contains(e.mousePosition) && e.button == 0:
+                    draggingSplitter = true;
+                    e.Use();
+                    break;
+
+                // 動かした距離で足し引きする。マウス座標をそのまま幅にすると、
+                // 外側の box の余白ぶんだけ食い違う。
+                case EventType.MouseDrag when draggingSplitter:
+                    entryListWidth = EntryListWidth + (e.mousePosition.x - rect.center.x);
+                    e.Use();
+                    Repaint();
+                    break;
+
+                // 保存はドラッグが終わってから。動かすたびに EditorPrefs へ書かない。
+                case EventType.MouseUp when draggingSplitter:
+                    draggingSplitter = false;
+                    EditorPrefs.SetFloat(EntryListWidthPrefKey, EntryListWidth);
+                    e.Use();
+                    break;
+            }
         }
 
         /// <summary>リストの上に置く操作。エントリを増やす・減らす・フォルダを作る。</summary>

@@ -36,6 +36,15 @@ namespace YozoLab.FBXAnimationBaker
         /// <summary>エントリ 1 行の高さ。</summary>
         private const float EntryRowHeight = 20f;
 
+        /// <summary>リストペイン幅の保存先。ユーザーごとの好みなので EditorPrefs。</summary>
+        private const string EntryListWidthPrefKey = "FBXAnimBaker_EntryListWidth";
+
+        /// <summary>仕切りを掴んでいる最中か。</summary>
+        private bool draggingSplitter;
+
+        /// <summary>リストペインの幅。負なら EditorPrefs からまだ読んでいない。</summary>
+        private float entryListWidth = -1f;
+
         /// <summary>ドラッグ中のエントリ番号を運ぶ鍵。</summary>
         private const string EntryDragKey = "YozoLab.FBXAnimationBaker.Entries";
 
