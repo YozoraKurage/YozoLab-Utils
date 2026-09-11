@@ -20,15 +20,19 @@ namespace YozoLab.UtilSettings
         public string AsmdefGuid;
 
         /// <summary>
-        /// このパッケージの本体と歩調を合わせる、別アセンブリの asmdef GUID。
-        /// テストや、必須パッケージが無いときだけ出る案内など。
+        /// このパッケージのテストアセンブリの asmdef GUID（無ければ null）。
         ///
-        /// これらも <see cref="Define"/> の開け閉めに追随させる必要がある。
-        /// versionDefines はアセンブリごとの設定なので、本体の asmdef で立てた
-        /// シンボルは別アセンブリからは見えない。本体と同じ内容を書き込まないと、
-        /// 制約が永久に満たされないか、逆に本体を切っても道連れにならず残ってしまう。
+        /// テスト側は対象アセンブリを参照するので、対象が落ちているのに自分だけ
+        /// コンパイルされると参照が解決できず CS0234 で落ちる。かといって
+        /// defineConstraints に <see cref="Define"/> を書くだけでは駄目で、
+        /// versionDefines はアセンブリごとの設定なので、対象 asmdef で立てた
+        /// シンボルはテスト側からは見えない。制約が永久に満たされず、対象を
+        /// 有効にしてもテストが走らなくなる。
+        ///
+        /// そこで対象 asmdef と同じ内容をテスト asmdef にも書き込み、
+        /// 有効・無効を揃えて動かす。
         /// </summary>
-        public string[] CompanionAsmdefGuids = Array.Empty<string>();
+        public string TestsAsmdefGuid;
 
         /// <summary>
         /// このパッケージを「コンパイルしない」ことを表すシンボル。
@@ -84,7 +88,7 @@ namespace YozoLab.UtilSettings
                 DisplayName = "Animation Tools",
                 Description = "Animation ウィンドウまわりの拡張。Harmony を使う。",
                 AsmdefGuid = "6b8d0f08c02241c78f4bd111ed92fc21",
-                CompanionAsmdefGuids = new[] { "31d72fe163d8e99bbac8794dd6dd532c" },
+                TestsAsmdefGuid = "31d72fe163d8e99bbac8794dd6dd532c",
                 Define = "YOZOLAB_DISABLE_ANIMTOOLS",
                 Toggles = new[]
                 {
@@ -114,7 +118,7 @@ namespace YozoLab.UtilSettings
                 DisplayName = "VRC Gizmo Accelerator",
                 Description = "PhysBone ギズモを独自の一括描画パスに置き換えて軽くする。Harmony を使う。",
                 AsmdefGuid = "c54f7afe8bca44b5bf2680c2058b79b5",
-                CompanionAsmdefGuids = new[] { "12a0b490157839ef79a1addefcf8f301" },
+                TestsAsmdefGuid = "12a0b490157839ef79a1addefcf8f301",
                 Define = "YOZOLAB_DISABLE_VRCGIZMOACCELERATOR",
                 OpenMenuPath = "YozoLab/VRC Gizmo Accelerator",
             },
@@ -124,7 +128,7 @@ namespace YozoLab.UtilSettings
                 DisplayName = "PhysBone Radius Gizmo",
                 Description = "PhysBone の Collision Radius をシーン上のハンドルで変える。",
                 AsmdefGuid = "98df72da806a4338800e6d264b24df60",
-                CompanionAsmdefGuids = new[] { "d58808ea513ef82e991b03714d812d34" },
+                TestsAsmdefGuid = "d58808ea513ef82e991b03714d812d34",
                 Define = "YOZOLAB_DISABLE_PBRADIUSGIZMO",
                 Toggles = new[]
                 {
@@ -159,11 +163,7 @@ namespace YozoLab.UtilSettings
                 DisplayName = "FBX Animation Baker",
                 Description = "アニメーションを焼き込んだ FBX を書き出す。",
                 AsmdefGuid = "cfe0f2ee4c194abbaee7f96b07cbcefa",
-                CompanionAsmdefGuids = new[]
-                {
-                    "2dd2f79c2d81fc7a2932776149e3913d",  // Tests
-                    "98011acf6a29e6ba395a375e1609c8e1",  // FBX Exporter 未導入時の案内
-                },
+                TestsAsmdefGuid = "2dd2f79c2d81fc7a2932776149e3913d",
                 Define = "YOZOLAB_DISABLE_FBXANIMATIONBAKER",
                 OpenMenuPath = "YozoLab/FBX Animation Baker",
             },
@@ -174,10 +174,6 @@ namespace YozoLab.UtilSettings
                 Description = "FBX からアニメーションを取り出す。",
                 AsmdefGuid = "48aa154317f40c64e9da67181b8b3731",
                 Define = "YOZOLAB_DISABLE_FBXANIMATIONEXTRACTOR",
-                CompanionAsmdefGuids = new[]
-                {
-                    "865434a0d37df836a826bc43acd9dd70",  // FBX Exporter 未導入時の案内
-                },
                 OpenMenuPath = "YozoLab/FBX Animation Extractor",
             },
             new UtilPackage
@@ -222,7 +218,7 @@ namespace YozoLab.UtilSettings
                 DisplayName = "Particle Tools",
                 Description = "パーティクル制作支援。時間バーでのスクラブ(標準 Particle Effect パネル置き換え)と色の一括編集。",
                 AsmdefGuid = "998afc256cc14f59adb8fb9bd4245156",
-                CompanionAsmdefGuids = new[] { "fdb1e1857182a0d938a4c01c93383726" },
+                TestsAsmdefGuid = "fdb1e1857182a0d938a4c01c93383726",
                 Define = "YOZOLAB_DISABLE_PARTICLETOOLS",
                 OpenMenuPath = "YozoLab/Particle Color Editor",
             },

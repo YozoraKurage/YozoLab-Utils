@@ -39,6 +39,12 @@ namespace YozoLab.FBXAnimationBaker
         /// <summary>リストペイン幅の保存先。ユーザーごとの好みなので EditorPrefs。</summary>
         private const string EntryListWidthPrefKey = "FBXAnimBaker_EntryListWidth";
 
+        /// <summary>必須パッケージ。未導入ならウィンドウ上部から導入できる。</summary>
+        private const string FbxExporterPackageId = "com.unity.formats.fbx";
+
+        /// <summary>導入ボタンで走らせたインストール要求。未実行なら null。</summary>
+        private UnityEditor.PackageManager.Requests.AddRequest fbxExporterInstall;
+
         /// <summary>仕切りを掴んでいる最中か。</summary>
         private bool draggingSplitter;
 

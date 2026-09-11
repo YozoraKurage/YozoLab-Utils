@@ -12,15 +12,8 @@
     "autoReferenced": false,
     "defineConstraints": [
         "UNITY_EDITOR",
-        "!YOZOLAB_DISABLE_FBXANIMATIONBAKER",
-        "YOZOLAB_HAS_FBXEXPORTER"
+        "!YOZOLAB_DISABLE_FBXANIMATIONBAKER"
     ],
-    "versionDefines": [
-        {
-            "name": "com.unity.formats.fbx",
-            "expression": "",
-            "define": "YOZOLAB_HAS_FBXEXPORTER"
-        }
-    ],
+    "versionDefines": [],
     "noEngineReferences": false
 }

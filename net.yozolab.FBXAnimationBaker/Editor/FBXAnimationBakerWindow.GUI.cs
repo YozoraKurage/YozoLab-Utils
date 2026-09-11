@@ -1,5 +1,7 @@
 using UnityEngine;
 using UnityEditor;
+using UnityEditor.PackageManager;
+using UnityEditor.PackageManager.Requests;
 using System;
 using System.Linq;
 using System.Collections.Generic;
@@ -60,11 +62,40 @@ namespace YozoLab.FBXAnimationBaker
 
                 EditorGUILayout.BeginHorizontal();
                 GUILayout.FlexibleSpace();
+
+                // 探しに行くのはユーザーの手間なので、その場で入れられるようにする。
+                // 解決するとドメインリロードが走り、次の描画では IsAvailable が true になる。
+                using (new EditorGUI.DisabledScope(fbxExporterInstall != null && !fbxExporterInstall.IsCompleted))
+                {
+                    if (GUILayout.Button(L10n.T("インストール", "Install"), GUILayout.Width(110)))
+                    {
+                        fbxExporterInstall = Client.Add(FbxExporterPackageId);
+                    }
+                }
+
+                if (GUILayout.Button(L10n.T("Package Manager", "Package Manager"), GUILayout.Width(130)))
+                {
+                    UnityEditor.PackageManager.UI.Window.Open(FbxExporterPackageId);
+                }
+
                 if (GUILayout.Button(L10n.T("再チェック", "Re-check"), GUILayout.Width(110)))
                 {
                     FbxExporterBridge.ClearCache();
                 }
                 EditorGUILayout.EndHorizontal();
+
+                if (fbxExporterInstall != null && !fbxExporterInstall.IsCompleted)
+                {
+                    EditorGUILayout.LabelField(L10n.T("インストール中…", "Installing…"), EditorStyles.miniLabel);
+                    Repaint();
+                }
+                else if (fbxExporterInstall != null && fbxExporterInstall.Status == StatusCode.Failure)
+                {
+                    EditorGUILayout.HelpBox(
+                        L10n.T($"インストールに失敗しました: {fbxExporterInstall.Error?.message}",
+                               $"Install failed: {fbxExporterInstall.Error?.message}"),
+                        MessageType.Error);
+                }
             }
 
             // 出力先はフォルダごとの設定。共通の Output Directory は持たない。
