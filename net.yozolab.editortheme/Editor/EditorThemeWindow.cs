@@ -42,6 +42,21 @@ namespace YozoLab.EditorTheme
                 if (EditorGUI.EndChangeCheck()) EditorThemeApplier.PatchImgui = patch;
 
 
+                using (new EditorGUI.DisabledScope(!WindowsChromePatch.IsAvailable))
+                {
+                    EditorGUI.BeginChangeCheck();
+                    bool chrome = EditorGUILayout.ToggleLeft(
+                        new GUIContent("Windows のタイトルバー・メニューも暗くする",
+                            "OS が描くタイトルバーと右クリックメニューを暗くします。Windows の API を"
+                            + "直接呼ぶだけで、同梱するバイナリはありません。切れば元に戻ります"),
+                        EditorThemeApplier.WindowsChrome);
+                    if (EditorGUI.EndChangeCheck()) EditorThemeApplier.WindowsChrome = chrome;
+                }
+                if (!WindowsChromePatch.IsAvailable)
+                {
+                    EditorGUILayout.LabelField("（Windows 以外では使えません）", EditorStyles.miniLabel);
+                }
+
                 EditorGUILayout.Space();
                 EditorGUI.BeginChangeCheck();
                 bool debug = EditorGUILayout.ToggleLeft(

@@ -322,7 +322,8 @@ namespace YozoLab.EditorTheme
 
         public static void Restore()
         {
-            if (!RestoreBackups()) return;
+            bool hadBackups = RestoreBackups();
+            if (!hadBackups) return;
 
             // パッチの最中や後に初期化された型のコピーは、差し替え済みのスキンから作られて
             // いるので、控えでは戻らない（控え自体が単色テクスチャを指している）。
@@ -346,12 +347,18 @@ namespace YozoLab.EditorTheme
         {
             applyPending = false;
             currentPalette = null;
+
+            // 型が抱え込んだ色は applied の状態に関わらず必ず戻す。
+            // 塗るのは GUI パス（ApplyStaticCopiesNow）で、剥がすのはここ。
+            // 以前はこれが下の早期 return より後ろにあり、applied が false のときに
+            // 一度も呼ばれず、Hierarchy の可視性列などが Iceberg の色のまま残っていた。
+            StaticStylePatcher.RestoreStaticColors();
+
             if (!applied) return false;
 
             // 後から控えたものから戻す。同じ状態を二度控えていても最初の値で終わる。
             for (int i = Backups.Count - 1; i >= 0; i--) Backups[i].Restore();
             Backups.Clear();
-            StaticStylePatcher.RestoreStaticColors();
             applied = false;
             return true;
         }

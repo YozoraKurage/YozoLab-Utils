@@ -224,9 +224,9 @@ namespace YozoLab.UtilSettings
                 {
                     new RuntimeToggle
                     {
-                        Label = "Iceberg を当てる",
+                        Label = "Editor Theme を適用する",
                         TypeName = "YozoLab.EditorTheme.EditorThemeApplier",
-                        Tooltip = "エディタ全体の配色を Iceberg に差し替える。切ると元の Unity の配色に戻る。",
+                        Tooltip = "エディタ全体の配色を差し替える。切ると元の Unity の配色に戻る。",
                     },
                 },
             },

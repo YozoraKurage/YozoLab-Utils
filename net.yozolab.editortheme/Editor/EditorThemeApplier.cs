@@ -31,6 +31,7 @@ namespace YozoLab.EditorTheme
         private const string PrefVariant = "YozoLab.EditorTheme.Variant";
         private const string PrefPatchImgui = "YozoLab.EditorTheme.PatchImgui";
         private const string PrefDebugPaint = "YozoLab.EditorTheme.DebugPaint";
+        private const string PrefWindowsChrome = "YozoLab.EditorTheme.WindowsChrome";
 
         private const int ProSkinCheckIntervalFrames = 30;
 
@@ -56,6 +57,21 @@ namespace YozoLab.EditorTheme
         {
             get => EditorPrefs.GetBool(PrefPatchImgui, true);
             set { EditorPrefs.SetBool(PrefPatchImgui, value); Reapply(); }
+        }
+
+        /// <summary>
+        /// Windows のタイトルバーとメニュー（右クリック含む）も暗くするか。
+        /// OS の API を直接呼ぶだけで、同梱するバイナリは無い。切れば元に戻る。
+        /// </summary>
+        internal static bool WindowsChrome
+        {
+            get => EditorPrefs.GetBool(PrefWindowsChrome, true);
+            set
+            {
+                EditorPrefs.SetBool(PrefWindowsChrome, value);
+                if (!applied) return;
+                if (value) WindowsChromePatch.Apply(appliedDark); else WindowsChromePatch.Restore();
+            }
         }
 
         /// <summary>
@@ -109,6 +125,7 @@ namespace YozoLab.EditorTheme
             sb.AppendLine($"  panels with Iceberg clear colour: {PanelGroundPatcher.PatchedPanelCount} (active={PanelGroundPatcher.IsActive})");
             sb.AppendLine($"  static GUIStyle copies patched: {StaticStylePatcher.PatchedCount}");
             sb.AppendLine($"  static Color fields patched: {StaticStylePatcher.PatchedColorCount}");
+            sb.AppendLine($"  windows chrome: available={WindowsChromePatch.IsAvailable} applied={WindowsChromePatch.IsApplied} note={WindowsChromePatch.Note ?? "-"}");
             sb.AppendLine($"  style catalog colours patched: {StyleCatalogRecolorer.PatchedCount} error={StyleCatalogRecolorer.LastError ?? "-"}");
             sb.AppendLine($"  solid textures: {ImguiSkinPatcher.DescribeSolids()}");
             sb.AppendLine($"  chrome drift healed: {ImguiSkinPatcher.HealCount} times, last={ImguiSkinPatcher.LastDrift ?? "-"}");
@@ -281,6 +298,10 @@ namespace YozoLab.EditorTheme
 
             // IMGUI の色の出所。スキンのテクスチャより先に塗る。テクスチャを持たない
             // スタイルはここの色で描かれる（StylePainter がカタログを直接読む）。
+            // カタログを塗る前に、色を焼き込む型を初期化させておく。あとから初期化されると
+            // 塗った色を「元の色」として抱え込み、無効化しても戻せなくなる。
+            StaticStylePatcher.WarmUpStaticColors();
+
             StyleCatalogRecolorer.Apply(dark);
 
             if (PatchImgui)
@@ -294,6 +315,8 @@ namespace YozoLab.EditorTheme
             applied = true;
             appliedDark = dark;
 
+            if (WindowsChrome) WindowsChromePatch.Apply(dark);
+
 #if YOZOLAB_EDITORTHEME_HARMONY
             PaintTracer.Apply();
 #endif
@@ -305,6 +328,7 @@ namespace YozoLab.EditorTheme
             StyleCatalogRecolorer.Restore();
             PanelGroundPatcher.Restore();
             ImguiSkinPatcher.Restore();
+            WindowsChromePatch.Restore();
 #if YOZOLAB_EDITORTHEME_HARMONY
             ImguiBackgroundPatch.Restore();
 #endif

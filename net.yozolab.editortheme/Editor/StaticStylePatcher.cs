@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using UnityEditor;
 using UnityEngine;
@@ -53,6 +54,32 @@ namespace YozoLab.EditorTheme
         ///
         /// 色付きの値（警告の黄、エラーの赤など）は翻訳表が素通しするので触らない。
         /// </summary>
+        /// <summary>
+        /// 候補の型を先に初期化させる。
+        ///
+        /// エディタには、型初期化のときにカタログの色を static readonly へ焼き込む型がある。
+        ///
+        ///     public static readonly Color backgroundColor =
+        ///         EditorResources.GetStyle("game-object-tree-view-scene-visibility").GetColor("background-color");
+        ///
+        /// カタログを塗り替えたあとに初期化されると、塗った色を「元の色」として抱え込む。
+        /// そうなるとこちらには控えが無く、無効化しても戻せない（実測: OFF にしても
+        /// Hierarchy の可視性列が Iceberg のまま残った）。
+        /// カタログを塗る前にここで初期化させ、素の色を抱えさせておく。
+        /// </summary>
+        internal static void WarmUpStaticColors()
+        {
+            CollectCandidates();
+            using (new SkinScope())
+            {
+                foreach (Type type in Candidates)
+                {
+                    try { System.Runtime.CompilerServices.RuntimeHelpers.RunClassConstructor(type.TypeHandle); }
+                    catch (Exception) { /* 初期化に GUI 文脈が要る型は諦める */ }
+                }
+            }
+        }
+
         internal static void PatchStaticColors(bool dark)
         {
             RestoreStaticColors();
@@ -75,12 +102,20 @@ namespace YozoLab.EditorTheme
                         catch (Exception) { continue; }
 
                         Color mapped = IcebergTranslation.Translate(value, dark);
+
                         if (mapped == value) continue;
 
                         try
                         {
                             field.SetValue(null, mapped);
-                            ColorBackups.Add(new KeyValuePair<FieldInfo, Color>(field, value));
+
+                            // 書けたか確かめてから控える。書けていないのに控えると、
+                            // 復元時に「戻したつもり」で終わってしまう。
+                            var now = (Color)field.GetValue(null);
+                            if (now == mapped)
+                                ColorBackups.Add(new KeyValuePair<FieldInfo, Color>(field, value));
+                            else
+                                Debug.Log($"[YozoLab Editor Theme] static Color を塗れない: {type.FullName}.{field.Name} (initonly={field.IsInitOnly})");
                         }
                         catch (Exception) { /* readonly を書けない実行環境なら諦める */ }
                     }
@@ -90,13 +125,37 @@ namespace YozoLab.EditorTheme
             PatchedColorCount = ColorBackups.Count;
         }
 
+        /// <summary>直近の復元で戻せなかったフィールド。診断用。</summary>
+        internal static string LastRestoreFailure { get; private set; }
+
         internal static void RestoreStaticColors()
         {
+            var failures = new List<string>();
+
             for (int i = ColorBackups.Count - 1; i >= 0; i--)
             {
-                try { ColorBackups[i].Key.SetValue(null, ColorBackups[i].Value); }
-                catch (Exception) { }
+                FieldInfo field = ColorBackups[i].Key;
+                Color want = ColorBackups[i].Value;
+                try
+                {
+                    field.SetValue(null, want);
+
+                    // 書けたつもりでも戻っていないことがある（initonly な static は
+                    // 実行環境によっては黙って無視される）。読み直して確かめる。
+                    var now = (Color)field.GetValue(null);
+                    if (now != want)
+                        failures.Add($"{field.DeclaringType?.FullName}.{field.Name} 書いても戻らない (want {want}, got {now})");
+                }
+                catch (Exception e)
+                {
+                    failures.Add($"{field.DeclaringType?.FullName}.{field.Name} 例外 {e.GetType().Name}");
+                }
             }
+
+            LastRestoreFailure = failures.Count == 0 ? null : string.Join(" / ", failures.Take(5));
+            if (failures.Count > 0)
+                Debug.Log($"[YozoLab Editor Theme] static Color を戻せなかった: {failures.Count} 件 — {LastRestoreFailure}");
+
             ColorBackups.Clear();
             PatchedColorCount = 0;
         }
