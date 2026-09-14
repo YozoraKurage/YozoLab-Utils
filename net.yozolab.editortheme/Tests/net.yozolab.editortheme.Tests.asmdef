@@ -1,0 +1,25 @@
+{
+    "name": "net.yozolab.editortheme.Tests",
+    "rootNamespace": "YozoLab.Tests",
+    "references": [
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner",
+        "net.yozolab.editortheme.Editor"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS",
+        "!YOZOLAB_DISABLE_EDITORTHEME"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

@@ -1,0 +1,24 @@
+{
+    "name": "net.yozolab.editortheme.Editor",
+    "rootNamespace": "YozoLab.EditorTheme",
+    "references": [],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "!YOZOLAB_DISABLE_EDITORTHEME"
+    ],
+    "versionDefines": [
+        {
+            "name": "com.vrchat.base",
+            "expression": "",
+            "define": "YOZOLAB_EDITORTHEME_HARMONY"
+        }
+    ],
+    "noEngineReferences": false
+}

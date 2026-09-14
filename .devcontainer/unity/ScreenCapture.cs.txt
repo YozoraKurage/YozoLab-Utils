@@ -1,0 +1,153 @@
+// エディタの画面を実際に撮ってファイルに書く。テーマの見た目を人手を介さず確かめるため。
+//
+// 環境変数 YOZOLAB_CAPTURE に出力先の PNG パスを入れて GUI モードで起動すると、
+// 設定を反映し、数フレーム描かせてから撮り、エディタを終了する。
+// 変数が無いときは何もしないので、通常の batchmode のテスト実行には影響しない。
+//
+// 進行はフレーム数で刻む。経過時間で刻むと、インポートやコンパイルで update が
+// 止まっている間に時間だけ飛び、途中の段が丸ごと抜ける（実際に抜けた）。
+#if UNITY_EDITOR
+using System;
+using System.IO;
+using System.Linq;
+using System.Reflection;
+using UnityEditor;
+using UnityEditorInternal;
+using UnityEngine;
+
+namespace YozoLab.CaptureTool
+{
+    [InitializeOnLoad]
+    internal static class YozoLabScreenCapture
+    {
+        private const BindingFlags Any = BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public;
+
+        private static readonly string OutputPath = Environment.GetEnvironmentVariable("YOZOLAB_CAPTURE");
+        private static readonly string DebugPaintFlag = Environment.GetEnvironmentVariable("YOZOLAB_CAPTURE_DEBUGPAINT");
+        private static readonly string ThemeFlag = Environment.GetEnvironmentVariable("YOZOLAB_CAPTURE_THEME");
+        private static readonly string WindowsToOpen = Environment.GetEnvironmentVariable("YOZOLAB_CAPTURE_WINDOWS");
+        private static readonly string SelectFlag = Environment.GetEnvironmentVariable("YOZOLAB_CAPTURE_SELECT");
+
+        private const int SettleFrames = 150;
+        private const int AfterApplyFrames = 150;
+
+        private static int frames;
+        private static int step;
+
+        static YozoLabScreenCapture()
+        {
+            if (string.IsNullOrEmpty(OutputPath)) return;
+            EditorApplication.update += Tick;
+            Debug.Log($"[CAPTURE] armed -> {OutputPath} theme={ThemeFlag} debugPaint={DebugPaintFlag}");
+        }
+
+        private static Type FindApplier()
+            => AppDomain.CurrentDomain.GetAssemblies()
+                .Select(a => { try { return a.GetType("YozoLab.EditorTheme.EditorThemeApplier"); } catch { return null; } })
+                .FirstOrDefault(t => t != null);
+
+        private static void ApplyThemeSettings()
+        {
+            Type applier = FindApplier();
+            if (applier == null) { Debug.Log("[CAPTURE] EditorThemeApplier が見つからない"); return; }
+
+            if (!string.IsNullOrEmpty(DebugPaintFlag))
+                applier.GetProperty("DebugPaint", Any)?.SetValue(null, DebugPaintFlag == "1");
+            if (!string.IsNullOrEmpty(ThemeFlag))
+                applier.GetMethod("SetEnabled", Any)?.Invoke(null, new object[] { ThemeFlag == "1" });
+
+            applier.GetMethod("Reapply", Any)?.Invoke(null, null);
+
+            Debug.Log($"[CAPTURE] 反映: Enabled={applier.GetProperty("Enabled", Any)?.GetValue(null)} "
+                      + $"DebugPaint={applier.GetProperty("DebugPaint", Any)?.GetValue(null)} "
+                      + $"IsApplied={applier.GetProperty("IsApplied", Any)?.GetValue(null)}");
+        }
+
+        private static void Tick()
+        {
+            frames++;
+            InternalEditorUtility.RepaintAllViews();
+
+            if (step == 0 && frames >= SettleFrames)
+            {
+                step = 1;
+                frames = 0;
+                try { OpenRequestedWindows(); }
+                catch (Exception e) { Debug.Log($"[CAPTURE] ウィンドウを開けなかった: {e.Message}"); }
+                try { PopulateSelection(); }
+                catch (Exception e) { Debug.Log($"[CAPTURE] 選択を作れなかった: {e.Message}"); }
+                try { ApplyThemeSettings(); }
+                catch (Exception e) { Debug.Log($"[CAPTURE] 反映に失敗: {e}"); }
+                return;
+            }
+
+            if (step == 1 && frames >= AfterApplyFrames)
+            {
+                step = 2;
+                EditorApplication.update -= Tick;
+                try { DumpDiagnostics(); Capture(); }
+                catch (Exception e) { Debug.Log($"[CAPTURE] 失敗: {e}"); }
+                EditorApplication.Exit(0);
+            }
+        }
+
+        /// <summary>
+        /// Inspector に中身を出すために、オブジェクトを 1 つ作って選ぶ。
+        /// 空の Inspector では component の見出しや背景が描かれず、そこの塗り漏れに気付けない。
+        /// </summary>
+        private static void PopulateSelection()
+        {
+            if (SelectFlag != "1") return;
+
+            var go = new GameObject("CaptureTarget");
+            go.hideFlags = HideFlags.DontSave;
+            go.AddComponent<BoxCollider>();
+            go.AddComponent<Light>();
+            Selection.activeGameObject = go;
+            Debug.Log("[CAPTURE] 選択を作った: CaptureTarget");
+        }
+
+        /// <summary>調べたいウィンドウを開く。型名をカンマ区切りで環境変数に入れる。</summary>
+        private static void OpenRequestedWindows()
+        {
+            if (string.IsNullOrEmpty(WindowsToOpen)) return;
+
+            foreach (string raw in WindowsToOpen.Split(','))
+            {
+                string wanted = raw.Trim();
+                if (wanted.Length == 0) continue;
+
+                Type found = AppDomain.CurrentDomain.GetAssemblies()
+                    .SelectMany(a => { try { return a.GetTypes(); } catch { return new Type[0]; } })
+                    .FirstOrDefault(t => typeof(EditorWindow).IsAssignableFrom(t)
+                                         && (t.Name == wanted || t.FullName == wanted));
+                if (found == null) { Debug.Log($"[CAPTURE] ウィンドウ型が無い: {wanted}"); continue; }
+
+                EditorWindow.GetWindow(found, false, wanted, true);
+                Debug.Log($"[CAPTURE] 開いた: {found.FullName}");
+            }
+        }
+
+        private static void DumpDiagnostics()
+        {
+            try { FindApplier()?.GetMethod("DumpDiagnostics", Any)?.Invoke(null, null); }
+            catch (Exception e) { Debug.Log($"[CAPTURE] 診断に失敗: {e}"); }
+        }
+
+        private static void Capture()
+        {
+            int w = Screen.currentResolution.width;
+            int h = Screen.currentResolution.height;
+            Color[] pixels = InternalEditorUtility.ReadScreenPixel(Vector2.zero, w, h);
+            if (pixels == null || pixels.Length == 0) { Debug.Log("[CAPTURE] ReadScreenPixel が空"); return; }
+
+            var tex = new Texture2D(w, h, TextureFormat.RGBA32, false);
+            tex.SetPixels(pixels);
+            tex.Apply();
+            File.WriteAllBytes(OutputPath, tex.EncodeToPNG());
+            UnityEngine.Object.DestroyImmediate(tex);
+            Debug.Log($"[CAPTURE] 書き出した: {OutputPath} ({new FileInfo(OutputPath).Length} bytes)");
+        }
+    }
+}
+#endif

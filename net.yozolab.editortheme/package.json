@@ -1,0 +1,11 @@
+{
+  "name": "net.yozolab.editortheme",
+  "version": "0.7.0",
+  "displayName": "YozoLab Editor Theme",
+  "description": "Unity エディタ全体の配色を Iceberg (cocopon/iceberg.vim) に差し替える。",
+  "unity": "2022.3",
+  "author": {
+    "name": "Yozolab"
+  },
+  "keywords": []
+}

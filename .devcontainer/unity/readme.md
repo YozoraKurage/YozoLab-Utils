@@ -83,3 +83,23 @@ run-tests.sh --log                              # 失敗時に Unity ログの�
   `temp/` はローカルパッケージの一部としてインポートされてしまう。
 - `setup.sh` は何度実行してもよい。既にある manifest は上書きせず、
   このリポジトリの参照と `testables` だけを保証する（追加したパッケージは消えない）。
+
+## run-capture.sh
+
+エディタを実際に描画させて画面を PNG に撮る。batchmode では窓が無く何も描かれないので、
+Xvfb の仮想ディスプレイに GUI の Unity を立ち上げ、Unity 自身の `ReadScreenPixel` で
+撮らせている（スクショ用の外部コマンドがこのイメージに無い）。
+
+```
+run-capture.sh out.png                 テーマ有効で撮る
+run-capture.sh out.png --debug-paint   仕組みごとの原色で撮る
+run-capture.sh out.png --no-theme      テーマ無効で撮る
+run-capture.sh out.png --trace         何がどこを塗ったかもログに出す
+```
+
+撮影スクリプトの実体は `ScreenCapture.cs.txt`。実行時にテストプロジェクトの
+`Assets/Editor/YozoLabScreenCapture.cs` へ複製される。環境変数 `YOZOLAB_CAPTURE` が
+無ければ何もしないので、通常の `run-tests.sh` には影響しない。
+
+見た目の変更は、画素を数えて確かめられる。Editor Theme の調査ではこれで
+「内部的には当たっているのに画面が変わらない」を切り分けた。
