@@ -6,9 +6,9 @@ Vim カラースキーム）に差し替えるエディタ拡張です。Unity �
 
 ## 使い方
 
-- `YozoLab > Editor Theme` を開くと ON/OFF と配色を切り替えられます。
-- `配色` は `Auto` で Unity の Editor Theme（Dark / Light）に追随します。Iceberg にも
-  light 配色があるので、Light テーマにはそちらが当たります。
+- `YozoLab > Editor Theme` を開くと ON/OFF とテーマを切り替えられます。
+- `テーマ` を選ばなければ、Unity の Editor Theme（Dark / Light）に合う組み込みテーマが
+  当たります。選べば、Unity 側が Dark でも明色テーマを当てられます。
 - `IMGUI の中身も塗り替える` は Hierarchy / Project / Inspector の文字色と選択色の切り替えです。
   崩れる箇所があればここだけ切れます（窓枠やタブはこの設定と無関係に変わります）。
 

@@ -56,8 +56,10 @@ namespace YozoLab.CaptureTool
                 applier.GetProperty("DebugPaint", Any)?.SetValue(null, DebugPaintFlag == "1");
             if (!string.IsNullOrEmpty(ThemeNameFlag))
             {
-                applier.GetProperty("ThemeName", Any)?.SetValue(null, ThemeNameFlag);
-                Debug.Log($"[CAPTURE] テーマを選択: {ThemeNameFlag}");
+                // "auto" は選択を外す。Unity の明暗に合う組み込みテーマが当たる経路を撮る。
+                string want = ThemeNameFlag == "auto" ? string.Empty : ThemeNameFlag;
+                applier.GetProperty("ThemeName", Any)?.SetValue(null, want);
+                Debug.Log($"[CAPTURE] テーマを選択: {(want.Length == 0 ? "(自動)" : want)}");
             }
             if (!string.IsNullOrEmpty(ThemeFlag))
                 applier.GetMethod("SetEnabled", Any)?.Invoke(null, new object[] { ThemeFlag == "1" });

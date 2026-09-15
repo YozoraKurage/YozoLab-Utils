@@ -7,6 +7,11 @@ namespace YozoLab.EditorTheme
     /// <summary>設定ウィンドウ。テーマの選択と編集、塗り替えの ON/OFF。</summary>
     internal sealed class EditorThemeWindow : EditorWindow
     {
+        // 編集中かどうかは専用のフラグで持つ。
+        // [SerializeField] を付けた [Serializable] クラスは、ドメインリロード後に
+        // null ではなく既定インスタンスになる（Unity の仕様）。null を「編集していない」の
+        // 印に使うと、ウィンドウを開いただけで空の編集欄が出てしまう（実際に出た）。
+        [SerializeField] private bool isEditing;
         [SerializeField] private ThemeDefinition editing;
         [SerializeField] private Vector2 scroll;
 
@@ -45,12 +50,6 @@ namespace YozoLab.EditorTheme
 
             using (new EditorGUI.DisabledScope(!enabled))
             {
-                EditorGUI.BeginChangeCheck();
-                var variant = (ThemeVariant)EditorGUILayout.EnumPopup(
-                    new GUIContent("配色", "Auto は Unity の Editor Theme（Dark / Light）に合わせます"),
-                    EditorThemeApplier.Variant);
-                if (EditorGUI.EndChangeCheck()) EditorThemeApplier.Variant = variant;
-
                 DrawThemePicker();
 
                 EditorGUI.BeginChangeCheck();
@@ -151,16 +150,17 @@ namespace YozoLab.EditorTheme
                 ThemeCatalog.Reload();
                 EditorThemeApplier.Reapply();
             }
-            if (editing == null && GUILayout.Button(new GUIContent("複製して色を編集",
+            if (!isEditing && GUILayout.Button(new GUIContent("複製して色を編集",
                     "今のテーマを複製して、色を自由に決められます。組み込みのテーマは書き換えません")))
             {
                 ThemeDefinition source = ThemeCatalog.Resolve(EditorGUIUtility.isProSkin);
                 editing = source.Clone();
                 editing.name = source.name + " のコピー";
+                isEditing = true;
             }
             EditorGUILayout.EndHorizontal();
 
-            if (editing != null) DrawThemeEditor();
+            if (isEditing && editing != null) DrawThemeEditor();
         }
 
         /// <summary>色の編集。役割ごとに 1 色決める。</summary>
@@ -202,10 +202,10 @@ namespace YozoLab.EditorTheme
                         string path = ThemeCatalog.Save(editing);
                         EditorThemeApplier.ThemeName = editing.name;
                         Debug.Log($"[YozoLab Editor Theme] 保存しました: {path}");
-                        editing = null;
+                        isEditing = false;
                     }
                 }
-                if (GUILayout.Button("編集をやめる")) editing = null;
+                if (GUILayout.Button("編集をやめる")) isEditing = false;
                 EditorGUILayout.EndHorizontal();
             }
         }

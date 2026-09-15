@@ -3,14 +3,6 @@ using UnityEngine;
 
 namespace YozoLab.EditorTheme
 {
-    /// <summary>どの配色を当てるか。</summary>
-    internal enum ThemeVariant
-    {
-        /// <summary>Unity の Editor Theme（Dark / Light）に合わせる。</summary>
-        Auto = 0,
-        Dark = 1,
-        Light = 2,
-    }
 
     /// <summary>
     /// Iceberg の配色をエディタ全体に当てる入口。
@@ -28,7 +20,6 @@ namespace YozoLab.EditorTheme
     public static class EditorThemeApplier
     {
         private const string PrefEnabled = "YozoLab.EditorTheme.Enabled";
-        private const string PrefVariant = "YozoLab.EditorTheme.Variant";
         private const string PrefPatchImgui = "YozoLab.EditorTheme.PatchImgui";
         private const string PrefDebugPaint = "YozoLab.EditorTheme.DebugPaint";
         private const string PrefWindowsChrome = "YozoLab.EditorTheme.WindowsChrome";
@@ -48,11 +39,6 @@ namespace YozoLab.EditorTheme
             private set => EditorPrefs.SetBool(PrefEnabled, value);
         }
 
-        internal static ThemeVariant Variant
-        {
-            get => (ThemeVariant)EditorPrefs.GetInt(PrefVariant, (int)ThemeVariant.Auto);
-            set { EditorPrefs.SetInt(PrefVariant, (int)value); Reapply(); }
-        }
 
         /// <summary>
         /// 使うテーマの名前。空なら明暗に応じた組み込みテーマ。
@@ -141,7 +127,7 @@ namespace YozoLab.EditorTheme
             sb.AppendLine($"  style catalog colours patched: {StyleCatalogRecolorer.PatchedCount} error={StyleCatalogRecolorer.LastError ?? "-"}");
             sb.AppendLine($"  solid textures: {ImguiSkinPatcher.DescribeSolids()}");
             sb.AppendLine($"  chrome drift healed: {ImguiSkinPatcher.HealCount} times, last={ImguiSkinPatcher.LastDrift ?? "-"}");
-            sb.AppendLine($"  prefs: variant={Variant} patchImgui={PatchImgui} debugPaint={DebugPaint}");
+            sb.AppendLine($"  prefs: patchImgui={PatchImgui} debugPaint={DebugPaint}");
 
             // スキンの実状態。窓の地色は "dockarea"（ドック時）と "hostview"（浮遊時）の
             // テクスチャで決まる。ここが null なら何も描かれず、その下の色がそのまま見える。
@@ -258,7 +244,7 @@ namespace YozoLab.EditorTheme
             if (!applied) return;
             if (++frameCounter % ProSkinCheckIntervalFrames != 0) return;
 
-            if (Variant == ThemeVariant.Auto && appliedDark != EditorGUIUtility.isProSkin)
+            if (appliedDark != EditorGUIUtility.isProSkin)
             {
                 Reapply();
                 return;
@@ -281,12 +267,11 @@ namespace YozoLab.EditorTheme
                 return;
             }
 
-            bool dark = Variant switch
-            {
-                ThemeVariant.Dark => true,
-                ThemeVariant.Light => false,
-                _ => EditorGUIUtility.isProSkin,
-            };
+            // 素の色の表は Unity のスキンで決まる。ここに利用者の選択は無い。
+            // 素の色そのものが Unity のスキンから来るので、食い違わせると意味が壊れる
+            // （暗色スキンで明色の表を引くと、窓の地 #383838 が文字色の役割に寄る）。
+            // 明暗の好みはテーマ側が持つ。
+            bool dark = EditorGUIUtility.isProSkin;
 
             bool debug = DebugPaint;
 
