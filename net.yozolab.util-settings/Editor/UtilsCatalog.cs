@@ -215,8 +215,8 @@ namespace YozoLab.UtilSettings
             new UtilPackage
             {
                 Id = "editortheme",
-                DisplayName = "Editor Theme (Iceberg)",
-                Description = "エディタ全体の配色を Iceberg (cocopon/iceberg.vim) に差し替える。窓枠・タブ・各ウィンドウの背景と文字。",
+                DisplayName = "Editor Theme",
+                Description = "エディタ全体の配色を差し替える。窓枠・タブ・各ウィンドウの背景と文字。テーマは JSON で追加できる。",
                 AsmdefGuid = "023ddf696474d3ca8af75074fa7f814a",
                 Define = "YOZOLAB_DISABLE_EDITORTHEME",
                 OpenMenuPath = "YozoLab/Editor Theme",

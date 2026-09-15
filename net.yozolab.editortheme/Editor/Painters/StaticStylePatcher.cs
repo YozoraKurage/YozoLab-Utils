@@ -83,7 +83,7 @@ namespace YozoLab.EditorTheme
                         try { value = (Color)field.GetValue(null); }
                         catch (Exception) { continue; }
 
-                        Color mapped = IcebergTranslation.Translate(value, dark);
+                        Color mapped = ThemeTranslation.Translate(value, ThemeCatalog.Resolve(dark), dark);
 
                         if (mapped == value)
                         {

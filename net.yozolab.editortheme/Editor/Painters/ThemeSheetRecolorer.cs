@@ -9,7 +9,7 @@ using UnityEngine.UIElements;
 namespace YozoLab.EditorTheme
 {
     /// <summary>
-    /// Unity のテーマシートの色テーブルを、その場で Iceberg に書き換える。
+    /// Unity のテーマシートの色テーブルを、その場でテーマの色に書き換える。
     ///
     /// ── なぜこの方法か ─────────────────────────────────────────────
     /// Unity 2022 のエディタ UI（窓枠・タブ・ツールバー・UI Toolkit 製の各ウィンドウ）は
@@ -103,7 +103,7 @@ namespace YozoLab.EditorTheme
             return sb.ToString().TrimEnd();
         }
 
-        /// <summary>dark なら Dark テーマのシート、そうでなければ Light のシートを Iceberg にする。</summary>
+        /// <summary>dark なら Dark 用のシート、そうでなければ Light 用のシートを塗り替える。</summary>
         private static bool patchedDark;
         private static Color? patchedDebugColor;
 
@@ -190,7 +190,7 @@ namespace YozoLab.EditorTheme
             {
                 colors[i] = patchedDebugColor.HasValue
                     ? new Color(patchedDebugColor.Value.r, patchedDebugColor.Value.g, patchedDebugColor.Value.b, colors[i].a)
-                    : IcebergTranslation.Translate(colors[i], dark);
+                    : ThemeTranslation.Translate(colors[i], ThemeCatalog.Resolve(dark), dark);
             }
 
             PatchedSheets.Add(patched);

@@ -29,8 +29,7 @@ namespace YozoLab.EditorTheme
 
         public static void Reload()
         {
-            cache = new List<ThemeDefinition> { IcebergDark(), IcebergLight() };
-            cache.AddRange(PresetThemes.All());
+            cache = new List<ThemeDefinition>(PresetThemes.All());
 
             try
             {
@@ -82,7 +81,7 @@ namespace YozoLab.EditorTheme
             {
                 if (t.isDark == dark) return t;
             }
-            return chosen ?? IcebergDark();
+            return chosen ?? PresetThemes.Default();
         }
 
         /// <summary>利用者のテーマとして保存する。</summary>
@@ -97,68 +96,5 @@ namespace YozoLab.EditorTheme
             return path;
         }
 
-        private static ThemeDefinition IcebergDark() => new ThemeDefinition
-        {
-            name = "Iceberg Dark",
-            isDark = true,
-            accent = "#84a0c6",
-            accentBright = "#91acd1",
-            control = "#3d425b",
-            controlBright = "#444b71",
-            controlBrightest = "#5b6389",
-            error = "#e27878",
-            errorBright = "#e98989",
-            info = "#89b8c2",
-            infoBright = "#95c4ce",
-            purple = "#a093c7",
-            selection = "#2a3158",
-            success = "#b4be82",
-            surface = "#161821",
-            surfaceDeepest = "#0f1117",
-            surfaceHover = "#272c42",
-            surfaceRaised = "#1e2132",
-            text = "#c6c8d1",
-            textBright = "#d2d4de",
-            textBrightest = "#eff0f4",
-            textDim = "#818596",
-            textMuted = "#9a9ca5",
-            warning = "#e2a478",
-            warningBright = "#e9b189",
-            controlSurface = "#3d425b",
-            controlSurfaceSelected = "#5b6389",
-            textFaint = "#6b7089",
-        };
-
-        private static ThemeDefinition IcebergLight() => new ThemeDefinition
-        {
-            name = "Iceberg Light",
-            isDark = false,
-            accent = "#2d539e",
-            accentBright = "#4f6ca8",
-            control = "#757ca3",
-            controlBright = "#9fa7bd",
-            controlBrightest = "#8b98b6",
-            error = "#cc517a",
-            errorBright = "#d96f92",
-            info = "#3f83a6",
-            infoBright = "#5f9ab7",
-            purple = "#7759b4",
-            selection = "#a7b2cd",
-            success = "#668e3d",
-            surface = "#e8e9ec",
-            surfaceDeepest = "#cad0de",
-            surfaceHover = "#c9cdd7",
-            surfaceRaised = "#dcdfe7",
-            text = "#33374c",
-            textBright = "#33374c",
-            textBrightest = "#e8e9ec",
-            textDim = "#8389a3",
-            textMuted = "#6b7089",
-            warning = "#c57339",
-            warningBright = "#d18a55",
-            controlSurface = "#cad0de",
-            controlSurfaceSelected = "#a7b2cd",
-            textFaint = "#8389a3",
-        };
     }
 }

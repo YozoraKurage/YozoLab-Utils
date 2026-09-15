@@ -119,8 +119,8 @@ Editor Theme が Dark でも明色テーマが当たります。** `isDark` が�
 
 ## 内部の話
 
-- 素の色から役割への表は `ThemeTranslation.cs`。Dark と Light で別の表です。同じ素の色でも
+- 素の色から役割への表は `Theme/ThemeTranslation.cs`。Dark と Light で別の表です。同じ素の色でも
   役割が違うためで、たとえば `#101010` は暗色では面、明色では文字になります
 - 表に無い灰色は、明るさの最も近い項目の役割へ寄せます。表に無い**色付きの色は触りません**。
   意味を持っている可能性があるためです
-- テーマの役割から、IMGUI が使う 11 色（`IcebergPalette.Palette`）が導出されます
+- テーマの役割から、IMGUI が使う 11 色（`ThemePalette.Palette`）が導出されます

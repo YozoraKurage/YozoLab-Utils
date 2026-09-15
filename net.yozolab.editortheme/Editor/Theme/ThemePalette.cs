@@ -6,15 +6,10 @@ namespace YozoLab.EditorTheme
     /// IMGUI 側が使う色。テーマ（ThemeDefinition）の役割から導出する。
     ///
     /// 値そのものはここには持たない。テーマを差し替えれば、この 11 色も一緒に変わる。
+    /// 特定の配色に依存しないので、名前もテーマ一般のものにしてある。
     /// </summary>
-    internal static class IcebergPalette
+    internal static class ThemePalette
     {
-        /// <summary>今選ばれている暗色テーマ。</summary>
-        public static Palette Dark => ThemeCatalog.Resolve(true).ToPalette();
-
-        /// <summary>今選ばれている明色テーマ。</summary>
-        public static Palette Light => ThemeCatalog.Resolve(false).ToPalette();
-
         /// <summary>
         /// 診断用の原色。テーマではない。
         ///

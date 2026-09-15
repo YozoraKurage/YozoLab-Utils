@@ -10,12 +10,12 @@ namespace YozoLab.EditorTheme
 {
     /// <summary>
     /// IMGUI 側の塗り替え。GUISkin の各スタイルが持つ文字色と、選択・見出しの
-    /// 背景テクスチャを Iceberg の色に差し替える。
+    /// 背景テクスチャをテーマの色に差し替える。
     ///
     /// USS が効くのは UI Toolkit で描かれる部分だけで、Hierarchy / Project のツリーや
     /// Inspector の大半は IMGUI が GUISkin から色を取って描いている。
     ///
-    /// 文字色は「無彩色の灰色」だけを明るさに応じて Iceberg の前景色へ写す。
+    /// 文字色は「無彩色の灰色」だけを明るさに応じてテーマの前景色へ写す。
     /// 色付きの文字（警告の黄、リンクの青など）は意味を持っているので触らない。
     /// 背景は名前で狙い撃ちにする。テクスチャは角丸やグラデーションを持つものが多く、
     /// 一律に単色へ置き換えると崩れるため、選択行と見出しの帯だけにしている。
@@ -158,7 +158,7 @@ namespace YozoLab.EditorTheme
 
         private static bool applied;
 
-        public static void Apply(IcebergPalette.Palette palette)
+        public static void Apply(ThemePalette.Palette palette)
         {
             if (applied) Restore();
 
@@ -205,7 +205,7 @@ namespace YozoLab.EditorTheme
         // SceneView の描画コールバック）に回す。適用も修復も同じ。呼び出しは 1 度で済むので、
         // 走ったら購読を外す。テストからは、GUISkin.current を整えたうえで直接呼んでよい。
 
-        private static IcebergPalette.Palette currentPalette;
+        private static ThemePalette.Palette currentPalette;
         private static (Color selection, Color header, Color window, Color chrome, Color chromeOn, Color toolbar, Color toolbarOn) currentColors;
         private static bool applyPending;
         private static bool repairPending;
@@ -351,7 +351,7 @@ namespace YozoLab.EditorTheme
             // 型が抱え込んだ色は applied の状態に関わらず必ず戻す。
             // 塗るのは GUI パス（ApplyStaticCopiesNow）で、剥がすのはここ。
             // 以前はこれが下の早期 return より後ろにあり、applied が false のときに
-            // 一度も呼ばれず、Hierarchy の可視性列などが Iceberg の色のまま残っていた。
+            // 一度も呼ばれず、Hierarchy の可視性列などがテーマの色のまま残っていた。
             StaticStylePatcher.RestoreStaticColors();
 
             if (!applied) return false;
@@ -449,7 +449,7 @@ namespace YozoLab.EditorTheme
         /// 窓の地の役割ごとの色。部品（ボタン・入力欄など）はここでは扱わない。
         /// あちらは StyleCatalogRecolorer が色の出所を塗り替えることで直る。
         /// </summary>
-        private static Color ChromeOff(Surface surface, IcebergPalette.Palette p)
+        private static Color ChromeOff(Surface surface, ThemePalette.Palette p)
         {
             switch (surface)
             {
@@ -459,7 +459,7 @@ namespace YozoLab.EditorTheme
             }
         }
 
-        private static Color ChromeOn(Surface surface, IcebergPalette.Palette p)
+        private static Color ChromeOn(Surface surface, ThemePalette.Palette p)
         {
             switch (surface)
             {
@@ -596,7 +596,7 @@ namespace YozoLab.EditorTheme
         private static bool IsOurSolid(Texture2D texture, Color color)
             => texture != null && SolidColors.TryGetValue(texture, out Color c) && c == color;
 
-        private static void PatchStyle(GUIStyle style, IcebergPalette.Palette palette, Color selection, Color header)
+        private static void PatchStyle(GUIStyle style, ThemePalette.Palette palette, Color selection, Color header)
         {
             string name = style.name?.ToLowerInvariant() ?? string.Empty;
             bool isSelection = Matches(name, SelectionStyleHints);
@@ -605,7 +605,7 @@ namespace YozoLab.EditorTheme
             // 原色モードでは、狙い撃ちしていないスタイルの背景も残らず塗る。
             // そうしないと「狙いから漏れているスタイル」と「そもそも IMGUI が
             // 描いていない場所」が、どちらも灰色のままで見分けられない。
-            bool debug = ReferenceEquals(palette, IcebergPalette.Debug);
+            bool debug = ReferenceEquals(palette, ThemePalette.Debug);
 
             foreach (GUIStyleState state in EnumerateStates(style))
             {
@@ -632,10 +632,10 @@ namespace YozoLab.EditorTheme
         }
 
         /// <summary>
-        /// 無彩色の灰色だけを、明るさで 3 段に丸めて Iceberg の前景色へ。
+        /// 無彩色の灰色だけを、明るさで 3 段に丸めてテーマの前景色へ。
         /// Light 配色では向きが逆（暗い文字が本文）になるので分けている。
         /// </summary>
-        private static bool TryMapText(Color color, IcebergPalette.Palette palette, out Color mapped)
+        private static bool TryMapText(Color color, ThemePalette.Palette palette, out Color mapped)
         {
             mapped = color;
             if (color.a <= 0f) return false;

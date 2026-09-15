@@ -49,7 +49,7 @@ namespace YozoLab.EditorTheme
 
             for (int i = 0; i < colors.Length; i++)
             {
-                colors[i] = IcebergTranslation.Translate(colors[i], dark);
+                colors[i] = ThemeTranslation.Translate(colors[i], ThemeCatalog.Resolve(dark), dark);
             }
             return true;
         }

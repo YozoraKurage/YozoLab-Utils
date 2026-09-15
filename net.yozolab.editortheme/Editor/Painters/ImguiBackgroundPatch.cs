@@ -47,7 +47,7 @@ namespace YozoLab.EditorTheme
             }
 
             // IMGUI 側の色表（EditorResources.styleCatalog）は SVC<Color>.value を通して読まれる。
-            // 読み出しのたびに翻訳表を通せば、キャッシュの有無に関わらず Iceberg になる。
+            // 読み出しのたびに翻訳表を通せば、キャッシュの有無に関わらずテーマの色になる。
             Type svcOpen = typeof(EditorGUIUtility).Assembly.GetType("UnityEditor.StyleSheets.SVC`1");
             MethodInfo svcValue = svcOpen?.MakeGenericType(typeof(Color)).GetProperty("value", Any)?.GetGetMethod(true);
             if (svcValue != null)
@@ -75,7 +75,7 @@ namespace YozoLab.EditorTheme
 
         private static void TranslatePostfix(ref Color __result)
         {
-            __result = IcebergTranslation.Translate(__result, translateDark);
+            __result = ThemeTranslation.Translate(__result, ThemeCatalog.Resolve(translateDark), translateDark);
         }
     }
 }

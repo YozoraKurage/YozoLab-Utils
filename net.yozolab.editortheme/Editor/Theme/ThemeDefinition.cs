@@ -128,7 +128,7 @@ namespace YozoLab.EditorTheme
         public ThemeDefinition Clone() => FromJson(ToJson());
 
         /// <summary>IMGUI 側が使う 11 色へ落とす。</summary>
-        public IcebergPalette.Palette ToPalette() => new IcebergPalette.Palette
+        public ThemePalette.Palette ToPalette() => new ThemePalette.Palette
         {
             Background = Get(ThemeRole.Surface),
             BackgroundDark = Get(ThemeRole.SurfaceDeepest),

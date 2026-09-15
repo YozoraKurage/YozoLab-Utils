@@ -9,7 +9,7 @@ namespace YozoLab.Tests
     /// <summary>
     /// テーマの土台（役割・定義・一覧）の回帰テスト。
     ///
-    /// 対応表を「Unity の色 → Iceberg の色」の直書きから「Unity の色 → 役割」に
+    /// 対応表を色の直書きから「Unity の色 → 役割」に
     /// 置き換えたときの取り決めを固定する。役割の割り当てを書き換えると配色が
     /// 静かに変わるので、代表的な対応を明示的に押さえておく。
     /// </summary>
@@ -108,14 +108,14 @@ namespace YozoLab.Tests
         [Test]
         public void PaletteIsDerivedFromTheTheme()
         {
-            IcebergPalette.Palette p = Dark.ToPalette();
+            ThemePalette.Palette p = Dark.ToPalette();
             Assert.That(Hex(p.Background), Is.EqualTo("161821"));
             Assert.That(Hex(p.BackgroundDark), Is.EqualTo("0f1117"));
             Assert.That(Hex(p.Menu), Is.EqualTo("3d425b"));
             Assert.That(Hex(p.ForegroundDim), Is.EqualTo("6b7089"));
             Assert.That(p.IsDark, Is.True);
 
-            IcebergPalette.Palette l = Light.ToPalette();
+            ThemePalette.Palette l = Light.ToPalette();
             Assert.That(Hex(l.Menu), Is.EqualTo("cad0de"), "明色の Menu は面の色");
             Assert.That(Hex(l.ForegroundDim), Is.EqualTo("8389a3"));
         }

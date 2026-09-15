@@ -135,24 +135,25 @@ namespace YozoLab.Tests
 
         /// <summary>
         /// before と after を比べるだけでは、最初から汚れていた値を見逃す。
-        /// OFF にした状態に Iceberg の色が残っていないかを直接見る。
+        /// OFF にした状態にテーマの色が残っていないかを直接見る。
         /// </summary>
         [Test]
-        public void NoIcebergColourSurvivesDisabling()
+        public void NoThemeColourSurvivesDisabling()
         {
             EditorThemeApplier.SetEnabled(true);
             ImguiSkinPatcher.RunPendingInGui();
             EditorThemeApplier.SetEnabled(false);
             ImguiSkinPatcher.RunPendingInGui();
 
+            ThemePalette.Palette themed = ThemeCatalog.Resolve(true).ToPalette();
             var palette = new (string name, Color value)[]
             {
-                ("Background", IcebergPalette.Dark.Background),
-                ("BackgroundDark", IcebergPalette.Dark.BackgroundDark),
-                ("Line", IcebergPalette.Dark.Line),
-                ("Visual", IcebergPalette.Dark.Visual),
-                ("Selection", IcebergPalette.Dark.Selection),
-                ("Menu", IcebergPalette.Dark.Menu),
+                ("Background", themed.Background),
+                ("BackgroundDark", themed.BackgroundDark),
+                ("Line", themed.Line),
+                ("Visual", themed.Visual),
+                ("Selection", themed.Selection),
+                ("Menu", themed.Menu),
             };
 
             bool Same(Color a, Color b) =>
@@ -189,7 +190,7 @@ namespace YozoLab.Tests
             }
 
             foreach (string l in leaks.Take(20)) Debug.Log($"[LEAK] {l}");
-            Assert.That(leaks, Is.Empty, $"OFF にしても {leaks.Count} 件が Iceberg のまま残っている");
+            Assert.That(leaks, Is.Empty, $"OFF にしても {leaks.Count} 件がテーマの色のまま残っている");
         }
 
         private static System.Collections.Generic.IEnumerable<Type> StaticColorHolders()

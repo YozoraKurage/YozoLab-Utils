@@ -5,7 +5,7 @@ namespace YozoLab.EditorTheme
 {
 
     /// <summary>
-    /// Iceberg の配色をエディタ全体に当てる入口。
+    /// 選ばれたテーマの配色をエディタ全体に当てる入口。
     ///
     /// 実際の書き換えは 2 段に分かれる。
     ///   - UI Toolkit 側: <see cref="ThemeSheetRecolorer"/> がテーマシートの色テーブルを書き換える。
@@ -120,7 +120,7 @@ namespace YozoLab.EditorTheme
             }
 
             sb.AppendLine(ThemeSheetRecolorer.DescribeSheets());
-            sb.AppendLine($"  panels with Iceberg clear colour: {PanelGroundPatcher.PatchedPanelCount} (active={PanelGroundPatcher.IsActive})");
+            sb.AppendLine($"  panels with theme clear colour: {PanelGroundPatcher.PatchedPanelCount} (active={PanelGroundPatcher.IsActive})");
             sb.AppendLine($"  static GUIStyle copies patched: {StaticStylePatcher.PatchedCount}");
             sb.AppendLine($"  static Color fields patched: {StaticStylePatcher.PatchedColorCount}");
             sb.AppendLine($"  windows chrome: available={WindowsChromePatch.IsAvailable} applied={WindowsChromePatch.IsApplied} note={WindowsChromePatch.Note ?? "-"}");
@@ -275,8 +275,8 @@ namespace YozoLab.EditorTheme
 
             bool debug = DebugPaint;
 
-            // 原色モードではシート由来の画素をピンクにする。翻訳表を通すと Iceberg の
-            // 濃紺になってしまい、地の灰色と見分けが付きにくい。
+            // 原色モードではシート由来の画素をピンクにする。翻訳表を通すとテーマの
+            // 面の色になってしまい、地と見分けが付きにくい。
             if (!ThemeSheetRecolorer.Apply(dark, debug ? new Color(1f, 0f, 0.66f, 1f) : (Color?)null))
             {
                 Debug.LogWarning("[YozoLab Editor Theme] テーマシートを取得できませんでした。");
@@ -286,7 +286,7 @@ namespace YozoLab.EditorTheme
             // 素の色の表は dark（Unity のスキン / 配色の指定）で選び、
             // 塗る色は選ばれているテーマから取る。両者は一致しなくてよい。
             ThemeDefinition theme = ThemeCatalog.Resolve(dark);
-            IcebergPalette.Palette palette = debug ? IcebergPalette.Debug : theme.ToPalette();
+            ThemePalette.Palette palette = debug ? ThemePalette.Debug : theme.ToPalette();
             palette.StockIsDark = dark;
             bool themeDark = debug || theme.isDark;
 
