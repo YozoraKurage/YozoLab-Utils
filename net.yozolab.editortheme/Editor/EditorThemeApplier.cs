@@ -298,10 +298,6 @@ namespace YozoLab.EditorTheme
 
             // IMGUI の色の出所。スキンのテクスチャより先に塗る。テクスチャを持たない
             // スタイルはここの色で描かれる（StylePainter がカタログを直接読む）。
-            // カタログを塗る前に、色を焼き込む型を初期化させておく。あとから初期化されると
-            // 塗った色を「元の色」として抱え込み、無効化しても戻せなくなる。
-            StaticStylePatcher.WarmUpStaticColors();
-
             StyleCatalogRecolorer.Apply(dark);
 
             if (PatchImgui)

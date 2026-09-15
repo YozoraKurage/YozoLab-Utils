@@ -66,6 +66,36 @@ namespace YozoLab.EditorTheme
         }
 
         /// <summary>
+        /// 塗り替え後の色から、塗り替え前の色を引く。
+        ///
+        /// カタログの色を型初期化時に static へ焼き込む型がある。塗り替えたあとに
+        /// 初期化されると、塗った色を「元の色」として抱え込んでしまい、こちらには
+        /// 控えが無いので無効化しても戻せない（Hierarchy の可視性列で実際に起きた）。
+        ///
+        /// 型初期化子を先に走らせて素の色を抱えさせる案は採れない。GUI の文脈外で
+        /// 走らせると EditorStyles を参照する型が NullReferenceException を投げ、
+        /// .NET はその失敗を記憶するため、以後その型は永久に使えなくなる
+        /// （PropertyEditor+Styles がこれでインスペクタごと死んだ）。
+        ///
+        /// 代わりに、塗り替え前後の配列を突き合わせて原本を引く。型には触らない。
+        /// </summary>
+        public static bool TryFindOriginal(Color patched, out Color stock)
+        {
+            stock = patched;
+            if (live == null || original == null) return false;
+
+            int n = Math.Min(live.Length, original.Length);
+            for (int i = 0; i < n; i++)
+            {
+                if (live[i] != patched) continue;
+                if (original[i] == patched) return false; // 塗り替えで変わらなかった色
+                stock = original[i];
+                return true;
+            }
+            return false;
+        }
+
+        /// <summary>
         /// EditorResources.styleCatalog.buffers.colors の実体を取る。
         /// buffers は struct を返すプロパティだが、colors は配列なので参照が取れる。
         /// styleCatalog の getter は s_StyleCatalog が null のときだけ組み立て直すので、

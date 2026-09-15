@@ -54,35 +54,17 @@ namespace YozoLab.EditorTheme
         ///
         /// 色付きの値（警告の黄、エラーの赤など）は翻訳表が素通しするので触らない。
         /// </summary>
-        /// <summary>
-        /// 候補の型を先に初期化させる。
-        ///
-        /// エディタには、型初期化のときにカタログの色を static readonly へ焼き込む型がある。
-        ///
-        ///     public static readonly Color backgroundColor =
-        ///         EditorResources.GetStyle("game-object-tree-view-scene-visibility").GetColor("background-color");
-        ///
-        /// カタログを塗り替えたあとに初期化されると、塗った色を「元の色」として抱え込む。
-        /// そうなるとこちらには控えが無く、無効化しても戻せない（実測: OFF にしても
-        /// Hierarchy の可視性列が Iceberg のまま残った）。
-        /// カタログを塗る前にここで初期化させ、素の色を抱えさせておく。
-        /// </summary>
-        internal static void WarmUpStaticColors()
-        {
-            CollectCandidates();
-            using (new SkinScope())
-            {
-                foreach (Type type in Candidates)
-                {
-                    try { System.Runtime.CompilerServices.RuntimeHelpers.RunClassConstructor(type.TypeHandle); }
-                    catch (Exception) { /* 初期化に GUI 文脈が要る型は諦める */ }
-                }
-            }
-        }
-
         internal static void PatchStaticColors(bool dark)
         {
             RestoreStaticColors();
+
+            // 型を触る前に EditorStyles を用意しておく。初期化子で EditorStyles を読む型が
+            // あり（PropertyEditor+Styles など）、s_Current が null だと初期化に失敗する。
+            // .NET は型初期化の失敗を記憶するため、一度失敗するとその型はドメインが
+            // 終わるまで使えない。用意できなくても進む。ここは GUI パスからしか呼ばれず、
+            // 実機ではその時点で s_Current は揃っている。
+            PrepareEditorStyles();
+
             CollectCandidates();
 
             using (new SkinScope())
@@ -103,7 +85,16 @@ namespace YozoLab.EditorTheme
 
                         Color mapped = IcebergTranslation.Translate(value, dark);
 
-                        if (mapped == value) continue;
+                        if (mapped == value)
+                        {
+                            // 翻訳しても変わらない = 読んだ時点で既に塗り替え後の色だった、
+                            // つまりこの型はカタログを塗ったあとに初期化されている。
+                            // 型には触らず、カタログの前後を突き合わせて原本を引き、
+                            // 控えだけ取っておく（値は既にテーマ色なのでそのままでよい）。
+                            if (StyleCatalogRecolorer.TryFindOriginal(value, out Color stock))
+                                ColorBackups.Add(new KeyValuePair<FieldInfo, Color>(field, stock));
+                            continue;
+                        }
 
                         try
                         {
@@ -127,6 +118,34 @@ namespace YozoLab.EditorTheme
 
         /// <summary>直近の復元で戻せなかったフィールド。診断用。</summary>
         internal static string LastRestoreFailure { get; private set; }
+
+        /// <summary>
+        /// EditorStyles.s_Current を用意する（できなくても呼び出し側は進む）。
+        ///
+        /// 無い状態で型を触ると、初期化子で EditorStyles を読む型が
+        /// NullReferenceException で初期化に失敗する。.NET は型初期化の失敗を記憶するので、
+        /// 一度失敗するとその型はドメインが終わるまで使えない（PropertyEditor+Styles が
+        /// これで壊れ、インスペクタごと落ちた）。
+        ///
+        /// 無いときは UpdateSkinCache() で用意させる。これは控えが null のときだけ作る
+        /// 実装なので、既にあるものを作り直すことはなく、寸法も動かない。
+        /// </summary>
+        private static bool PrepareEditorStyles()
+        {
+            try
+            {
+                FieldInfo current = typeof(EditorStyles).GetField("s_Current", BindingFlags.Static | BindingFlags.NonPublic);
+                if (current == null) return false;
+                if (current.GetValue(null) != null) return true;
+
+                typeof(EditorStyles)
+                    .GetMethod("UpdateSkinCache", BindingFlags.Static | BindingFlags.NonPublic, null, Type.EmptyTypes, null)
+                    ?.Invoke(null, null);
+
+                return current.GetValue(null) != null;
+            }
+            catch (Exception) { return false; }
+        }
 
         internal static void RestoreStaticColors()
         {
