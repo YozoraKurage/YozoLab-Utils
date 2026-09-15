@@ -27,6 +27,7 @@ namespace YozoLab.CaptureTool
         private static readonly string ThemeFlag = Environment.GetEnvironmentVariable("YOZOLAB_CAPTURE_THEME");
         private static readonly string WindowsToOpen = Environment.GetEnvironmentVariable("YOZOLAB_CAPTURE_WINDOWS");
         private static readonly string SelectFlag = Environment.GetEnvironmentVariable("YOZOLAB_CAPTURE_SELECT");
+        private static readonly string ThemeNameFlag = Environment.GetEnvironmentVariable("YOZOLAB_CAPTURE_THEME_NAME");
 
         private const int SettleFrames = 150;
         private const int AfterApplyFrames = 150;
@@ -53,6 +54,11 @@ namespace YozoLab.CaptureTool
 
             if (!string.IsNullOrEmpty(DebugPaintFlag))
                 applier.GetProperty("DebugPaint", Any)?.SetValue(null, DebugPaintFlag == "1");
+            if (!string.IsNullOrEmpty(ThemeNameFlag))
+            {
+                applier.GetProperty("ThemeName", Any)?.SetValue(null, ThemeNameFlag);
+                Debug.Log($"[CAPTURE] テーマを選択: {ThemeNameFlag}");
+            }
             if (!string.IsNullOrEmpty(ThemeFlag))
                 applier.GetMethod("SetEnabled", Any)?.Invoke(null, new object[] { ThemeFlag == "1" });
 

@@ -32,6 +32,7 @@ namespace YozoLab.EditorTheme
         private const string PrefPatchImgui = "YozoLab.EditorTheme.PatchImgui";
         private const string PrefDebugPaint = "YozoLab.EditorTheme.DebugPaint";
         private const string PrefWindowsChrome = "YozoLab.EditorTheme.WindowsChrome";
+        private const string PrefThemeName = "YozoLab.EditorTheme.ThemeName";
 
         private const int ProSkinCheckIntervalFrames = 30;
 
@@ -50,6 +51,16 @@ namespace YozoLab.EditorTheme
         {
             get => (ThemeVariant)EditorPrefs.GetInt(PrefVariant, (int)ThemeVariant.Auto);
             set { EditorPrefs.SetInt(PrefVariant, (int)value); Reapply(); }
+        }
+
+        /// <summary>
+        /// 使うテーマの名前。空なら明暗に応じた組み込みテーマ。
+        /// 一覧は ThemeCatalog（組み込み + Assets/YozoLabThemes/*.json）。
+        /// </summary>
+        internal static string ThemeName
+        {
+            get => EditorPrefs.GetString(PrefThemeName, string.Empty);
+            set { EditorPrefs.SetString(PrefThemeName, value ?? string.Empty); Reapply(); }
         }
 
         /// <summary>IMGUI の GUISkin も塗り替えるか。見た目が合わないときに切れるよう別スイッチにしてある。</summary>

@@ -6,6 +6,7 @@
 #   run-capture.sh out.png --no-theme      テーマ無効で撮る
 #   run-capture.sh out.png --trace         何がどこを塗ったかもログに出す
 #   run-capture.sh out.png --select        オブジェクトを選んで Inspector に中身を出す
+#   run-capture.sh out.png --theme-name "My Theme"  テーマを選んで撮る
 #   run-capture.sh out.png --windows AnimationWindow,ConsoleWindow  指定のウィンドウも開く
 #
 # batchmode では窓が無く、何も描かれない。ここでは Xvfb の仮想ディスプレイに
@@ -17,7 +18,7 @@
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 
 OUT="${1:?出力する PNG のパスが要る}"; shift || true
-THEME=1; DEBUG_PAINT=0; TRACE=0; SELECT=0; WINDOWS=""
+THEME=1; DEBUG_PAINT=0; TRACE=0; SELECT=0; WINDOWS=""; THEME_NAME=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -26,6 +27,7 @@ while [[ $# -gt 0 ]]; do
     --trace)       TRACE=1; shift ;;
     --select)      SELECT=1; shift ;;
     --windows)     WINDOWS="${2:?--windows に型名が要る}"; shift 2 ;;
+    --theme-name)  THEME_NAME="${2:?--theme-name に名前が要る}"; shift 2 ;;
     *) die "不明な引数: $1" ;;
   esac
 done
@@ -63,6 +65,7 @@ YOZOLAB_CAPTURE_DEBUGPAINT="$DEBUG_PAINT" \
 YOZOLAB_TRACE_PAINT="$TRACE" \
 YOZOLAB_CAPTURE_SELECT="$SELECT" \
 YOZOLAB_CAPTURE_WINDOWS="$WINDOWS" \
+YOZOLAB_CAPTURE_THEME_NAME="$THEME_NAME" \
   "$UNITY_BIN" -projectPath "$UNITY_PROJECT" -logFile "$LOG" || true
 
 if [[ -s "$OUT" ]]; then
