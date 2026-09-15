@@ -142,6 +142,7 @@ namespace YozoLab.EditorTheme
             ForegroundDim = Get(ThemeRole.TextFaint),
             Blue = Get(ThemeRole.Accent),
             IsDark = isDark,
+            StockIsDark = isDark,
         };
     }
 }

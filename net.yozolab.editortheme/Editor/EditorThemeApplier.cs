@@ -38,6 +38,7 @@ namespace YozoLab.EditorTheme
 
         private static bool applied;
         private static bool appliedDark;
+        private static bool appliedThemeDark;
         private static int frameCounter;
 
         /// <summary>util-settings のトグル契約。</summary>
@@ -81,7 +82,7 @@ namespace YozoLab.EditorTheme
             {
                 EditorPrefs.SetBool(PrefWindowsChrome, value);
                 if (!applied) return;
-                if (value) WindowsChromePatch.Apply(appliedDark); else WindowsChromePatch.Restore();
+                if (value) WindowsChromePatch.Apply(appliedThemeDark); else WindowsChromePatch.Restore();
             }
         }
 
@@ -297,9 +298,12 @@ namespace YozoLab.EditorTheme
                 return;
             }
 
-            IcebergPalette.Palette palette = debug
-                ? IcebergPalette.Debug
-                : dark ? IcebergPalette.Dark : IcebergPalette.Light;
+            // 素の色の表は dark（Unity のスキン / 配色の指定）で選び、
+            // 塗る色は選ばれているテーマから取る。両者は一致しなくてよい。
+            ThemeDefinition theme = ThemeCatalog.Resolve(dark);
+            IcebergPalette.Palette palette = debug ? IcebergPalette.Debug : theme.ToPalette();
+            palette.StockIsDark = dark;
+            bool themeDark = debug || theme.isDark;
 
             // 窓の地色。パネルのクリア色と OS ウィンドウの背景の 2 段。
             // 原色モードでは、この 2 つも窓枠スタイルと見分けが付くよう別の色にする。
@@ -321,8 +325,10 @@ namespace YozoLab.EditorTheme
 
             applied = true;
             appliedDark = dark;
+            appliedThemeDark = themeDark;
 
-            if (WindowsChrome) WindowsChromePatch.Apply(dark);
+            // OS 側はテーマの明暗に合わせる（明色テーマなら明るいタイトルバー）。
+            if (WindowsChrome) WindowsChromePatch.Apply(themeDark);
 
 #if YOZOLAB_EDITORTHEME_HARMONY
             PaintTracer.Apply();

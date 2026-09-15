@@ -120,6 +120,81 @@ namespace YozoLab.Tests
             Assert.That(Hex(l.ForegroundDim), Is.EqualTo("8389a3"));
         }
 
+        /// <summary>
+        /// 組み込みのテーマが全部そろっていて、読める配色になっていること。
+        /// 役割の埋め忘れや、面と文字が同化した配色を弾く。
+        /// </summary>
+        [Test]
+        public void EveryBuiltInThemeIsCompleteAndLegible()
+        {
+            float Luminance(Color c) => 0.2126f * c.r + 0.7152f * c.g + 0.0722f * c.b;
+
+            var problems = new System.Collections.Generic.List<string>();
+            foreach (ThemeDefinition theme in ThemeCatalog.All)
+            {
+                foreach (ThemeRole role in Enum.GetValues(typeof(ThemeRole)))
+                {
+                    if (theme.Get(role) == Color.magenta)
+                        problems.Add($"{theme.name}: {role} が未定義");
+                }
+
+                // 本文と地の明度差。これが無いと文字が読めない。
+                float gap = Mathf.Abs(Luminance(theme.Get(ThemeRole.Text)) - Luminance(theme.Get(ThemeRole.Surface)));
+                if (gap < 0.25f) problems.Add($"{theme.name}: 本文と地の明度差が小さい ({gap:F2})");
+
+                // へこんだ面は地より暗い。これは明暗どちらのテーマでも同じで、
+                // 明色テーマでも surfaceDeepest（入力欄の凹みなど）は地より暗くなる。
+                float deepest = Luminance(theme.Get(ThemeRole.SurfaceDeepest));
+                float surface = Luminance(theme.Get(ThemeRole.Surface));
+                if (deepest > surface + 0.01f)
+                    problems.Add($"{theme.name}: surfaceDeepest が surface より明るい");
+            }
+
+            foreach (string p in problems.Take(10)) Debug.Log($"[THEME] {p}");
+            Assert.That(problems, Is.Empty, $"{problems.Count} 件の問題");
+        }
+
+        [Test]
+        public void PresetThemesAreListed()
+        {
+            string[] names = ThemeCatalog.All.Select(t => t.name).ToArray();
+            foreach (string expected in new[] { "Iceberg Dark", "Dracula", "Nord", "Gruvbox Dark",
+                                                "Solarized Light", "Tokyo Night", "Monokai" })
+                Assert.That(names, Contains.Item(expected), $"{expected} が一覧に無い");
+
+            Assert.That(names.Distinct().Count(), Is.EqualTo(names.Length), "名前が重複している");
+            Assert.That(names.Count(n => ThemeCatalog.Find(n).isDark == false),
+                Is.GreaterThanOrEqualTo(3), "明色テーマが少なすぎる");
+        }
+
+        /// <summary>
+        /// 明示的に選んだテーマは、明暗が合わなくても使われること。
+        /// 暗いエディタで明色テーマを選んでも黙って無視されていた不具合の回帰テスト。
+        /// </summary>
+        [Test]
+        public void ExplicitChoiceWinsOverDarkness()
+        {
+            string saved = EditorThemeApplier.ThemeName;
+            try
+            {
+                EditorThemeApplier.ThemeName = "Solarized Light";
+                ThemeDefinition got = ThemeCatalog.Resolve(true); // 素は暗色
+                Assert.That(got.name, Is.EqualTo("Solarized Light"), "選んだ明色テーマが差し戻された");
+                Assert.That(got.isDark, Is.False);
+            }
+            finally { EditorThemeApplier.ThemeName = saved; }
+        }
+
+        [Test]
+        public void StockTableIsChosenByStockDarknessNotTheme()
+        {
+            // 素が暗色なら、明色テーマでも暗色側の表を引く。
+            // #383838 は暗色の表にしかない。明色テーマの面の色へ写るのが正しい。
+            Color got = ThemeTranslation.Translate(Parse("#383838"), Light, stockDark: true);
+            Assert.That(Hex(got), Is.EqualTo(Hex(Light.Get(ThemeRole.Surface))),
+                "素の表がテーマの明暗で選ばれてしまっている");
+        }
+
         [Test]
         public void ResolveFallsBackToMatchingDarkness()
         {
@@ -127,7 +202,7 @@ namespace YozoLab.Tests
             string saved = EditorThemeApplier.ThemeName;
             try
             {
-                EditorThemeApplier.ThemeName = "存在しないテーマ";
+                EditorThemeApplier.ThemeName = "存在しないテーマ";  // 見つからないときだけ明暗で選ぶ
                 Assert.That(ThemeCatalog.Resolve(true).isDark, Is.True);
                 Assert.That(ThemeCatalog.Resolve(false).isDark, Is.False);
             }

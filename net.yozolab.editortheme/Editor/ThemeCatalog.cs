@@ -30,6 +30,7 @@ namespace YozoLab.EditorTheme
         public static void Reload()
         {
             cache = new List<ThemeDefinition> { IcebergDark(), IcebergLight() };
+            cache.AddRange(PresetThemes.All());
 
             try
             {
@@ -71,8 +72,11 @@ namespace YozoLab.EditorTheme
         /// </summary>
         public static ThemeDefinition Resolve(bool dark)
         {
+            // 明示的に選ばれていれば、明暗が合わなくてもそれを使う。
+            // 以前は「明暗が合わない」として差し戻していたが、暗いエディタで明色テーマを
+            // 選んでも黙って無視される作りになっていた（選択欄は選ばれたままなので気付けない）。
             ThemeDefinition chosen = Find(EditorThemeApplier.ThemeName);
-            if (chosen != null && chosen.isDark == dark) return chosen;
+            if (chosen != null) return chosen;
 
             foreach (ThemeDefinition t in All)
             {

@@ -11,7 +11,8 @@ namespace YozoLab.EditorTheme
     internal static class IcebergTranslation
     {
         /// <summary>今選ばれているテーマで翻訳する。</summary>
-        public static Color Translate(Color source, bool dark)
-            => ThemeTranslation.Translate(source, ThemeCatalog.Resolve(dark));
+        /// <param name="stockDark">今 Unity が使っている素の色が暗色側か。</param>
+        public static Color Translate(Color source, bool stockDark)
+            => ThemeTranslation.Translate(source, ThemeCatalog.Resolve(stockDark), stockDark);
     }
 }

@@ -61,7 +61,14 @@ namespace YozoLab.EditorTheme
         {
             public Color Background, BackgroundDark, Line, Visual, Selection, Menu, MenuSelected;
             public Color Foreground, ForegroundBright, ForegroundDim, Blue;
+            /// <summary>このテーマが暗色か。</summary>
             public bool IsDark;
+
+            /// <summary>
+            /// 今 Unity が使っている素の色が暗色側か。素の色を分類するときに使う。
+            /// テーマの明暗とは別物。
+            /// </summary>
+            public bool StockIsDark;
         }
     }
 }

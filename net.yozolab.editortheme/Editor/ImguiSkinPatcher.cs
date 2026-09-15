@@ -304,7 +304,7 @@ namespace YozoLab.EditorTheme
 
             // 型が抱え込んでいる色も塗る。カタログを塗る前に初期化された静的フィールドは
             // 素の色のまま残っているため（Hierarchy の可視性列など）。
-            StaticStylePatcher.PatchStaticColors(currentPalette.IsDark);
+            StaticStylePatcher.PatchStaticColors(currentPalette.StockIsDark);
 
             foreach (GUIStyle style in StaticStylePatcher.EnumerateStyles().Concat(EnumerateEditorStyles()))
             {
@@ -646,7 +646,8 @@ namespace YozoLab.EditorTheme
 
             float luminance = (max + min) * 0.5f;
 
-            if (palette.IsDark)
+            // 分類するのは素の色なので、判断は素の明暗で行う。
+            if (palette.StockIsDark)
             {
                 if (luminance >= 0.8f) mapped = palette.ForegroundBright;
                 else if (luminance >= 0.55f) mapped = palette.Foreground;

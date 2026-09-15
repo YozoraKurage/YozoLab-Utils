@@ -80,12 +80,22 @@ namespace YozoLab.EditorTheme
             ["FF9999"] = ThemeRole.Error, ["FFB299"] = ThemeRole.Warning, ["FFFFFF"] = ThemeRole.TextBrightest,
         };
 
-        /// <summary>素の色を、テーマの色へ置き換える。</summary>
+        /// <summary>素の色を、テーマの色へ置き換える。素の表はテーマの明暗で選ぶ。</summary>
         public static Color Translate(Color source, ThemeDefinition theme)
+            => Translate(source, theme, theme?.isDark ?? true);
+
+        /// <summary>
+        /// 素の色を、テーマの色へ置き換える。
+        ///
+        /// <paramref name="stockDark"/> は「今 Unity が使っている素の色が暗色側か」。
+        /// テーマの明暗とは別物で、混同すると暗いエディタに明色テーマを当てられなくなる。
+        /// 素の色は Unity のスキンから来るので表はそちらで選び、塗る色はテーマから取る。
+        /// </summary>
+        public static Color Translate(Color source, ThemeDefinition theme, bool stockDark)
         {
             if (theme == null) return source;
 
-            Dictionary<string, ThemeRole> table = theme.isDark ? DarkRoles : LightRoles;
+            Dictionary<string, ThemeRole> table = stockDark ? DarkRoles : LightRoles;
             string key = ColorUtility.ToHtmlStringRGB(source);
 
             if (!table.TryGetValue(key, out ThemeRole role))

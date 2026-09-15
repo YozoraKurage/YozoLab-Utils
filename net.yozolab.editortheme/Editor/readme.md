@@ -182,9 +182,14 @@ Harmony を同梱する VRCSDK（`com.vrchat.base`）が無い環境では、上
 
 `YozoLab > Editor Theme` でできること。
 
-- `テーマ` から選ぶ（組み込みの Iceberg Dark / Light と、置いた JSON）
+- `テーマ` から選ぶ（組み込みのプリセットと、置いた JSON）
 - `複製して色を編集` で今のテーマを複製し、26 の役割ごとに色を決めて保存する
 - `テーマを再読込` で JSON を読み直す
+
+組み込みのプリセットは 12 個です。Iceberg Dark / Light に加えて、Dracula、Nord、
+Gruvbox Dark / Light、Solarized Dark / Light、Tokyo Night、Catppuccin Mocha、One Dark、
+Monokai。値は各テーマの公開パレットから取っていますが、**どの色をどの役割に割り当てるかは
+こちらの判断**なので、好みに合わなければ `複製して色を編集` で直せます。
 
 **書き方は [theme-authoring.md](theme-authoring.md)。** 役割の一覧と雛形が載っているので、
 「こういう配色にして」と AI に頼むときはその文書を渡せばそのまま書けます。
