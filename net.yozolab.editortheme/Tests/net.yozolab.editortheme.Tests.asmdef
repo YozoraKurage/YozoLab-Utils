@@ -1,10 +1,10 @@
 {
-    "name": "net.yozolab.fbxanimationbaker.Tests",
+    "name": "net.yozolab.editortheme.Tests",
     "rootNamespace": "YozoLab.Tests",
     "references": [
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner",
-        "net.yozolab.fbxanimationbaker.Editor"
+        "net.yozolab.editortheme.Editor"
     ],
     "includePlatforms": [
         "Editor"
@@ -18,7 +18,7 @@
     "autoReferenced": false,
     "defineConstraints": [
         "UNITY_INCLUDE_TESTS",
-        "!YOZOLAB_DISABLE_FBXANIMATIONBAKER"
+        "!YOZOLAB_DISABLE_EDITORTHEME"
     ],
     "versionDefines": [],
     "noEngineReferences": false

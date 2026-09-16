@@ -1,5 +1,7 @@
 using UnityEngine;
 using UnityEditor;
+using UnityEditor.PackageManager;
+using UnityEditor.PackageManager.Requests;
 using System;
 using System.Linq;
 using System.Collections.Generic;
@@ -11,7 +13,10 @@ namespace YozoLab.FBXAnimationBaker
     /// </summary>
     public partial class FBXAnimationBakerWindow
     {
-        private const float EntryListWidth = 240f;
+        // リストペインの幅の下限・上限。上限はウィンドウ幅から詳細ペインの取り分を引いて決める。
+        private const float EntryListMinWidth = 170f;
+        private const float EntryDetailMinWidth = 300f;
+        private const float SplitterWidth = 5f;
 
         private void OnGUI()
         {
@@ -44,8 +49,8 @@ namespace YozoLab.FBXAnimationBaker
             EditorGUILayout.Space();
 
             EditorGUILayout.LabelField(L10n.T(
-                "FBX と Humanoid AnimationClip を指定すると、クリップを Transform アニメーションとしてベイクした FBX を書き出します。",
-                "Pick an FBX and humanoid animation clips to export an FBX with the clip baked as Transform animation."),
+                "FBX とモーション(AnimationClip / BVH)を指定すると、それを Transform アニメーションとしてベイクした FBX を書き出します。",
+                "Pick an FBX and motions (animation clips or BVH) to export an FBX with them baked as Transform animation."),
                 EditorStyles.wordWrappedMiniLabel);
 
             if (!FbxExporterBridge.IsAvailable)
@@ -57,11 +62,40 @@ namespace YozoLab.FBXAnimationBaker
 
                 EditorGUILayout.BeginHorizontal();
                 GUILayout.FlexibleSpace();
+
+                // 探しに行くのはユーザーの手間なので、その場で入れられるようにする。
+                // 解決するとドメインリロードが走り、次の描画では IsAvailable が true になる。
+                using (new EditorGUI.DisabledScope(fbxExporterInstall != null && !fbxExporterInstall.IsCompleted))
+                {
+                    if (GUILayout.Button(L10n.T("インストール", "Install"), GUILayout.Width(110)))
+                    {
+                        fbxExporterInstall = Client.Add(FbxExporterPackageId);
+                    }
+                }
+
+                if (GUILayout.Button(L10n.T("Package Manager", "Package Manager"), GUILayout.Width(130)))
+                {
+                    UnityEditor.PackageManager.UI.Window.Open(FbxExporterPackageId);
+                }
+
                 if (GUILayout.Button(L10n.T("再チェック", "Re-check"), GUILayout.Width(110)))
                 {
                     FbxExporterBridge.ClearCache();
                 }
                 EditorGUILayout.EndHorizontal();
+
+                if (fbxExporterInstall != null && !fbxExporterInstall.IsCompleted)
+                {
+                    EditorGUILayout.LabelField(L10n.T("インストール中…", "Installing…"), EditorStyles.miniLabel);
+                    Repaint();
+                }
+                else if (fbxExporterInstall != null && fbxExporterInstall.Status == StatusCode.Failure)
+                {
+                    EditorGUILayout.HelpBox(
+                        L10n.T($"インストールに失敗しました: {fbxExporterInstall.Error?.message}",
+                               $"Install failed: {fbxExporterInstall.Error?.message}"),
+                        MessageType.Error);
+                }
             }
 
             // 出力先はフォルダごとの設定。共通の Output Directory は持たない。
@@ -87,47 +121,117 @@ namespace YozoLab.FBXAnimationBaker
         {
             EditorGUILayout.BeginVertical("box", GUILayout.ExpandHeight(true));
             EnsureSelectedEntryIndex();
-            DrawEntryToolbar();
-            DrawTemplateToolbar();
 
-            EditorGUILayout.Space(4);
-
+            // 操作はそれが効く場所の近くへ置く。リストを触るものはリストの中、
+            // 設定を触るものは設定ペインの中。全幅のツールバーに並べると、
+            // リストを操作するボタンが右端(＝詳細ペインの上)に出てしまう。
             EditorGUILayout.BeginHorizontal(GUILayout.ExpandHeight(true));
             DrawEntryListPane();
+            DrawPaneSplitter();
             DrawEntryDetailPane();
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.EndVertical();
         }
 
-        private void DrawEntryToolbar()
+        /// <summary>
+        /// リストペインの幅。ユーザーごとの見た目の好みなので EditorPrefs に持つ
+        /// （プロジェクト設定に混ぜると、他の人の環境まで動いてしまう）。
+        /// ウィンドウを狭めたときに詳細ペインが潰れないよう、読むたびに現在の幅で丸める。
+        /// </summary>
+        private float EntryListWidth
+        {
+            get
+            {
+                if (entryListWidth < 0f)
+                {
+                    entryListWidth = EditorPrefs.GetFloat(EntryListWidthPrefKey, 270f);
+                }
+
+                float max = Mathf.Max(EntryListMinWidth, position.width - EntryDetailMinWidth - SplitterWidth);
+                return Mathf.Clamp(entryListWidth, EntryListMinWidth, max);
+            }
+        }
+
+        /// <summary>
+        /// リストと設定のあいだの仕切り。掴んで幅を変えられる。
+        /// 幅の決め打ちだと、エントリ名が長い人にも短い人にも合わない。
+        /// </summary>
+        private void DrawPaneSplitter()
+        {
+            Rect rect = GUILayoutUtility.GetRect(SplitterWidth, SplitterWidth, GUILayout.ExpandHeight(true));
+
+            if (Event.current.type == EventType.Repaint)
+            {
+                // 掴めることが分かる程度の線。掴んでいる間は濃くする。
+                var line = new Rect(rect.x + rect.width * 0.5f - 1f, rect.y + 2f, 2f, rect.height - 4f);
+                EditorGUI.DrawRect(line, draggingSplitter
+                    ? new Color(0.35f, 0.58f, 0.85f, 0.9f)
+                    : new Color(0f, 0f, 0f, 0.25f));
+            }
+
+            EditorGUIUtility.AddCursorRect(rect, MouseCursor.ResizeHorizontal);
+
+            Event e = Event.current;
+            switch (e.type)
+            {
+                case EventType.MouseDown when rect.Contains(e.mousePosition) && e.button == 0:
+                    draggingSplitter = true;
+                    e.Use();
+                    break;
+
+                // 動かした距離で足し引きする。マウス座標をそのまま幅にすると、
+                // 外側の box の余白ぶんだけ食い違う。
+                case EventType.MouseDrag when draggingSplitter:
+                    entryListWidth = EntryListWidth + (e.mousePosition.x - rect.center.x);
+                    e.Use();
+                    Repaint();
+                    break;
+
+                // 保存はドラッグが終わってから。動かすたびに EditorPrefs へ書かない。
+                case EventType.MouseUp when draggingSplitter:
+                    draggingSplitter = false;
+                    EditorPrefs.SetFloat(EntryListWidthPrefKey, EntryListWidth);
+                    e.Use();
+                    break;
+            }
+        }
+
+        /// <summary>リストの上に置く操作。エントリを増やす・減らす・フォルダを作る。</summary>
+        private void DrawEntryListToolbar()
         {
             EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField($"Entries: {bakeEntriesProp.arraySize}", EditorStyles.boldLabel, GUILayout.Width(90));
-            GUILayout.FlexibleSpace();
+            EditorGUILayout.LabelField($"Entries: {bakeEntriesProp.arraySize}", EditorStyles.miniBoldLabel,
+                                       GUILayout.Width(70));
+            GUILayout.Label("🔍", GUILayout.Width(16));
+            entrySearchText = EditorGUILayout.TextField(entrySearchText);
+            EditorGUILayout.EndHorizontal();
 
-            GUILayout.Label("Search", GUILayout.Width(45));
-            entrySearchText = EditorGUILayout.TextField(entrySearchText, GUILayout.Width(160));
+            EditorGUILayout.BeginHorizontal();
 
-            if (GUILayout.Button("Add", GUILayout.Width(60)))
+            if (GUILayout.Button(new GUIContent("+ Add", L10n.T("空のエントリを追加", "Add an empty entry")),
+                    EditorStyles.miniButtonLeft))
             {
                 AddEntry(null, null);
             }
 
-            if (GUILayout.Button(new GUIContent("From Selection",
+            if (GUILayout.Button(new GUIContent(L10n.T("選択から", "From Sel."),
                     L10n.T("Projectで選択中のFBXとAnimationClipからエントリを作成します",
                            "Create entries from the FBX models and animation clips selected in the Project window")),
-                GUILayout.Width(110)))
+                EditorStyles.miniButtonMid))
             {
                 AddEntriesFromSelection();
             }
 
             using (new EditorGUI.DisabledScope(!IsEntryIndexValid(selectedEntryIndex)))
             {
-                if (GUILayout.Button("Duplicate", GUILayout.Width(80)))
+                if (GUILayout.Button(new GUIContent(L10n.T("複製", "Duplicate"),
+                        L10n.T("選択中エントリを複製", "Duplicate the selected entry")), EditorStyles.miniButtonMid))
                 {
                     bakeEntriesProp.InsertArrayElementAtIndex(selectedEntryIndex);
                     selectedEntryIndex++;
+                    selectedEntryIndices.Clear();
+                    selectedEntryIndices.Add(selectedEntryIndex);
 
                     SerializedProperty nameProp = bakeEntriesProp
                         .GetArrayElementAtIndex(selectedEntryIndex)
@@ -138,38 +242,30 @@ namespace YozoLab.FBXAnimationBaker
                     }
                 }
 
-                if (GUILayout.Button("Delete", GUILayout.Width(70)))
+                if (GUILayout.Button(new GUIContent(L10n.T("削除", "Delete"),
+                        L10n.T("選択中エントリを削除", "Delete the selected entry")), EditorStyles.miniButtonMid))
                 {
                     bakeEntriesProp.DeleteArrayElementAtIndex(selectedEntryIndex);
-                    checkedEntryIndices.Clear();
+                    selectedEntryIndices.Clear();
                     selectedEntryIndex = Mathf.Clamp(selectedEntryIndex, 0, bakeEntriesProp.arraySize - 1);
                 }
             }
 
-            if (GUILayout.Button(new GUIContent("New Folder",
-                    L10n.T("Entry Listに新しいフォルダを作成します", "Create a new folder in the Entry List")),
-                GUILayout.Width(90)))
+            if (GUILayout.Button(new GUIContent(L10n.T("新規フォルダ", "New Folder"),
+                    L10n.T("フォルダを作ります。名前は見出しでそのまま直せます",
+                           "Create a folder. Rename it directly in its header")),
+                EditorStyles.miniButtonRight))
             {
-                FolderNamePromptWindow.Open(
-                    L10n.T("新規フォルダ", "New Folder"),
-                    name => CreateFolder(name, null));
-            }
-
-            List<int> folderTargets = GetBatchTargetIndices();
-            using (new EditorGUI.DisabledScope(folderTargets.Count == 0))
-            {
-                if (GUILayout.Button(new GUIContent($"Folder ({folderTargets.Count}) ▾",
-                        L10n.T("チェック済みエントリ(未チェックなら選択中エントリ)をフォルダへ移動",
-                               "Move checked entries (or the selected entry when none are checked) to a folder")),
-                    GUILayout.Width(95)))
-                {
-                    ShowFolderAssignMenu(folderTargets);
-                }
+                CreateFolder(MakeUniqueFolderName(L10n.T("新しいフォルダ", "New Folder")), null);
             }
 
             EditorGUILayout.EndHorizontal();
         }
 
+        /// <summary>
+        /// 設定ペインの上に置くテンプレート操作。
+        /// 写す元も貼る先もこのペインに映っている設定なので、ここが置き場になる。
+        /// </summary>
         private void DrawTemplateToolbar()
         {
             EditorGUILayout.BeginHorizontal();
@@ -179,18 +275,18 @@ namespace YozoLab.FBXAnimationBaker
                 : $"\"{entryTemplate.sourceEntryName}\"";
             EditorGUILayout.LabelField(new GUIContent(
                 $"Template: {source}",
-                L10n.T("選択中エントリのベイク設定をコピーし、複数のエントリに貼り付けできます(FBX/クリップ/名前は除く)",
-                       "Copy the selected entry's bake settings and paste them to several entries (excluding FBX, clips and name)")),
+                L10n.T("選択中エントリのベイク設定をコピーし、複数のエントリに貼り付けできます(FBX/モーション/名前は除く)",
+                       "Copy the selected entry's bake settings and paste them to several entries (excluding FBX, motions and name)")),
                 EditorStyles.miniBoldLabel);
 
             GUILayout.FlexibleSpace();
 
             using (new EditorGUI.DisabledScope(!IsEntryIndexValid(selectedEntryIndex)))
             {
-                if (GUILayout.Button(new GUIContent("Copy Template",
-                        L10n.T("選択中エントリからテンプレートをコピー(FBX/クリップ/名前を除く)",
-                               "Capture the selected entry as a template (excluding FBX, clips and name)")),
-                    GUILayout.Width(130)))
+                if (GUILayout.Button(new GUIContent(L10n.T("コピー", "Copy"),
+                        L10n.T("選択中エントリからテンプレートをコピー(FBX/モーション/名前を除く)",
+                               "Capture the selected entry as a template (excluding FBX, motions and name)")),
+                    EditorStyles.miniButtonLeft, GUILayout.Width(70)))
                 {
                     CopySelectedEntryToTemplate();
                 }
@@ -200,10 +296,9 @@ namespace YozoLab.FBXAnimationBaker
             using (new EditorGUI.DisabledScope(entryTemplate == null || pasteTargets.Count == 0))
             {
                 if (GUILayout.Button(new GUIContent(
-                        $"Paste ({pasteTargets.Count})",
-                        L10n.T("チェック済みエントリにペースト(未チェックなら選択中エントリ)",
-                               "Paste to checked entries (or the selected entry when none are checked)")),
-                    GUILayout.Width(110)))
+                        $"{L10n.T("貼り付け", "Paste")} ({pasteTargets.Count})",
+                        L10n.T("選択中のエントリすべてに貼り付け", "Paste to every selected entry")),
+                    EditorStyles.miniButtonRight, GUILayout.Width(90)))
                 {
                     PasteTemplateToEntries(pasteTargets);
                 }
@@ -216,11 +311,7 @@ namespace YozoLab.FBXAnimationBaker
         {
             EditorGUILayout.BeginVertical(GUILayout.Width(EntryListWidth), GUILayout.ExpandHeight(true));
 
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Entry List", EditorStyles.miniBoldLabel);
-            GUILayout.FlexibleSpace();
-            EditorGUILayout.LabelField($"Checked: {checkedEntryIndices.Count}", EditorStyles.miniLabel, GUILayout.Width(80));
-            EditorGUILayout.EndHorizontal();
+            DrawEntryListToolbar();
 
             // エントリが 0 でも、フォルダがあれば見出しと出力先の設定を出す必要がある
             // (フォルダを作った直後がこの状態)。
@@ -319,7 +410,8 @@ namespace YozoLab.FBXAnimationBaker
 
                 DrawFolderOutputDirectory(folder);
 
-                EditorGUILayout.BeginHorizontal();
+                // フォルダの中身もドロップ先にする。見出しの細い帯だけが的だと外しやすい。
+                Rect bodyRect = EditorGUILayout.BeginHorizontal();
                 GUILayout.Space(14);
                 EditorGUILayout.BeginVertical();
                 foreach (int i in visibleIndices)
@@ -328,6 +420,7 @@ namespace YozoLab.FBXAnimationBaker
                 }
                 EditorGUILayout.EndVertical();
                 EditorGUILayout.EndHorizontal();
+                HandleFolderDrop(bodyRect, folder.name);
             }
 
             if (bakeEntriesProp.arraySize == 0)
@@ -337,80 +430,224 @@ namespace YozoLab.FBXAnimationBaker
 
             EditorGUILayout.EndScrollView();
 
-            EditorGUILayout.Space(4);
+            EditorGUILayout.Space(2);
             EditorGUILayout.BeginHorizontal();
 
             using (new EditorGUI.DisabledScope(selectedEntryIndex <= 0 || selectedEntryIndex >= bakeEntriesProp.arraySize))
             {
-                if (GUILayout.Button("Move Up", EditorStyles.miniButton))
+                if (GUILayout.Button(new GUIContent("▲", L10n.T("ひとつ上へ", "Move up")),
+                        EditorStyles.miniButtonLeft, GUILayout.Width(26)))
                 {
                     bakeEntriesProp.MoveArrayElement(selectedEntryIndex, selectedEntryIndex - 1);
                     selectedEntryIndex--;
-                    checkedEntryIndices.Clear();
+                    selectedEntryIndices.Clear();
+                    selectedEntryIndices.Add(selectedEntryIndex);
                 }
             }
 
             using (new EditorGUI.DisabledScope(selectedEntryIndex < 0 || selectedEntryIndex >= bakeEntriesProp.arraySize - 1))
             {
-                if (GUILayout.Button("Move Down", EditorStyles.miniButton))
+                if (GUILayout.Button(new GUIContent("▼", L10n.T("ひとつ下へ", "Move down")),
+                        EditorStyles.miniButtonRight, GUILayout.Width(26)))
                 {
                     bakeEntriesProp.MoveArrayElement(selectedEntryIndex, selectedEntryIndex + 1);
                     selectedEntryIndex++;
-                    checkedEntryIndices.Clear();
+                    selectedEntryIndices.Clear();
+                    selectedEntryIndices.Add(selectedEntryIndex);
+                }
+            }
+
+            GUILayout.FlexibleSpace();
+
+            if (selectedEntryIndices.Count > 1)
+            {
+                EditorGUILayout.LabelField($"{selectedEntryIndices.Count} selected", EditorStyles.miniLabel,
+                                           GUILayout.Width(72));
+            }
+
+            using (new EditorGUI.DisabledScope(!searching))
+            {
+                if (GUILayout.Button(new GUIContent(L10n.T("表示中を全選択", "Select Filtered"),
+                        L10n.T("検索で絞り込まれている行をまとめて選択します", "Select every row the search leaves visible")),
+                    EditorStyles.miniButtonLeft, GUILayout.Width(92)))
+                {
+                    CheckAllFiltered(normalizedSearch);
+                }
+            }
+
+            using (new EditorGUI.DisabledScope(selectedEntryIndices.Count == 0))
+            {
+                if (GUILayout.Button(new GUIContent(L10n.T("解除", "Clear"),
+                        L10n.T("選択を解除します", "Clear the selection")),
+                    EditorStyles.miniButtonRight, GUILayout.Width(44)))
+                {
+                    selectedEntryIndices.Clear();
                 }
             }
 
             EditorGUILayout.EndHorizontal();
 
-            EditorGUILayout.BeginHorizontal();
-            if (GUILayout.Button("Check All Filtered", EditorStyles.miniButton))
-            {
-                CheckAllFiltered(normalizedSearch);
-            }
-            if (GUILayout.Button("Uncheck All", EditorStyles.miniButton))
-            {
-                checkedEntryIndices.Clear();
-            }
-            EditorGUILayout.EndHorizontal();
-
             EditorGUILayout.EndVertical();
         }
 
+        /// <summary>
+        /// エントリ 1 行。
+        ///
+        /// チェックボックスは「このエントリを焼くか」の 1 つだけ。以前は選択用の
+        /// チェックと実行フラグのトグルが並んでいて、どちらが何なのか見て分からなかった。
+        /// 一括操作の対象は、リストの選択そのもの（Ctrl / Shift クリック）に寄せた。
+        ///
+        /// 行はボタンではなく Rect として扱う。修飾キー付きのクリックと、
+        /// フォルダへのドラッグを自分で捌く必要があるため。
+        /// </summary>
         private void DrawEntryListItem(int i)
         {
             SerializedProperty entryProp = bakeEntriesProp.GetArrayElementAtIndex(i);
             string label = GetEntryLabel(entryProp);
 
-            bool isSelected = selectedEntryIndex == i;
-            Color prevBg = GUI.backgroundColor;
-            if (isSelected)
+            Rect row = EditorGUILayout.GetControlRect(GUILayout.Height(EntryRowHeight));
+            bool isSelected = selectedEntryIndices.Contains(i);
+
+            if (Event.current.type == EventType.Repaint)
             {
-                GUI.backgroundColor = new Color(0.35f, 0.58f, 0.85f, 0.9f);
+                if (isSelected)
+                {
+                    EditorGUI.DrawRect(row, selectedEntryIndex == i
+                        ? new Color(0.24f, 0.42f, 0.68f, 0.85f)
+                        : new Color(0.24f, 0.42f, 0.68f, 0.45f));
+                }
+                else if (row.Contains(Event.current.mousePosition))
+                {
+                    EditorGUI.DrawRect(row, new Color(1f, 1f, 1f, 0.05f));
+                }
             }
 
-            EditorGUILayout.BeginHorizontal();
+            var toggleRect = new Rect(row.x + 2f, row.y + 1f, 16f, row.height - 2f);
+            var labelRect = new Rect(toggleRect.xMax + 4f, row.y, row.width - toggleRect.width - 8f, row.height);
 
-            bool wasChecked = checkedEntryIndices.Contains(i);
-            bool isChecked = EditorGUILayout.Toggle(wasChecked, GUILayout.Width(16));
-            if (isChecked != wasChecked)
-            {
-                if (isChecked) checkedEntryIndices.Add(i);
-                else checkedEntryIndices.Remove(i);
-            }
-
-            // エントリ個別の実行フラグ。フォルダ側の Bake が OFF ならそちらが優先される。
             SerializedProperty enabledProp = entryProp.FindPropertyRelative("enabled");
-            enabledProp.boolValue = EditorGUILayout.Toggle(enabledProp.boolValue, GUILayout.Width(16));
+            enabledProp.boolValue = EditorGUI.Toggle(toggleRect, enabledProp.boolValue);
 
-            if (GUILayout.Button(new GUIContent(label, label), EditorStyles.miniButton,
-                                 GUILayout.Height(20), GUILayout.ExpandWidth(true)))
+            var content = new GUIContent(label,
+                L10n.T("クリックで選択。Ctrlで追加選択、Shiftで範囲選択。ドラッグでフォルダへ移動できます。",
+                       "Click to select. Ctrl to add, Shift for a range. Drag onto a folder to move it."));
+            GUI.Label(labelRect, content, isSelected ? EditorStyles.whiteLabel : EditorStyles.label);
+
+            HandleEntryRowInput(row, labelRect, i);
+        }
+
+        /// <summary>行のクリック・ドラッグ開始・右クリックメニューを捌く。</summary>
+        private void HandleEntryRowInput(Rect row, Rect labelRect, int i)
+        {
+            Event e = Event.current;
+
+            switch (e.type)
             {
-                selectedEntryIndex = i;
-                GUI.FocusControl(null);
+                case EventType.MouseDown when labelRect.Contains(e.mousePosition) && e.button == 0:
+                    SelectEntry(i, e.control || e.command, e.shift);
+                    entryDragStart = e.mousePosition;
+                    entryDragCandidate = i;
+                    GUI.FocusControl(null);
+                    e.Use();
+                    break;
+
+                case EventType.MouseDown when row.Contains(e.mousePosition) && e.button == 1:
+                    if (!selectedEntryIndices.Contains(i)) SelectEntry(i, false, false);
+                    ShowEntryContextMenu();
+                    e.Use();
+                    break;
+
+                // 少し動いてから掴む。クリックのたびにドラッグが始まると選択できない。
+                case EventType.MouseDrag when entryDragCandidate == i
+                                              && Vector2.Distance(entryDragStart, e.mousePosition) > 4f:
+                    DragAndDrop.PrepareStartDrag();
+                    DragAndDrop.SetGenericData(EntryDragKey, new List<int>(selectedEntryIndices));
+                    DragAndDrop.objectReferences = new UnityEngine.Object[0];
+                    DragAndDrop.StartDrag(selectedEntryIndices.Count > 1
+                        ? $"{selectedEntryIndices.Count} entries"
+                        : GetEntryLabel(bakeEntriesProp.GetArrayElementAtIndex(i)));
+                    entryDragCandidate = -1;
+                    e.Use();
+                    break;
+
+                case EventType.MouseUp:
+                    entryDragCandidate = -1;
+                    break;
+            }
+        }
+
+        /// <summary>クリックの修飾キーに応じて選択を更新する。</summary>
+        private void SelectEntry(int i, bool additive, bool range)
+        {
+            if (range && IsEntryIndexValid(selectedEntryIndex))
+            {
+                int from = Mathf.Min(selectedEntryIndex, i);
+                int to = Mathf.Max(selectedEntryIndex, i);
+                selectedEntryIndices.Clear();
+                for (int index = from; index <= to; index++) selectedEntryIndices.Add(index);
+                return;
             }
 
-            EditorGUILayout.EndHorizontal();
-            GUI.backgroundColor = prevBg;
+            if (additive)
+            {
+                if (!selectedEntryIndices.Add(i)) selectedEntryIndices.Remove(i);
+                selectedEntryIndex = i;
+                return;
+            }
+
+            selectedEntryIndices.Clear();
+            selectedEntryIndices.Add(i);
+            selectedEntryIndex = i;
+        }
+
+        /// <summary>右クリックメニュー。フォルダ移動の道はドラッグだけにしない。</summary>
+        private void ShowEntryContextMenu()
+        {
+            var menu = new GenericMenu();
+            List<int> targets = GetBatchTargetIndices();
+
+            foreach (string folderName in CollectFolderNames())
+            {
+                string captured = folderName;
+                menu.AddItem(new GUIContent($"{L10n.T("フォルダへ移動", "Move to folder")}/{folderName}"),
+                    false, () => AssignFolderToEntries(targets, captured));
+            }
+
+            if (settings.bakeFolders == null || settings.bakeFolders.Count == 0)
+            {
+                menu.AddDisabledItem(new GUIContent(L10n.T("フォルダがありません", "No folders yet")));
+            }
+
+            menu.AddSeparator(string.Empty);
+            menu.AddItem(new GUIContent(L10n.T("フォルダから出す", "Move out of folder")), false,
+                () => AssignFolderToEntries(targets, string.Empty));
+            menu.ShowAsContext();
+        }
+
+        /// <summary>フォルダ見出しへのドロップを受ける。受け取ったら true。</summary>
+        private void HandleFolderDrop(Rect rect, string folderName)
+        {
+            Event e = Event.current;
+            if (!rect.Contains(e.mousePosition)) return;
+
+            bool carriesEntries = DragAndDrop.GetGenericData(EntryDragKey) is List<int>;
+            if (!carriesEntries) return;
+
+            switch (e.type)
+            {
+                case EventType.DragUpdated:
+                    DragAndDrop.visualMode = DragAndDropVisualMode.Move;
+                    e.Use();
+                    break;
+
+                case EventType.DragPerform:
+                    DragAndDrop.AcceptDrag();
+                    AssignFolderToEntries((List<int>)DragAndDrop.GetGenericData(EntryDragKey), folderName);
+                    DragAndDrop.SetGenericData(EntryDragKey, null);
+                    e.Use();
+                    GUIUtility.ExitGUI();
+                    break;
+            }
         }
 
         /// <summary>
@@ -419,17 +656,29 @@ namespace YozoLab.FBXAnimationBaker
         /// </summary>
         private bool DrawFolderHeader(BakeFolderState folder, int entryCount, bool searching)
         {
-            EditorGUILayout.BeginHorizontal("box");
+            // BeginHorizontal の戻り値がこの行の矩形。ドロップ判定に使う。
+            Rect headerRect = EditorGUILayout.BeginHorizontal("box");
 
             bool shownExpanded = searching || folder.expanded;
-            bool nowExpanded = EditorGUILayout.Foldout(shownExpanded, $"{folder.name}  ({entryCount})", true,
-                                                       EditorStyles.foldoutHeader);
+            bool nowExpanded = EditorGUILayout.Foldout(shownExpanded, GUIContent.none, true, EditorStyles.foldoutHeader);
             if (!searching && nowExpanded != folder.expanded)
             {
                 folder.expanded = nowExpanded;
                 EditorUtility.SetDirty(settings);
             }
 
+            // 名前は見出しでそのまま直せる。作成時に名前を訊くウィンドウを出すのをやめた分、
+            // ここが唯一の名前の置き場になる。
+            EditorGUI.BeginChangeCheck();
+            string renamed = EditorGUILayout.DelayedTextField(folder.name, EditorStyles.boldLabel,
+                                                              GUILayout.MinWidth(60));
+            if (EditorGUI.EndChangeCheck())
+            {
+                RenameFolder(folder, renamed);
+                GUIUtility.ExitGUI();
+            }
+
+            EditorGUILayout.LabelField($"({entryCount})", EditorStyles.miniLabel, GUILayout.Width(30));
             GUILayout.FlexibleSpace();
 
             // Bake フラグはフォルダ見出しに常時表示して、すぐ切り替えられるようにする
@@ -463,7 +712,44 @@ namespace YozoLab.FBXAnimationBaker
             }
 
             EditorGUILayout.EndHorizontal();
+
+            // 見出しはドロップ先。行をここへ落とすとこのフォルダへ移る。
+            HandleFolderDrop(headerRect, folder.name);
+
             return searching || folder.expanded;
+        }
+
+        /// <summary>フォルダ名を変える。中のエントリが持っている所属名も付け替える。</summary>
+        private void RenameFolder(BakeFolderState folder, string requested)
+        {
+            string trimmed = requested?.Trim() ?? string.Empty;
+            if (string.IsNullOrEmpty(trimmed) || string.Equals(trimmed, folder.name, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            serializedSettings.ApplyModifiedProperties();
+
+            string unique = string.Equals(trimmed, folder.name, StringComparison.OrdinalIgnoreCase)
+                ? trimmed
+                : MakeUniqueFolderName(trimmed);
+
+            Undo.RecordObject(settings, "Rename Folder");
+
+            string previous = folder.name;
+            folder.name = unique;
+
+            foreach (AnimationBakeEntry entry in settings.bakeEntries)
+            {
+                if (entry != null && string.Equals(entry.folder?.Trim(), previous, StringComparison.OrdinalIgnoreCase))
+                {
+                    entry.folder = unique;
+                }
+            }
+
+            EditorUtility.SetDirty(settings);
+            settings.SaveSettings();
+            serializedSettings.Update();
         }
 
         /// <summary>
@@ -514,6 +800,7 @@ namespace YozoLab.FBXAnimationBaker
         private void DrawEntryDetailPane()
         {
             EditorGUILayout.BeginVertical(GUILayout.ExpandHeight(true));
+            DrawTemplateToolbar();
             entryDetailScrollPosition = EditorGUILayout.BeginScrollView(entryDetailScrollPosition, "box");
 
             if (!IsEntryIndexValid(selectedEntryIndex))
@@ -545,9 +832,7 @@ namespace YozoLab.FBXAnimationBaker
                 }
             }
 
-            EditorGUILayout.PropertyField(entryProp.FindPropertyRelative("clips"), new GUIContent("Humanoid Clips",
-                L10n.T("ベイクするHumanoidアニメーションクリップ(1クリップにつきFBXを1つ出力)",
-                       "Humanoid animation clips to bake (one FBX per clip)")), true);
+            DrawMotionList(entryProp);
 
             EditorGUILayout.Space();
             EditorGUILayout.LabelField(L10n.T("出力", "Output"), EditorStyles.boldLabel);
@@ -587,7 +872,8 @@ namespace YozoLab.FBXAnimationBaker
                 L10n.T("サンプリングのフレームレート(0で元クリップのフレームレート)",
                        "Sampling frame rate (0 = source clip frame rate)")));
             EditorGUILayout.PropertyField(entryProp.FindPropertyRelative("bakeRootMotion"), new GUIContent("Bake Root Motion",
-                L10n.T("ルートモーションをルートTransformにベイクする", "Bake root motion into the root Transform")));
+                L10n.T("ルートモーションを含める。焼き込み先は常に Hips で、モデルのオブジェクト自体にはキーを打ちません。OFFでその場での動きになります",
+                       "Include root motion. It is baked into the Hips bone, never onto the model object itself. Turn it off for an in-place motion")));
             EditorGUILayout.PropertyField(entryProp.FindPropertyRelative("bakeScale"), new GUIContent("Bake Scale",
                 L10n.T("スケールカーブもベイクする", "Bake Transform scale curves as well")));
             SerializedProperty bakeBlendShapesProp = entryProp.FindPropertyRelative("bakeBlendShapes");
@@ -631,6 +917,266 @@ namespace YozoLab.FBXAnimationBaker
             EditorGUILayout.EndVertical();
         }
 
+        /// <summary>
+        /// 焼くモーションの一覧。
+        ///
+        /// AnimationClip と .bvh を同じ一覧に置く。以前は「Humanoid Clips」と
+        /// 「BVH File」で欄が分かれていて、このエントリが結局どちらを変換するのか
+        /// 見て分からなかった。1 行 1 モーション、1 モーションにつき FBX が 1 つ。
+        /// </summary>
+        private void DrawMotionList(SerializedProperty entryProp)
+        {
+            SerializedProperty motionsProp = entryProp.FindPropertyRelative("motions");
+
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField(new GUIContent(L10n.T("モーション", "Motion"),
+                    L10n.T("焼くモーション。AnimationClip(.anim / FBX内蔵)と .bvh を混ぜて置けます。1つにつきFBXを1つ出力します",
+                           "Motions to bake. Animation clips and .bvh files can be mixed. One FBX per motion")),
+                EditorStyles.boldLabel);
+            GUILayout.FlexibleSpace();
+            if (GUILayout.Button("+", EditorStyles.miniButton, GUILayout.Width(24)))
+            {
+                motionsProp.InsertArrayElementAtIndex(motionsProp.arraySize);
+                motionsProp.GetArrayElementAtIndex(motionsProp.arraySize - 1).objectReferenceValue = null;
+            }
+            EditorGUILayout.EndHorizontal();
+
+            for (int i = 0; i < motionsProp.arraySize; i++)
+            {
+                SerializedProperty element = motionsProp.GetArrayElementAtIndex(i);
+
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.LabelField(DescribeMotion(element.objectReferenceValue),
+                                           EditorStyles.miniLabel, GUILayout.Width(40));
+                element.objectReferenceValue = EditorGUILayout.ObjectField(
+                    element.objectReferenceValue, typeof(UnityEngine.Object), false);
+
+                if (GUILayout.Button("✕", EditorStyles.miniButton, GUILayout.Width(24)))
+                {
+                    motionsProp.DeleteArrayElementAtIndex(i);
+                    EditorGUILayout.EndHorizontal();
+                    break;
+                }
+                EditorGUILayout.EndHorizontal();
+            }
+
+            DrawMotionDropArea(motionsProp);
+
+            bool hasBvh = false;
+            for (int i = 0; i < motionsProp.arraySize; i++)
+            {
+                UnityEngine.Object motion = motionsProp.GetArrayElementAtIndex(i).objectReferenceValue;
+                if (motion == null) continue;
+
+                if (IsBvhAsset(motion)) { hasBvh = true; continue; }
+                if (motion is AnimationClip) continue;
+
+                EditorGUILayout.HelpBox(L10n.T(
+                    $"\"{motion.name}\" は AnimationClip でも .bvh でもないため、Executeで無視されます。",
+                    $"\"{motion.name}\" is neither an AnimationClip nor a .bvh file, so Execute skips it."),
+                    MessageType.Warning);
+            }
+
+            if (hasBvh)
+            {
+                DrawBvhOptions(entryProp);
+            }
+        }
+
+        /// <summary>一覧の下の受け皿。まとめて放り込めるようにしておく。</summary>
+        private void DrawMotionDropArea(SerializedProperty motionsProp)
+        {
+            Rect drop = GUILayoutUtility.GetRect(0f, 28f, GUILayout.ExpandWidth(true));
+            GUI.Box(drop, L10n.T("ここへ .anim / FBX / .bvh をドロップ", "Drop .anim / FBX / .bvh here"),
+                    EditorStyles.helpBox);
+
+            Event e = Event.current;
+            if (!drop.Contains(e.mousePosition)) return;
+            if (e.type != EventType.DragUpdated && e.type != EventType.DragPerform) return;
+
+            DragAndDrop.visualMode = DragAndDropVisualMode.Copy;
+            if (e.type != EventType.DragPerform) return;
+
+            DragAndDrop.AcceptDrag();
+            foreach (UnityEngine.Object dropped in DragAndDrop.objectReferences)
+            {
+                // FBX を落としたら、その中のクリップを取り出す。モデルそのものを
+                // モーションとして扱っても意味が無い。
+                if (dropped is GameObject)
+                {
+                    foreach (UnityEngine.Object asset in AssetDatabase.LoadAllAssetsAtPath(AssetDatabase.GetAssetPath(dropped)))
+                    {
+                        if (asset is AnimationClip clip && !clip.name.StartsWith("__preview__")) AddMotion(motionsProp, clip);
+                    }
+                    continue;
+                }
+
+                if (dropped is AnimationClip || IsBvhAsset(dropped)) AddMotion(motionsProp, dropped);
+            }
+            e.Use();
+        }
+
+        private static void AddMotion(SerializedProperty motionsProp, UnityEngine.Object motion)
+        {
+            for (int i = 0; i < motionsProp.arraySize; i++)
+            {
+                if (motionsProp.GetArrayElementAtIndex(i).objectReferenceValue == motion) return;
+            }
+            motionsProp.InsertArrayElementAtIndex(motionsProp.arraySize);
+            motionsProp.GetArrayElementAtIndex(motionsProp.arraySize - 1).objectReferenceValue = motion;
+        }
+
+        internal static bool IsBvhAsset(UnityEngine.Object asset)
+        {
+            if (asset == null) return false;
+            string path = AssetDatabase.GetAssetPath(asset);
+            return !string.IsNullOrEmpty(path) && path.EndsWith(".bvh", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static string DescribeMotion(UnityEngine.Object motion)
+        {
+            if (motion == null) return string.Empty;
+            if (IsBvhAsset(motion)) return "BVH";
+            return motion is AnimationClip ? "Clip" : "?";
+        }
+
+        /// <summary>
+        /// BVH が一覧に入っているときだけ出す設定。
+        /// クリップしか無いエントリに BVH の設定が並んでいても邪魔なだけ。
+        /// </summary>
+        private void DrawBvhOptions(SerializedProperty entryProp)
+        {
+            EditorGUILayout.Space(2);
+            EditorGUILayout.LabelField(L10n.T("BVH の読み方", "BVH options"), EditorStyles.miniBoldLabel);
+
+            EditorGUILayout.PropertyField(entryProp.FindPropertyRelative("bvhUpAxis"), new GUIContent("Up Axis",
+                L10n.T("BVHがどの軸を上としているか。Autoは骨格のOFFSETから判定します(規格はYですが実際にはZも多い)",
+                       "Which axis the BVH treats as up. Auto reads it from the skeleton's offsets")));
+
+            EditorGUILayout.PropertyField(entryProp.FindPropertyRelative("bvhScale"), new GUIContent("BVH Scale",
+                L10n.T("BVHの単位換算。リターゲットはHumanoidの正規化を通るため、一様な拡大縮小は結果に影響しません(Avatarが組めないほど極端なときだけ触ってください)",
+                       "Unit conversion. Retargeting goes through humanoid normalisation, so a uniform scale does not change the result")));
+
+            EditorGUILayout.HelpBox(L10n.T(
+                "BVHの骨格にもHumanoid Avatarを組み、そのポーズをSource FBXへ流します。"
+                + "そのためSource FBX側のRigもHumanoidである必要があります。",
+                "A humanoid Avatar is built for the BVH skeleton and its pose is pushed onto the Source FBX, "
+                + "so the Source FBX rig must be Humanoid too."),
+                MessageType.Info);
+
+            DrawBvhBoneOverrides(entryProp);
+        }
+
+        /// <summary>
+        /// ジョイント名の自動推測を上書きする表。
+        /// 自動で当たった分も「推測を確認」で一覧に出さないと、何が外れているのか分からない。
+        /// </summary>
+        private void DrawBvhBoneOverrides(SerializedProperty entryProp)
+        {
+            SerializedProperty overridesProp = entryProp.FindPropertyRelative("bvhBoneOverrides");
+
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField(L10n.T("ボーン対応の手当て", "Bone Overrides"), EditorStyles.miniBoldLabel);
+            GUILayout.FlexibleSpace();
+
+            string bvhPath = FirstBvhPath(entryProp);
+            using (new EditorGUI.DisabledScope(string.IsNullOrEmpty(bvhPath)))
+            {
+                if (GUILayout.Button(new GUIContent(L10n.T("推測を確認", "Check Mapping"),
+                        L10n.T("BVHを読んで、どのジョイントがどのHumanoidボーンに当たったかをConsoleへ出します",
+                               "Read the BVH and log which joint mapped to which humanoid bone")),
+                    EditorStyles.miniButton, GUILayout.Width(90)))
+                {
+                    LogBvhBoneMapping(entryProp, bvhPath);
+                }
+            }
+
+            if (GUILayout.Button(new GUIContent("+", L10n.T("手当てを1件追加", "Add one override")),
+                    EditorStyles.miniButton, GUILayout.Width(24)))
+            {
+                overridesProp.InsertArrayElementAtIndex(overridesProp.arraySize);
+            }
+            EditorGUILayout.EndHorizontal();
+
+            for (int i = 0; i < overridesProp.arraySize; i++)
+            {
+                SerializedProperty element = overridesProp.GetArrayElementAtIndex(i);
+
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.PropertyField(element.FindPropertyRelative("jointName"), GUIContent.none);
+                EditorGUILayout.LabelField("→", GUILayout.Width(16));
+                EditorGUILayout.PropertyField(element.FindPropertyRelative("humanBoneName"), GUIContent.none);
+
+                if (GUILayout.Button("✕", EditorStyles.miniButton, GUILayout.Width(24)))
+                {
+                    overridesProp.DeleteArrayElementAtIndex(i);
+                    EditorGUILayout.EndHorizontal();
+                    break;
+                }
+                EditorGUILayout.EndHorizontal();
+            }
+
+            if (overridesProp.arraySize == 0)
+            {
+                EditorGUILayout.LabelField(L10n.T(
+                    "空でよければ自動推測だけで動きます。",
+                    "Leave this empty to rely on the automatic guess."), EditorStyles.miniLabel);
+            }
+        }
+
+        /// <summary>一覧に入っている最初の .bvh のパス。無ければ空。</summary>
+        private static string FirstBvhPath(SerializedProperty entryProp)
+        {
+            SerializedProperty motionsProp = entryProp.FindPropertyRelative("motions");
+            for (int i = 0; i < motionsProp.arraySize; i++)
+            {
+                UnityEngine.Object motion = motionsProp.GetArrayElementAtIndex(i).objectReferenceValue;
+                if (IsBvhAsset(motion)) return AssetDatabase.GetAssetPath(motion);
+            }
+            return string.Empty;
+        }
+
+        /// <summary>「推測を確認」の中身。読めない BVH はここで分かる。</summary>
+        private void LogBvhBoneMapping(SerializedProperty entryProp, string bvhPath)
+        {
+            try
+            {
+                string absolute = System.IO.Path.GetFullPath(System.IO.Path.Combine(
+                    System.IO.Directory.GetParent(Application.dataPath).FullName, bvhPath));
+
+                Bvh.BvhFile file = Bvh.BvhFile.Load(absolute);
+
+                var overrides = new List<Bvh.BvhBoneOverride>();
+                SerializedProperty overridesProp = entryProp.FindPropertyRelative("bvhBoneOverrides");
+                for (int i = 0; i < overridesProp.arraySize; i++)
+                {
+                    SerializedProperty element = overridesProp.GetArrayElementAtIndex(i);
+                    overrides.Add(new Bvh.BvhBoneOverride
+                    {
+                        jointName = element.FindPropertyRelative("jointName").stringValue,
+                        humanBoneName = element.FindPropertyRelative("humanBoneName").stringValue,
+                    });
+                }
+
+                Dictionary<string, string> map = Bvh.BvhHumanoid.BuildBoneMap(file, overrides);
+
+                var lines = new System.Text.StringBuilder();
+                lines.AppendLine($"{LogPrefix} {System.IO.Path.GetFileName(bvhPath)}: "
+                                 + $"{file.Frames.Count} frame(s) @ {file.FrameRate:F2} fps, up axis = {file.GuessUpAxis()}");
+                lines.AppendLine(Bvh.BvhHumanoid.DescribeBoneMap(file, map));
+                foreach (KeyValuePair<string, string> pair in map)
+                {
+                    lines.AppendLine($"  {pair.Key} → {pair.Value}");
+                }
+
+                Debug.Log(lines.ToString());
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"{LogPrefix} BVH を読めませんでした: {e.Message}");
+            }
+        }
+
         /// <summary>実行前に、どのパスへ書き出されるかを確認できるようにしておく。</summary>
         private void DrawOutputPreview()
         {
@@ -642,13 +1188,25 @@ namespace YozoLab.FBXAnimationBaker
             }
 
             AnimationBakeEntry entry = settings.bakeEntries[selectedEntryIndex];
-            if (entry == null || entry.clips == null)
+            if (entry == null)
             {
                 return;
             }
 
-            List<AnimationClip> clips = entry.clips.Where(c => c != null).ToList();
-            if (clips.Count == 0)
+            var motionNames = new List<string>();
+            if (entry.motions != null)
+            {
+                foreach (UnityEngine.Object motion in entry.motions)
+                {
+                    if (motion == null) continue;
+                    motionNames.Add(motion is AnimationClip ? motion.name
+                                                            : System.IO.Path.GetFileNameWithoutExtension(
+                                                                  AssetDatabase.GetAssetPath(motion)));
+                }
+            }
+            bool multiOutput = motionNames.Count > 1;
+
+            if (motionNames.Count == 0)
             {
                 return;
             }
@@ -662,9 +1220,9 @@ namespace YozoLab.FBXAnimationBaker
             EditorGUILayout.Space();
             EditorGUILayout.LabelField(L10n.T("出力プレビュー", "Output Preview"), EditorStyles.boldLabel);
 
-            foreach (AnimationClip clip in clips)
+            foreach (string motionName in motionNames)
             {
-                EditorGUILayout.LabelField($"{folder}/{GetOutputName(entry, clip, clips.Count > 1)}.fbx", EditorStyles.miniLabel);
+                EditorGUILayout.LabelField($"{folder}/{GetOutputName(entry, motionName, multiOutput)}.fbx", EditorStyles.miniLabel);
             }
         }
 
@@ -777,15 +1335,13 @@ namespace YozoLab.FBXAnimationBaker
             entryProp.FindPropertyRelative("exportContent").enumValueIndex = (int)BakeExportContent.ModelAndAnimation;
             entryProp.FindPropertyRelative("importAnimationType").enumValueIndex = (int)BakedFbxAnimationType.Generic;
 
-            SerializedProperty clipsProp = entryProp.FindPropertyRelative("clips");
-            clipsProp.ClearArray();
+            SerializedProperty motionsProp = entryProp.FindPropertyRelative("motions");
+            motionsProp.ClearArray();
             if (clips != null)
             {
                 foreach (AnimationClip clip in clips)
                 {
-                    int clipIndex = clipsProp.arraySize;
-                    clipsProp.InsertArrayElementAtIndex(clipIndex);
-                    clipsProp.GetArrayElementAtIndex(clipIndex).objectReferenceValue = clip;
+                    if (clip != null) AddMotion(motionsProp, clip);
                 }
             }
 
@@ -954,31 +1510,6 @@ namespace YozoLab.FBXAnimationBaker
             return null;
         }
 
-        private void ShowFolderAssignMenu(List<int> entryIndices)
-        {
-            var menu = new GenericMenu();
-            menu.AddItem(new GUIContent(L10n.T("(フォルダなし)", "(No Folder)")), false,
-                () => AssignFolderToEntries(entryIndices, string.Empty));
-
-            List<string> names = CollectFolderNames();
-            if (names.Count > 0)
-            {
-                menu.AddSeparator(string.Empty);
-                foreach (string name in names)
-                {
-                    string captured = name;
-                    menu.AddItem(new GUIContent(captured), false, () => AssignFolderToEntries(entryIndices, captured));
-                }
-            }
-
-            menu.AddSeparator(string.Empty);
-            menu.AddItem(new GUIContent(L10n.T("新規フォルダ...", "New Folder...")), false, () =>
-                FolderNamePromptWindow.Open(
-                    L10n.T("新規フォルダ", "New Folder"),
-                    name => CreateFolder(name, entryIndices)));
-
-            menu.ShowAsContext();
-        }
 
         /// <summary>
         /// フォルダを作成する。同名(大文字小文字無視)が既にあればそれを使う。
@@ -1088,9 +1619,9 @@ namespace YozoLab.FBXAnimationBaker
             var list = new List<int>();
             if (bakeEntriesProp.arraySize == 0) return list;
 
-            if (checkedEntryIndices.Count > 0)
+            if (selectedEntryIndices.Count > 0)
             {
-                foreach (int i in checkedEntryIndices)
+                foreach (int i in selectedEntryIndices)
                 {
                     if (i >= 0 && i < bakeEntriesProp.arraySize) list.Add(i);
                 }
@@ -1109,7 +1640,7 @@ namespace YozoLab.FBXAnimationBaker
             {
                 if (EntryMatchesSearch(i, normalizedSearch))
                 {
-                    checkedEntryIndices.Add(i);
+                    selectedEntryIndices.Add(i);
                 }
             }
         }
@@ -1129,76 +1660,6 @@ namespace YozoLab.FBXAnimationBaker
         //  フォルダ名の入力ダイアログ
         // ═══════════════════════════════════════════════════════════════
 
-        private sealed class FolderNamePromptWindow : EditorWindow
-        {
-            private string folderName = string.Empty;
-            private Action<string> onConfirm;
-            private bool focusRequested = true;
-
-            public static void Open(string title, Action<string> onConfirm)
-            {
-                var window = CreateInstance<FolderNamePromptWindow>();
-                window.titleContent = new GUIContent(title);
-                window.onConfirm = onConfirm;
-                window.minSize = new Vector2(340f, 80f);
-                window.maxSize = new Vector2(340f, 80f);
-                window.ShowModalUtility();
-            }
-
-            private void OnGUI()
-            {
-                Event e = Event.current;
-                if (e.type == EventType.KeyDown)
-                {
-                    if (e.keyCode == KeyCode.Return || e.keyCode == KeyCode.KeypadEnter)
-                    {
-                        e.Use();
-                        Confirm();
-                        return;
-                    }
-                    if (e.keyCode == KeyCode.Escape)
-                    {
-                        e.Use();
-                        Close();
-                        return;
-                    }
-                }
-
-                EditorGUILayout.Space(8);
-                GUI.SetNextControlName("FolderNameField");
-                folderName = EditorGUILayout.TextField(L10n.T("フォルダ名", "Folder Name"), folderName);
-                if (focusRequested)
-                {
-                    EditorGUI.FocusTextInControl("FolderNameField");
-                    focusRequested = false;
-                }
-
-                EditorGUILayout.Space(8);
-                EditorGUILayout.BeginHorizontal();
-                GUILayout.FlexibleSpace();
-                using (new EditorGUI.DisabledScope(string.IsNullOrWhiteSpace(folderName)))
-                {
-                    if (GUILayout.Button(L10n.T("作成", "Create"), GUILayout.Width(90)))
-                    {
-                        Confirm();
-                    }
-                }
-                if (GUILayout.Button(L10n.T("キャンセル", "Cancel"), GUILayout.Width(90)))
-                {
-                    Close();
-                }
-                EditorGUILayout.EndHorizontal();
-            }
-
-            private void Confirm()
-            {
-                if (string.IsNullOrWhiteSpace(folderName)) return;
-                Action<string> callback = onConfirm;
-                string name = folderName.Trim();
-                Close();
-                callback?.Invoke(name);
-            }
-        }
 
         private static string GetEntryLabel(SerializedProperty entryProp)
         {
@@ -1211,8 +1672,8 @@ namespace YozoLab.FBXAnimationBaker
             UnityEngine.Object fbx = entryProp.FindPropertyRelative("sourceFbx").objectReferenceValue;
             if (fbx != null)
             {
-                int clipCount = entryProp.FindPropertyRelative("clips").arraySize;
-                return clipCount > 1 ? $"{fbx.name} ({clipCount})" : fbx.name;
+                int motionCount = entryProp.FindPropertyRelative("motions").arraySize;
+                return motionCount > 1 ? $"{fbx.name} ({motionCount})" : fbx.name;
             }
 
             return "(no FBX)";

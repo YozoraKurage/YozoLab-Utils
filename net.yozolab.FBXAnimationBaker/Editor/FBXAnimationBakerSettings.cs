@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEditor;
 using System;
 using System.Collections.Generic;
+using YozoLab.FBXAnimationBaker.Bvh;
 
 namespace YozoLab.FBXAnimationBaker
 {
@@ -24,6 +25,10 @@ namespace YozoLab.FBXAnimationBaker
         /// <summary>共通の Output Directory からフォルダ単位の設定への移行を済ませたか。</summary>
         [HideInInspector]
         public bool perFolderDirectoriesMigrated;
+
+        /// <summary>エントリごとの clips / bvhFile から motions への統合を済ませたか。</summary>
+        [HideInInspector]
+        public bool motionsMigrated;
 
         [Tooltip("List of bake entries (FBX + humanoid animation clips)")]
         public List<AnimationBakeEntry> bakeEntries = new List<AnimationBakeEntry>();
@@ -103,8 +108,35 @@ namespace YozoLab.FBXAnimationBaker
         [Tooltip("Source FBX (model) the animation is baked onto")]
         public GameObject sourceFbx;
 
-        [Tooltip("Humanoid animation clips to bake. One FBX is generated per clip")]
+        /// <summary>
+        /// 焼くモーション。1 つにつき FBX を 1 つ出力する。
+        ///
+        /// AnimationClip（FBX 内蔵でも .anim でも）と .bvh を同じ一覧に混ぜて置ける。
+        /// 以前はクリップ用と BVH 用で欄が分かれていたが、「このエントリは何を
+        /// 変換するのか」がひと目で分からず、どちらが使われるのかも読めなかった。
+        /// </summary>
+        [Tooltip("Motions to bake. Animation clips and .bvh files can be mixed. One FBX is generated per motion")]
+        public List<UnityEngine.Object> motions = new List<UnityEngine.Object>();
+
+        // ── 旧: クリップ用と BVH 用に分かれていた欄 ─────────────────────
+        // motions へ統合した。既存の設定を読み込んで移行するためだけに残してある。
+        // 移行後は空になり、以後は参照されない。
+
+        [HideInInspector]
         public List<AnimationClip> clips = new List<AnimationClip>();
+
+        [HideInInspector]
+        public DefaultAsset bvhFile;
+
+
+        [Tooltip("Which axis the BVH treats as up. Auto reads it from the skeleton's offsets. The spec says Y, but Z is common in practice")]
+        public BvhUpAxis bvhUpAxis = BvhUpAxis.Auto;
+
+        [Tooltip("Unit conversion for the BVH skeleton. Retargeting goes through humanoid normalisation, so this only matters when the values are extreme enough to stop an Avatar being built")]
+        public float bvhScale = 1f;
+
+        [Tooltip("Fix up how BVH joints map onto Unity humanoid bones. Only needed when the automatic guess misses one")]
+        public List<BvhBoneOverride> bvhBoneOverrides = new List<BvhBoneOverride>();
 
         [Tooltip("Per-entry output folder. When set, FBX files are written here instead of the folder's Output Directory")]
         public DefaultAsset outputDirectoryOverride;
@@ -121,7 +153,7 @@ namespace YozoLab.FBXAnimationBaker
         [Tooltip("Sampling frame rate. 0 = use the source clip frame rate")]
         public float frameRate = 0f;
 
-        [Tooltip("Apply root motion while sampling, so the humanoid root motion is baked into the root Transform")]
+        [Tooltip("Include root motion. It is baked into the Hips bone, never onto the model object itself. Turn it off for an in-place motion")]
         public bool bakeRootMotion = true;
 
         [Tooltip("Bake Transform Scale (m_LocalScale) curves as well")]

@@ -214,6 +214,24 @@ namespace YozoLab.UtilSettings
             },
             new UtilPackage
             {
+                Id = "editortheme",
+                DisplayName = "Editor Theme",
+                Description = "エディタ全体の配色を差し替える。窓枠・タブ・各ウィンドウの背景と文字。テーマは JSON で追加できる。",
+                AsmdefGuid = "023ddf696474d3ca8af75074fa7f814a",
+                Define = "YOZOLAB_DISABLE_EDITORTHEME",
+                OpenMenuPath = "YozoLab/Editor Theme",
+                Toggles = new[]
+                {
+                    new RuntimeToggle
+                    {
+                        Label = "Editor Theme を適用する",
+                        TypeName = "YozoLab.EditorTheme.EditorThemeApplier",
+                        Tooltip = "エディタ全体の配色を差し替える。切ると元の Unity の配色に戻る。",
+                    },
+                },
+            },
+            new UtilPackage
+            {
                 Id = "particletools",
                 DisplayName = "Particle Tools",
                 Description = "パーティクル制作支援。時間バーでのスクラブ(標準 Particle Effect パネル置き換え)と色の一括編集。",
