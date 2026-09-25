@@ -1,0 +1,19 @@
+{
+    "name": "net.yozolab.chainhandles.Editor",
+    "rootNamespace": "YozoLab.ChainHandles",
+    "references": [],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_EDITOR",
+        "!YOZOLAB_DISABLE_CHAINHANDLES"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

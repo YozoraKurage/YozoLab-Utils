@@ -142,6 +142,16 @@ namespace YozoLab.UtilSettings
             },
             new UtilPackage
             {
+                Id = "chainhandles",
+                DisplayName = "Chain Handles",
+                Description = "Transform の鎖を少数の IK ハンドルとロールハンドルで曲げる。書くのは回転だけで、長さとスケールは変えない。",
+                AsmdefGuid = "9af606a0b41349eb814f224161694eac",
+                TestsAsmdefGuid = "346a641ee45f4d8d9d96871dbefc8c0e",
+                Define = "YOZOLAB_DISABLE_CHAINHANDLES",
+                OpenMenuPath = "YozoLab/Chain Handles",
+            },
+            new UtilPackage
+            {
                 Id = "operationlogger",
                 DisplayName = "Operation Logger",
                 Description = "エディタ操作の記録。Harmony を使う。",

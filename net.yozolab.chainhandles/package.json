@@ -1,0 +1,11 @@
+{
+  "name": "net.yozolab.chainhandles",
+  "version": "0.8.0",
+  "displayName": "YozoLab Chain Handles",
+  "description": "Transform の鎖を、少数の IK ハンドルとロールハンドルで長さを保ったまま動かす。",
+  "unity": "2022.3",
+  "author": {
+    "name": "Yozolab"
+  },
+  "keywords": []
+}
