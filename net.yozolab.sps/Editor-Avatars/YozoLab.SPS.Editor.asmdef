@@ -1,0 +1,112 @@
+{
+    "name": "YozoLab.SPS.Editor",
+    "rootNamespace": "YozoLab.SPS",
+    "references": [
+        "YozoLab.SPS.Runtime",
+        "VRC.SDKBase.Editor.BuildPipeline",
+        "VRC.SDKBase.Editor",
+        "VRC.SDK3A.Editor",
+        "nadena.dev.ndmf",
+        "nadena.dev.ndmf.runtime",
+        "nadena.dev.ndmf.vrchat",
+        "nadena.dev.modular-avatar.core",
+        "nadena.dev.modular-avatar.core.editor"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "System.Collections.Immutable.dll",
+        "VRCSDKBase.dll",
+        "VRCSDK3A.dll",
+        "VRC.Dynamics.dll",
+        "VRC.SDK3.Dynamics.PhysBone.dll",
+        "VRC.SDK3.Dynamics.Contact.dll",
+        "VRC.SDK3.Dynamics.Constraint.dll",
+        "VRCSDKBase-Editor.dll",
+        "VRCCore-Editor.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "VRCF_AVATARS",
+        "YOZOLAB_SPS_NDMF",
+        "YOZOLAB_SPS_MA",
+        "!YOZOLAB_DISABLE_SPS"
+    ],
+    "versionDefines": [
+        {
+            "name": "com.vrchat.base",
+            "expression": "3.1.12",
+            "define": "VRC_NEW_HOOK_API"
+        },
+        {
+            "name": "com.vrchat.base",
+            "expression": "3.3.0",
+            "define": "VRC_NEW_PUBLIC_SDK"
+        },
+        {
+            "name": "com.vrchat.base",
+            "expression": "3.10.5",
+            "define": "VRCSDK_3_10_5_OR_NEWER"
+        },
+        {
+            "name": "com.vrchat.base",
+            "expression": "3.0.8",
+            "define": "VRCSDK_HAS_DRIVER_COPY"
+        },
+        {
+            "name": "com.vrchat.base",
+            "expression": "3.5.2",
+            "define": "VRCSDK_HAS_ANIMATOR_PLAY_AUDIO"
+        },
+        {
+            "name": "com.vrchat.base",
+            "expression": "3.5.2",
+            "define": "VRCSDK_HAS_HEAD_CHOP"
+        },
+        {
+            "name": "com.vrchat.base",
+            "expression": "3.7.0",
+            "define": "VRCSDK_HAS_VRCCONSTRAINTS"
+        },
+        {
+            "name": "com.vrchat.base",
+            "expression": "3.10.4",
+            "define": "VRCSDK_HAS_GLOBAL_PHYSBONE_COLLIDERS"
+        },
+        {
+            "name": "com.vrchat.base",
+            "expression": "3.10.5-0",
+            "define": "VRCSDK_HAS_GLOBAL_PHYSBONE_COLLIDER_OTHER"
+        },
+        {
+            "name": "com.vrchat.avatars",
+            "expression": "",
+            "define": "VRCF_AVATARS"
+        },
+        {
+            "name": "com.vrchat.avatars",
+            "expression": "3.10.3",
+            "define": "VRCSDK_HAS_VRCRAYCAST"
+        },
+        {
+            "name": "com.vrchat.base",
+            "expression": "3.7.5",
+            "define": "VRCSDK_HAS_ACTIVE_BUILD_TYPE"
+        },
+        {
+            "name": "nadena.dev.ndmf",
+            "expression": "1.14.0",
+            "define": "YOZOLAB_SPS_NDMF"
+        },
+        {
+            "name": "nadena.dev.modular-avatar",
+            "expression": "1.18.0",
+            "define": "YOZOLAB_SPS_MA"
+        }
+    ],
+    "noEngineReferences": false
+}

@@ -1,0 +1,83 @@
+using UnityEditor.Animations;
+using UnityEngine;
+using YozoLab.SPS.Utils.Controller;
+using VRC.SDK3.Avatars.Components;
+
+namespace YozoLab.SPS.Utils {
+    internal class VFControllerWithVrcType : VFController {
+        public readonly VRCAvatarDescriptor.AnimLayerType vrcType;
+        
+        public new VRCAvatarDescriptor.AnimLayerType GetType() {
+            return vrcType;
+        }
+
+        public VFControllerWithVrcType(VFController ctrl, VRCAvatarDescriptor.AnimLayerType vrcType) : base(ctrl) {
+            this.vrcType = vrcType;
+        }
+
+        public static VFController Load(
+            RuntimeAnimatorController ctrl,
+            VRCAvatarDescriptor.AnimLayerType type,
+            VFLoadContext context
+        ) {
+            if (context == null) throw new System.ArgumentNullException(nameof(context));
+            if (context.OwnerObject == null) throw new System.ArgumentNullException(nameof(context.OwnerObject));
+            if (context.AnimatorObject == null) throw new System.ArgumentNullException(nameof(context.AnimatorObject));
+            var output = VFController.Load(ctrl, context);
+            if (output == null) return null;
+            ApplyBaseMask(output, type);
+            return output;
+        }
+
+        /**
+         * VRCF's handles masks by "applying" the base mask to every mask in the controller. This makes things like
+         * merging controllers and features much easier. Later on, we recalculate a new base mask in FixMasksBuilder.
+         */
+        private static void ApplyBaseMask(VFController controller, VRCAvatarDescriptor.AnimLayerType type) {
+            var layer0 = controller.GetLayer(0);
+            if (layer0 == null) return;
+
+            var baseMask = layer0.mask;
+            if (type == VRCAvatarDescriptor.AnimLayerType.FX) {
+                if (baseMask == null) {
+                    baseMask = VFMask.DefaultFxMask();
+                } else {
+                    baseMask = baseMask.Clone();
+                }
+            } else if (type == VRCAvatarDescriptor.AnimLayerType.Gesture) {
+                if (baseMask == null) {
+                    // Technically, we should throw here. The VRCSDK will complain and prevent the user from uploading
+                    // until they fix this. But we fix it here for them temporarily so they can use play mode for now.
+                    // Gesture controllers merged using Full Controller with no base mask will slip through and be allowed
+                    // by this.
+                    baseMask = VFMask.Empty();
+                    baseMask.SetHumanoidBodyPartActive(AvatarMaskBodyPart.LeftFingers, true);
+                    baseMask.SetHumanoidBodyPartActive(AvatarMaskBodyPart.RightFingers, true);
+                } else {
+                    baseMask = baseMask.Clone();
+                    // If the base mask is just one hand, assume that they put in controller with just a left and right hand layer,
+                    // and meant to have both in the base mask.
+                    if (baseMask.GetHumanoidBodyPartActive(AvatarMaskBodyPart.LeftFingers))
+                        baseMask.SetHumanoidBodyPartActive(AvatarMaskBodyPart.RightFingers, true);
+                    if (baseMask.GetHumanoidBodyPartActive(AvatarMaskBodyPart.RightFingers))
+                        baseMask.SetHumanoidBodyPartActive(AvatarMaskBodyPart.LeftFingers, true);
+                }
+            } else {
+                // VRChat does not use the base mask on any other controller types
+                return;
+            }
+
+            // Because of some unity bug, ONLY the muscle part of the base mask is actually applied to the child layers
+            // The transform part of the base mask DOES NOT impact lower layers!!
+            baseMask.AllowAllTransforms();
+
+            foreach (var layer in controller.GetLayers()) {
+                if (layer.mask == null) {
+                    layer.mask = baseMask.Clone();
+                } else {
+                    layer.mask.IntersectWith(baseMask);
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "net.yozolab.sps",
+  "version": "0.8.0",
+  "displayName": "YozoLab SPS (VRCFury SPS port)",
+  "description": "VRCFury の SPS（Super Plug Shader）を NDMF / Modular Avatar 向けに移植したもの。VRCFury への依存は無い。VRCFury Personal License（非商用）で配布する。",
+  "unity": "2022.3",
+  "author": {
+    "name": "Yozolab"
+  },
+  "license": "SEE LICENSE IN LICENSE-VRCFury.md",
+  "keywords": [],
+  "vpmDependencies": {
+    "com.vrchat.avatars": ">=3.7.0",
+    "nadena.dev.ndmf": ">=1.14.0",
+    "nadena.dev.modular-avatar": ">=1.18.0"
+  }
+}

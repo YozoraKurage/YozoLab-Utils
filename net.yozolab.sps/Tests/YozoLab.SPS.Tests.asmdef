@@ -1,0 +1,48 @@
+{
+    "name": "YozoLab.SPS.Tests",
+    "rootNamespace": "YozoLab.SPS.Tests",
+    "references": [
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner",
+        "YozoLab.SPS.Runtime",
+        "YozoLab.SPS.Editor",
+        "nadena.dev.ndmf"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll",
+        "VRCSDKBase.dll",
+        "VRCSDK3A.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS",
+        "VRCF_AVATARS",
+        "YOZOLAB_SPS_NDMF",
+        "YOZOLAB_SPS_MA",
+        "!YOZOLAB_DISABLE_SPS"
+    ],
+    "versionDefines": [
+        {
+            "name": "com.vrchat.avatars",
+            "expression": "",
+            "define": "VRCF_AVATARS"
+        },
+        {
+            "name": "nadena.dev.ndmf",
+            "expression": "1.14.0",
+            "define": "YOZOLAB_SPS_NDMF"
+        },
+        {
+            "name": "nadena.dev.modular-avatar",
+            "expression": "1.18.0",
+            "define": "YOZOLAB_SPS_MA"
+        }
+    ],
+    "noEngineReferences": false
+}

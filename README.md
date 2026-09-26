@@ -25,5 +25,12 @@ defineConstraints が `!YOZOLAB_DISABLE_*` という否定形で、誰も切っ�
 
 ## ライセンス
 
-ライセンスはアドオンごとに、各フォルダの `LICENSE.md` に置いている（いずれも MIT）。
-再配布するときは、各フォルダの `LICENSE.md` をそのまま含めること。
+ライセンスはアドオンごとに、各フォルダの `LICENSE.md` に置いている。
+
+- `net.yozolab.sps` 以外はすべて MIT。
+- `net.yozolab.sps` は VRCFury の SPS を移植したものなので、VRCFury のライセンス
+  （Personal License。非商用のみで、寄付を受けることも商用に含まれる）に従う。
+  詳しくは [net.yozolab.sps/README.md](net.yozolab.sps/README.md) を参照。
+
+まとめて入れるパッケージ `net.yozolab.yozolab-utils` には、それぞれのライセンスのアドオンが
+同梱されている。再配布するときは、各フォルダの `LICENSE.md` をそのまま含めること。

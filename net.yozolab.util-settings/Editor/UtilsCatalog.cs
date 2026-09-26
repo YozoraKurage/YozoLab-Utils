@@ -167,6 +167,15 @@ namespace YozoLab.UtilSettings
             },
             new UtilPackage
             {
+                Id = "sps",
+                DisplayName = "YozoLab SPS (VRCFury SPS port)",
+                Description = "VRCFury の SPS を NDMF / Modular Avatar 向けに移植したもの。VRCSDK・NDMF・MA が揃っているときだけ動く。VRCFury Personal License（非商用）。",
+                AsmdefGuid = "88ee98023f444c5b98bc5d9278439dbf",
+                TestsAsmdefGuid = "d0d3b6e9866340f58e643195c40466cc",
+                Define = "YOZOLAB_DISABLE_SPS",
+            },
+            new UtilPackage
+            {
                 Id = "operationlogger",
                 DisplayName = "Operation Logger",
                 Description = "エディタ操作の記録。Harmony を使う。",

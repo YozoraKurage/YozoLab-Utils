@@ -1,0 +1,32 @@
+{
+    "name": "YozoLab.SPS.Runtime",
+    "rootNamespace": "YozoLab.SPS",
+    "references": [],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "VRCSDKBase.dll",
+        "VRCSDK3A.dll",
+        "VRC.Dynamics.dll",
+        "VRC.SDK3.Dynamics.PhysBone.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "VRCF_AVATARS"
+    ],
+    "versionDefines": [
+        {
+            "name": "com.vrchat.base",
+            "expression": "3.1.12",
+            "define": "VRC_NEW_HOOK_API"
+        },
+        {
+            "name": "com.vrchat.avatars",
+            "expression": "",
+            "define": "VRCF_AVATARS"
+        }
+    ],
+    "noEngineReferences": false
+}

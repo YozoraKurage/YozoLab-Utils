@@ -1,0 +1,48 @@
+using System;
+using System.Collections.Generic;
+using UnityEngine;
+
+namespace YozoLab.SPS.Component {
+    [AddComponentMenu("")]
+    internal class SpsSocketGizmo : SpsPlayComponent {
+        [Serializable]
+        public class GuidedPathStopData {
+            public Transform transform;
+            public bool customizeTangentIn;
+            public bool customizeTangentOut;
+            public Vector3 tangentInLocal;
+            public Vector3 tangentOutLocal;
+        }
+
+        [Serializable]
+        public class SocketGizmoData {
+            public SpsSocket.AddLight type;
+            public SpsSocket.AddLight legacyType;
+            public Vector3 pos;
+            public Quaternion rot;
+            public bool useRadiusOffset;
+            public bool useLegacyLights;
+            public bool overrideLegacyOffset;
+            public Vector3 legacyOffsetLocal;
+            public string name;
+            public bool hasHandTouchZone;
+            public float handTouchZoneLength;
+            public float handTouchZoneRadius;
+            public List<GuidedPathStopData> guidedPathStops = new List<GuidedPathStopData>();
+        }
+
+        public SocketGizmoData data = new SocketGizmoData();
+        public bool show = true;
+
+        bool lastShow = false;
+
+        private void Update() {
+            if (show && !lastShow) {
+                try { EnableSceneLighting?.Invoke(); } catch (Exception) {}
+            }
+            lastShow = show;
+        }
+
+        public static Action EnableSceneLighting;
+    }
+}
