@@ -116,6 +116,37 @@ namespace YozoLab.Tests
             Assert.IsEmpty(Find(lone));
         }
 
+        // ---- 複数選択を一本の並びにする ----------------------------------
+
+        private static List<string> Order(params Node[] nodes) =>
+            ChainCandidates.TryOrderOnLine(nodes, n => n.parent, out List<Node> ordered)
+                ? ordered.Select(n => n.name).ToList()
+                : null;
+
+        [Test]
+        public void SelectionOnOneLine_IsOrderedFromRoot()
+        {
+            // 選んだ順はばらばらでも、根元から順に並ぶ。間の飛ばした関節は問わない。
+            Dictionary<string, Node> n = MakeHead();
+            CollectionAssert.AreEqual(new[] { "Head", "A1", "A3" }, Order(n["A3"], n["Head"], n["A1"]));
+            CollectionAssert.AreEqual(new[] { "C1", "C2", "C3b" }, Order(n["C3b"], n["C1"], n["C2"]));
+        }
+
+        [Test]
+        public void SelectionAcrossBranches_IsRejected()
+        {
+            Dictionary<string, Node> n = MakeHead();
+            Assert.IsNull(Order(n["A1"], n["A2"], n["B2"]));      // 別の房
+            Assert.IsNull(Order(n["C1"], n["C3a"], n["C3b"]));    // 枝分かれの先どうし
+        }
+
+        [Test]
+        public void DuplicateSelection_IsIgnored()
+        {
+            Dictionary<string, Node> n = MakeHead();
+            CollectionAssert.AreEqual(new[] { "A1", "A3" }, Order(n["A1"], n["A3"], n["A1"]));
+        }
+
         [Test]
         public void ManyBranches_AreCapped()
         {

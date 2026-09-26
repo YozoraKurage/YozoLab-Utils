@@ -100,6 +100,46 @@ namespace YozoLab.ChainHandles
             return count;
         }
 
+        /// <summary>
+        /// 複数選んだものを根元から順に並べる。全部が一本の親子の並び
+        /// （どれも隣の祖先か子孫）に乗っていなければ false。
+        /// 選んだものがそのままハンドルの位置になり、先頭が始点、末尾が終点になる。
+        /// </summary>
+        internal static bool TryOrderOnLine<T>(IReadOnlyList<T> items, Func<T, T> parent, out List<T> ordered)
+            where T : class
+        {
+            ordered = new List<T>();
+            foreach (T item in items)
+            {
+                if (item != null && !ordered.Contains(item)) ordered.Add(item);
+            }
+            if (ordered.Count < 2) return false;
+
+            var depth = new Dictionary<T, int>();
+            foreach (T item in ordered)
+            {
+                int d = 0;
+                for (T p = parent(item); p != null; p = parent(p)) d++;
+                depth[item] = d;
+            }
+            ordered.Sort((a, b) => depth[a].CompareTo(depth[b]));
+
+            for (int i = 0; i + 1 < ordered.Count; i++)
+            {
+                if (!IsAncestor(ordered[i], ordered[i + 1], parent)) return false;
+            }
+            return true;
+        }
+
+        private static bool IsAncestor<T>(T ancestor, T node, Func<T, T> parent) where T : class
+        {
+            for (T p = parent(node); p != null; p = parent(p))
+            {
+                if (p == ancestor) return true;
+            }
+            return false;
+        }
+
         // ---------------------------------------------------------------
         // Transform 版
         // ---------------------------------------------------------------
@@ -121,6 +161,9 @@ namespace YozoLab.ChainHandles
                 !TransformChain.TryBuild(c.start, c.end, joints, out _) || ChainLength(joints) < ChainSolver.MinBoneLength);
             return found;
         }
+
+        internal static bool TryOrderOnLine(IReadOnlyList<Transform> items, out List<Transform> ordered) =>
+            TryOrderOnLine(items, t => t.parent, out ordered);
 
         internal static float ChainLength(List<Transform> joints)
         {

@@ -38,7 +38,7 @@ namespace YozoLab.ChainHandles
         }
 
         private readonly List<Entry> _entries = new List<Entry>();
-        private Action<Transform, Transform> _onPick;
+        private Action<Transform, Transform, List<Transform>> _onPick;
         private string _title;
         private int _hovered = -1;
         private int _cursor;
@@ -66,29 +66,40 @@ namespace YozoLab.ChainHandles
             EditorApplication.delayCall += () =>
             {
                 _menuPending = false;
-                StartFromSelection(SceneCorner(), ChainHandlesWindow.StartChain);
+                StartFromSelection(SceneCorner(), ChainHandlesScene.StartChain);
             };
         }
 
         [MenuItem(MenuPath, true)]
         private static bool FromMenuValidate()
         {
-            int count = TransformChain.SelectedTransforms().Length;
-            return count == 1 || count == 2;
+            return TransformChain.SelectedTransforms().Length > 0;
         }
 
         /// <summary>
-        /// 今の選択から鎖を決める。親子の 2 つが選ばれていればそれで決まり。
-        /// 1 つなら候補を探し、1 つに絞れればそのまま、複数なら一覧を出す。
+        /// 今の選択から鎖を決める。
+        /// - 3 つ以上: 一本の親子の並びに乗っていれば、一番上から一番下までを鎖にし、
+        ///   選んだボーンそれぞれにハンドルを置く。
+        /// - 親子の 2 つ: それを始点と終点にする（ハンドルは分割数で等分）。
+        /// - 1 つ: 候補を探し、1 つに絞れればそのまま、複数なら一覧を出す。
         /// </summary>
         /// <param name="screenRect">一覧を出すときの基準（この下に開く）。スクリーン座標。</param>
-        internal static void StartFromSelection(Rect screenRect, Action<Transform, Transform> onPick)
+        internal static void StartFromSelection(Rect screenRect, Action<Transform, Transform, List<Transform>> onPick)
         {
             Transform[] selected = TransformChain.SelectedTransforms();
 
+            if (selected.Length >= 3)
+            {
+                if (ChainCandidates.TryOrderOnLine(selected, out List<Transform> ordered))
+                    onPick(ordered[0], ordered[ordered.Count - 1], ordered);
+                else
+                    Notify("選んだボーンが一本の親子の並びに乗っていません");
+                return;
+            }
+
             if (selected.Length == 2)
             {
-                if (TransformChain.TryGuess(selected, out Transform s, out Transform e)) onPick(s, e);
+                if (TransformChain.TryGuess(selected, out Transform s, out Transform e)) onPick(s, e, null);
                 else Notify("選んだ 2 つが親子関係にありません");
                 return;
             }
@@ -109,7 +120,7 @@ namespace YozoLab.ChainHandles
             }
             if (found.Count == 1)
             {
-                onPick(found[0].start, found[0].end);
+                onPick(found[0].start, found[0].end, null);
                 return;
             }
 
@@ -130,14 +141,13 @@ namespace YozoLab.ChainHandles
             return new Rect(p.x + 12f, p.y + 40f, 1f, 1f);
         }
 
-        private static void Notify(string message)
-        {
-            SceneView view = SceneView.lastActiveSceneView;
-            if (view != null) view.ShowNotification(new GUIContent(message));
-            else Debug.Log($"[Chain Handles] {message}");
-        }
+        /// <summary>
+        /// 鎖を作れなかった理由を伝える。シーンビュー中央の大きな通知は作業の邪魔になるので、
+        /// コンソールに出すだけにする。
+        /// </summary>
+        private static void Notify(string message) => Debug.LogWarning($"[Chain Handles] {message}");
 
-        private void Setup(Transform target, List<ChainCandidates.Candidate<Transform>> found, Action<Transform, Transform> onPick)
+        private void Setup(Transform target, List<ChainCandidates.Candidate<Transform>> found, Action<Transform, Transform, List<Transform>> onPick)
         {
             _onPick = onPick;
             _title = $"{target.name} から作れる鎖（{found.Count} 件）";
@@ -273,9 +283,9 @@ namespace YozoLab.ChainHandles
         {
             if (index < 0 || index >= _entries.Count) return;
             Entry entry = _entries[index];
-            Action<Transform, Transform> onPick = _onPick;
+            Action<Transform, Transform, List<Transform>> onPick = _onPick;
             Close();
-            if (entry.start != null && entry.end != null) onPick?.Invoke(entry.start, entry.end);
+            if (entry.start != null && entry.end != null) onPick?.Invoke(entry.start, entry.end, null);
         }
 
         private static void EnsureStyles()
@@ -325,7 +335,7 @@ namespace YozoLab.ChainHandles
             // 実際に作られるハンドルの位置（既定の分割数）。
             if (ChainSolver.JointParameters(points, out _) != null)
             {
-                Vector3[] controls = ChainSolver.PlaceControls(points, ChainHandlesWindow.DefaultDivisions(points.Length));
+                Vector3[] controls = ChainSolver.PlaceControls(points, ChainHandlesScene.DefaultDivisions(points.Length), out _);
                 using (new Handles.DrawingScope(ControlColor))
                 {
                     foreach (Vector3 c in controls)

@@ -8,8 +8,8 @@ namespace YozoLab.ChainHandles
     ///
     /// 考え方はカーブデフォーマ + 長さの拘束。
     ///
-    /// 1. 掴む前の鎖（rest）に沿って、弧長で等間隔に制御点を置く。制御点を通る
-    ///    Catmull-Rom 曲線が「鎖の芯」になる。
+    /// 1. 掴む前の鎖（rest）に沿って、弧長で等間隔に（または指定した関節に）制御点を
+    ///    置く。制御点を通る曲線が「鎖の芯」になる。
     /// 2. 制御点を動かすと芯が曲がる。芯に沿って平行移動させた座標系（+ ロール）で
     ///    rest の鎖を芯ごと運び、「鎖が行きたい場所」の曲線を作る。
     ///    芯から外れていた分（うねりなど）も一緒に曲がって付いてくる。
@@ -70,20 +70,82 @@ namespace YozoLab.ChainHandles
         }
 
         /// <summary>
-        /// 制御点を置く。鎖を弧長で divisions 等分した divisions + 1 点（根元と先端を含む）。
+        /// 鎖をおおよそ弧長で divisions 等分する位置に近い関節を選ぶ。ハンドルは必ず関節の上に置く
+        /// （掴んだハンドルがどのボーンを動かすのかをはっきりさせるため）。
+        /// 分割数はボーンの本数までに抑え、同じ関節を二度選ばないようにする。
+        /// 根元（0）と先端（最後の関節）は必ず含む。
         /// </summary>
-        internal static Vector3[] PlaceControls(IReadOnlyList<Vector3> joints, int divisions)
+        internal static int[] EvenJointIndices(IReadOnlyList<Vector3> joints, int divisions)
         {
-            divisions = Mathf.Max(1, divisions);
+            int last = joints.Count - 1;
+            if (last < 1) return new[] { 0 };
+
+            divisions = Mathf.Clamp(divisions, 1, last);
             float[] parameters = JointParameters(joints, out _);
-            var controls = new Vector3[divisions + 1];
+            var indices = new int[divisions + 1];
+
             for (int k = 0; k <= divisions; k++)
             {
-                controls[k] = parameters == null
-                    ? joints[0]
-                    : PointOnChain(joints, parameters, (float)k / divisions);
+                float u = (float)k / divisions;
+                int best = 0;
+                if (parameters != null)
+                {
+                    for (int i = 1; i <= last; i++)
+                    {
+                        if (Mathf.Abs(parameters[i] - u) < Mathf.Abs(parameters[best] - u)) best = i;
+                    }
+                }
+                else
+                {
+                    best = Mathf.RoundToInt(u * last);
+                }
+
+                // 前のハンドルより先、かつ残りのハンドルが入る余地を残す。
+                int low = k == 0 ? 0 : indices[k - 1] + 1;
+                int high = last - (divisions - k);
+                indices[k] = Mathf.Clamp(best, low, high);
             }
-            return controls;
+            return indices;
+        }
+
+        /// <summary>分割数で関節を選んで制御点を置く。<see cref="EvenJointIndices"/> を参照。</summary>
+        internal static Vector3[] PlaceControls(IReadOnlyList<Vector3> joints, int divisions, out float[] knots) =>
+            PlaceControls(joints, EvenJointIndices(joints, divisions), out knots, out _);
+
+        internal static Vector3[] PlaceControls(
+            IReadOnlyList<Vector3> joints, IReadOnlyList<int> indices, out float[] knots) =>
+            PlaceControls(joints, indices, out knots, out _);
+
+        /// <summary>
+        /// 指定した関節に制御点を置く。
+        /// indices は根元 0 から先端までの昇順で、先頭は 0、末尾は最後の関節であること。
+        /// 同じ位置に重なる関節（長さ 0 のボーン越し）は 1 つにまとめる。
+        /// </summary>
+        /// <param name="knots">各制御点の弧長パラメータ。<see cref="Solve"/> へそのまま渡す。</param>
+        /// <param name="kept">実際に制御点を置いた関節の番号（まとめた後）。</param>
+        internal static Vector3[] PlaceControls(
+            IReadOnlyList<Vector3> joints, IReadOnlyList<int> indices, out float[] knots, out int[] kept)
+        {
+            float[] parameters = JointParameters(joints, out _);
+            var controls = new List<Vector3>();
+            var knotList = new List<float>();
+            var keptList = new List<int>();
+
+            if (parameters != null)
+            {
+                foreach (int index in indices)
+                {
+                    float u = parameters[index];
+                    if (knotList.Count > 0 && u - knotList[knotList.Count - 1] < 1e-6f) continue;
+                    controls.Add(joints[index]);
+                    knotList.Add(u);
+                    keptList.Add(index);
+                }
+            }
+
+            knots = knotList.ToArray();
+            kept = keptList.ToArray();
+            return controls.ToArray();
         }
 
         // ---------------------------------------------------------------
@@ -91,52 +153,84 @@ namespace YozoLab.ChainHandles
         // ---------------------------------------------------------------
 
         /// <summary>
-        /// 制御点を通る Catmull-Rom 曲線上の点。u は 0〜1 で、制御点 k が u = k / (数 - 1)。
-        /// 両端は外側に鏡映した仮想点で延ばす（端で曲線が暴れないように）。
+        /// 制御点を通る曲線上の点。u は 0〜1。
+        ///
+        /// 制御点 k の位置 u は knots[k]。knots が null なら等間隔（k / (数 - 1)）で、
+        /// そのときは一様な Catmull-Rom と一致する。間隔が不揃いでも曲線が暴れないよう、
+        /// 各制御点の接線は前後の制御点の差をパラメータの差で割ったもの（Hermite）にする。
+        /// 両端は外側に鏡映した仮想点で延ばす。
         /// </summary>
-        internal static Vector3 Spline(IReadOnlyList<Vector3> c, float u)
+        internal static Vector3 Spline(IReadOnlyList<Vector3> c, float u, IReadOnlyList<float> knots = null)
         {
-            GetSegment(c, u, out Vector3 p0, out Vector3 p1, out Vector3 p2, out Vector3 p3, out float t);
+            GetSegment(c, knots, u, out Vector3 p1, out Vector3 p2, out Vector3 m1, out Vector3 m2, out float t, out _);
             float t2 = t * t, t3 = t2 * t;
-            return 0.5f * (
-                p0 * (-t3 + 2f * t2 - t) +
-                p1 * (3f * t3 - 5f * t2 + 2f) +
-                p2 * (-3f * t3 + 4f * t2 + t) +
-                p3 * (t3 - t2));
+            return
+                p1 * (2f * t3 - 3f * t2 + 1f) +
+                m1 * (t3 - 2f * t2 + t) +
+                p2 * (-2f * t3 + 3f * t2) +
+                m2 * (t3 - t2);
         }
 
         /// <summary>曲線の接線（正規化していない。u に対する微分）。</summary>
-        internal static Vector3 SplineTangent(IReadOnlyList<Vector3> c, float u)
+        internal static Vector3 SplineTangent(IReadOnlyList<Vector3> c, float u, IReadOnlyList<float> knots = null)
         {
-            GetSegment(c, u, out Vector3 p0, out Vector3 p1, out Vector3 p2, out Vector3 p3, out float t);
+            GetSegment(c, knots, u, out Vector3 p1, out Vector3 p2, out Vector3 m1, out Vector3 m2, out float t, out float h);
             float t2 = t * t;
-            return 0.5f * (
-                p0 * (-3f * t2 + 4f * t - 1f) +
-                p1 * (9f * t2 - 10f * t) +
-                p2 * (-9f * t2 + 8f * t + 1f) +
-                p3 * (3f * t2 - 2f * t));
+            Vector3 dt =
+                p1 * (6f * t2 - 6f * t) +
+                m1 * (3f * t2 - 4f * t + 1f) +
+                p2 * (-6f * t2 + 6f * t) +
+                m2 * (3f * t2 - 2f * t);
+            return h > 0f ? dt / h : dt;
         }
 
+        /// <summary>制御点 k の弧長パラメータ。</summary>
+        internal static float Knot(IReadOnlyList<float> knots, int count, int k) =>
+            knots != null ? knots[k] : count > 1 ? (float)k / (count - 1) : 0f;
+
+        /// <summary>
+        /// u を含む区間の両端の点と、区間の長さ h を掛けた接線（m1, m2）。t は区間内の 0〜1。
+        /// </summary>
         private static void GetSegment(
-            IReadOnlyList<Vector3> c, float u,
-            out Vector3 p0, out Vector3 p1, out Vector3 p2, out Vector3 p3, out float t)
+            IReadOnlyList<Vector3> c, IReadOnlyList<float> knots, float u,
+            out Vector3 p1, out Vector3 p2, out Vector3 m1, out Vector3 m2, out float t, out float h)
         {
-            int segments = c.Count - 1;
+            int count = c.Count;
+            int segments = count - 1;
             if (segments <= 0)
             {
-                p0 = p1 = p2 = p3 = c[0];
-                t = 0f;
+                p1 = p2 = c[0];
+                m1 = m2 = Vector3.zero;
+                t = h = 0f;
                 return;
             }
 
-            float x = Mathf.Clamp01(u) * segments;
-            int s = Mathf.Min((int)x, segments - 1);
-            t = x - s;
+            u = Mathf.Clamp01(u);
+            int s = 0;
+            while (s < segments - 1 && u > Knot(knots, count, s + 1)) s++;
+
+            float u1 = Knot(knots, count, s);
+            float u2 = Knot(knots, count, s + 1);
+            h = u2 - u1;
+            t = h > 0f ? Mathf.Clamp01((u - u1) / h) : 0f;
 
             p1 = c[s];
             p2 = c[s + 1];
-            p0 = s > 0 ? c[s - 1] : 2f * p1 - p2;
-            p3 = s + 2 <= segments ? c[s + 2] : 2f * p2 - p1;
+            m1 = h * PointTangent(c, knots, s);
+            m2 = h * PointTangent(c, knots, s + 1);
+        }
+
+        /// <summary>
+        /// 制御点 k での接線（u に対する微分）。前後の点の差をパラメータの差で割る。
+        /// 端は鏡映した仮想点を置いたのと同じで、隣との差をその間隔で割ったものになる。
+        /// </summary>
+        private static Vector3 PointTangent(IReadOnlyList<Vector3> c, IReadOnlyList<float> knots, int k)
+        {
+            int count = c.Count;
+            int prev = Mathf.Max(k - 1, 0);
+            int next = Mathf.Min(k + 1, count - 1);
+            float du = Knot(knots, count, next) - Knot(knots, count, prev);
+            return du > 0f ? (c[next] - c[prev]) / du : Vector3.zero;
         }
 
         // ---------------------------------------------------------------
@@ -151,6 +245,7 @@ namespace YozoLab.ChainHandles
         /// <param name="restControls">掴む前の制御点（<see cref="PlaceControls"/> の結果）。</param>
         /// <param name="controls">動かした後の制御点。数は restControls と同じ。</param>
         /// <param name="rolls">制御点ごとのロール（度、芯まわり）。間は線形に補間する。</param>
+        /// <param name="knots">制御点ごとの弧長パラメータ。null なら等間隔。</param>
         /// <param name="positions">解いた関節の世界座標（確認用。書き込むのは回転だけでよい）。</param>
         /// <param name="rotations">解いた関節の世界回転。</param>
         /// <returns>解けたか。鎖の全長が 0 などで解けなければ false（出力は rest のまま）。</returns>
@@ -161,7 +256,8 @@ namespace YozoLab.ChainHandles
             IReadOnlyList<Vector3> controls,
             IReadOnlyList<float> rolls,
             Vector3[] positions,
-            Quaternion[] rotations)
+            Quaternion[] rotations,
+            IReadOnlyList<float> knots = null)
         {
             int jointCount = restPositions.Count;
             for (int i = 0; i < jointCount; i++)
@@ -171,6 +267,7 @@ namespace YozoLab.ChainHandles
             }
 
             if (jointCount < 2 || controls.Count < 2 || controls.Count != restControls.Count) return false;
+            if (knots != null && knots.Count != controls.Count) return false;
 
             float[] jointU = JointParameters(restPositions, out _);
             if (jointU == null) return false;
@@ -190,8 +287,8 @@ namespace YozoLab.ChainHandles
             for (int j = 0; j < n; j++)
             {
                 float u = samples[j];
-                Vector3 restTangent = SafeDirection(SplineTangent(restControls, u), restTangentPrev);
-                Vector3 tangent = SafeDirection(SplineTangent(controls, u), tangentPrev);
+                Vector3 restTangent = SafeDirection(SplineTangent(restControls, u, knots), restTangentPrev);
+                Vector3 tangent = SafeDirection(SplineTangent(controls, u, knots), tangentPrev);
 
                 if (j == 0)
                 {
@@ -210,13 +307,13 @@ namespace YozoLab.ChainHandles
 
                 Quaternion toNow = FrameDelta(frame, restFrame);
 
-                float roll = SampleRoll(rolls, u);
+                float roll = SampleRoll(rolls, u, knots);
                 deform[j] = Quaternion.AngleAxis(roll, tangent) * toNow;
 
                 // rest の鎖の点を、rest の芯からのずれごと今の芯へ運ぶ。
                 Vector3 restOnChain = PointOnChain(restPositions, jointU, u);
-                Vector3 offset = restOnChain - Spline(restControls, u);
-                target[j] = Spline(controls, u) + deform[j] * offset;
+                Vector3 offset = restOnChain - Spline(restControls, u, knots);
+                target[j] = Spline(controls, u, knots) + deform[j] * offset;
             }
 
             // --- 行き先の曲線を根元から辿り、長さを保って関節を置く ---
@@ -290,16 +387,20 @@ namespace YozoLab.ChainHandles
             return unique;
         }
 
-        /// <summary>ロールの線形補間。制御点 k が u = k / (数 - 1)。</summary>
-        internal static float SampleRoll(IReadOnlyList<float> rolls, float u)
+        /// <summary>ロールの線形補間。制御点 k の位置は knots[k]（null なら等間隔）。</summary>
+        internal static float SampleRoll(IReadOnlyList<float> rolls, float u, IReadOnlyList<float> knots = null)
         {
             if (rolls == null || rolls.Count == 0) return 0f;
-            int segments = rolls.Count - 1;
-            if (segments == 0) return rolls[0];
+            int count = rolls.Count;
+            if (count == 1) return rolls[0];
 
-            float x = Mathf.Clamp01(u) * segments;
-            int s = Mathf.Min((int)x, segments - 1);
-            return Mathf.Lerp(rolls[s], rolls[s + 1], x - s);
+            u = Mathf.Clamp01(u);
+            int s = 0;
+            while (s < count - 2 && u > Knot(knots, count, s + 1)) s++;
+
+            float u1 = Knot(knots, count, s), u2 = Knot(knots, count, s + 1);
+            float t = u2 - u1 > 0f ? Mathf.Clamp01((u - u1) / (u2 - u1)) : 0f;
+            return Mathf.Lerp(rolls[s], rolls[s + 1], t);
         }
 
         /// <summary>

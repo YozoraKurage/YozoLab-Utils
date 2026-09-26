@@ -62,6 +62,26 @@ namespace YozoLab.ChainHandles
             return false;
         }
 
+        /// <summary>
+        /// ハンドルを置くボーン（anchors）が、鎖の何番目の関節かを求める。
+        /// 先頭が始点、末尾が終点で、途中も根元から順に並んでいなければ false。
+        /// </summary>
+        internal static bool TryAnchorIndices(List<Transform> joints, IReadOnlyList<Transform> anchors, List<int> indices)
+        {
+            indices.Clear();
+            if (anchors == null || anchors.Count < 2) return false;
+
+            foreach (Transform anchor in anchors)
+            {
+                int index = anchor != null ? joints.IndexOf(anchor) : -1;
+                if (index < 0) return false;
+                if (indices.Count > 0 && index <= indices[indices.Count - 1]) return false;
+                indices.Add(index);
+            }
+
+            return indices[0] == 0 && indices[indices.Count - 1] == joints.Count - 1;
+        }
+
         /// <summary>鎖のどこかに非一様スケールがあるか。</summary>
         internal static bool HasNonUniformScale(List<Transform> joints)
         {

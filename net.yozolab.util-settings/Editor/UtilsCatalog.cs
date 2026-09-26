@@ -144,11 +144,20 @@ namespace YozoLab.UtilSettings
             {
                 Id = "chainhandles",
                 DisplayName = "Chain Handles",
-                Description = "Transform の鎖を少数の IK ハンドルとロールハンドルで曲げる。書くのは回転だけで、長さとスケールは変えない。",
+                Description = "Transform の鎖を少数の IK ハンドルとロールハンドルで曲げる。書くのは回転だけで、長さとスケールは変えない。鎖はアバターごとに保存する。",
                 AsmdefGuid = "9af606a0b41349eb814f224161694eac",
                 TestsAsmdefGuid = "346a641ee45f4d8d9d96871dbefc8c0e",
                 Define = "YOZOLAB_DISABLE_CHAINHANDLES",
-                OpenMenuPath = "YozoLab/Chain Handles",
+                OpenMenuPath = "YozoLab/Chain Handles/鎖の一覧",
+                Toggles = new[]
+                {
+                    new RuntimeToggle
+                    {
+                        Label = "鎖のギズモを表示",
+                        TypeName = "YozoLab.ChainHandles.ChainHandlesScene",
+                        Tooltip = "保存してある鎖のハンドルをシーンに出す。シーンビューのツールバーからも切り替えられる。",
+                    },
+                },
             },
             new UtilPackage
             {
