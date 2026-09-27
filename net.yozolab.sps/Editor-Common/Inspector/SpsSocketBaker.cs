@@ -326,7 +326,7 @@ namespace YozoLab.SPS.Inspector {
             return ShouldProbablyHaveTouchZone(socket, closestBone);
         }
 
-        private static Tuple<SpsSocket.AddLight, Vector3, Quaternion> GetInfoFromLightsOrComponent(
+        internal static Tuple<SpsSocket.AddLight, Vector3, Quaternion> GetInfoFromLightsOrComponent(
             SpsSocket socket,
             HumanBodyBones? closestBone
         ) {

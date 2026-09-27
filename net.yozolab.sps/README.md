@@ -35,6 +35,21 @@ VRCA / VRCW License の条項がそのまま適用される。
 
 作成メニューは `Tools/YozoLab SPS/` と、階層ウィンドウの右クリック `YozoLab SPS/` にある。
 
+### エディタで変形を確かめる（NDMF プレビュー）
+
+NDMF のプレビューが有効なら、シーンビューで Plug が近くの Socket の方へ曲がる様子がそのまま見える
+（プレイモードに入らなくてよい）。Plug や Socket を動かせば追従する。
+NDMF のプレビューメニューの「SPS Deformation」で切り替えられる。
+
+- アバターには一切手を加えない。プレビューのための Resolver・Socket の目印は、シーンに保存されない
+  隠しオブジェクトとして作り、NDMF が作るプレビュー用の複製のマテリアルだけを SPS 加工済みのものに替える。
+- SPS は画面を介してデータをやり取りするため、シーンビューのカメラが HDR で描いている必要がある
+  （VRChat 向けのプロジェクトの既定の設定なら HDR になっている）。
+- 他の NDMF プレビュー（Modular Avatar のメッシュ削除など）でメッシュの頂点数が変わった Plug は、
+  変形を見せない。
+- 深度アクション・触覚の Contact・OSC など、Animator や Contact が動いて初めて起きることはプレビューされない。
+  それらはプレイモードで確かめる。
+
 ### VRCFury の SPS から移し替える
 
 `Tools/YozoLab SPS/Migrate from VRCFury SPS` で、選んだアバターの中の VRCFury の SPS コンポーネント
@@ -93,6 +108,9 @@ SPS と関係なくアバター全体を書き換える、VRCFury 特有の処�
   （インスペクタにその旨を表示する）。
 - Poiyomi のマテリアルは、SPS が加工する前にロックされる（VRCFury と同じ。Poiyomi 自身も
   アップロード時に同じロックを行う）。
+- NDMF のプレビューで、エディタで止まったまま変形を見られるようにした（VRCFury には無い）。
+- シェーダー `sps_cell_frag.cginc` の画面の行の数え方を、OpenGL / Vulkan でも正しくなるよう
+  Direct3D 以外では反転しないようにした（Direct3D での振る舞いは変わらない）。
 - 名前空間 `VF` → `YozoLab.SPS`、コンポーネント名（`VRCFuryHapticPlug` → `SpsPlug` など）、
   アセットの GUID、メニューの場所、設定値のキー、隠しシェーダー名を変え、VRCFury と同じプロジェクトに
   入っていても衝突しないようにした。

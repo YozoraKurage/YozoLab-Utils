@@ -1,6 +1,7 @@
 using nadena.dev.ndmf;
 using nadena.dev.ndmf.animator;
 using YozoLab.SPS.Ndmf;
+using YozoLab.SPS.Preview;
 
 [assembly: ExportsPlugin(typeof(SpsNdmfPlugin))]
 
@@ -15,6 +16,7 @@ namespace YozoLab.SPS.Ndmf {
      *   このあと MA が同じ仮想コントローラーの上で合流を行うので、SPS が足したレイヤーや
      *   既存クリップへの手直しはそのまま引き継がれる。
      * プレイモードでの確認も、NDMF の Apply on Play でそのまま動く。
+     * エディタで止まったままの変形は、NDMF のプレビュー（SpsPreviewFilter）で見られる。
      */
     internal class SpsNdmfPlugin : Plugin<SpsNdmfPlugin> {
         public override string QualifiedName => "net.yozolab.sps";
@@ -24,7 +26,8 @@ namespace YozoLab.SPS.Ndmf {
             InPhase(BuildPhase.Generating)
                 .BeforePlugin("nadena.dev.modular-avatar")
                 .WithRequiredExtension(typeof(AnimatorServicesContext), seq => {
-                    seq.Run("Build SPS", SpsBuilder.Run);
+                    seq.Run("Build SPS", SpsBuilder.Run)
+                        .PreviewingWith(new SpsPreviewFilter());
                 });
         }
     }
