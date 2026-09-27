@@ -10,7 +10,7 @@ using YozoLab.SPS.Utils;
 using YozoLab.SPS.Utils.Controller;
 
 namespace YozoLab.SPS.Actions {
-    [FeatureTitle("Disable Hand Controls")]
+    [FeatureTitle("ハンドジェスチャーの無効化")]
     internal class DisableGesturesActionBuilder : ActionBuilder<DisableGesturesAction> {
 
         public VFClip Build(string actionName) {

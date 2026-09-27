@@ -10,7 +10,7 @@ using YozoLab.SPS.Utils;
 using YozoLab.SPS.Utils.Controller;
 
 namespace YozoLab.SPS.Actions {
-    [FeatureTitle("Disable Visemes")]
+    [FeatureTitle("リップシンクの無効化")]
     internal class BlockVisemesActionBuilder : ActionBuilder<BlockVisemesAction> {
 
         public VFClip Build(string actionName) {

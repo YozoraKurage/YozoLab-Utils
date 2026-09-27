@@ -8,7 +8,7 @@ using YozoLab.SPS.Utils;
 using YozoLab.SPS.Utils.Controller;
 
 namespace YozoLab.SPS.Actions {
-    [FeatureTitle("Object Toggle")]
+    [FeatureTitle("オブジェクトのオン/オフ")]
     [FeatureHideTitleInEditor]
     internal class ObjectToggleActionBuilder : ActionBuilder<ObjectToggleAction> {
         public VFClip Build(ObjectToggleAction toggle) {
@@ -47,8 +47,12 @@ namespace YozoLab.SPS.Actions {
             row.Add(VRCFuryEditorUtils.Prop(
                 prop.FindPropertyRelative("mode"),
                 formatEnum: str => {
-                    if (str == "Toggle") return "Flip State (Deprecated)";
-                    return str;
+                    switch (str) {
+                        case "TurnOn": return "オンにする";
+                        case "TurnOff": return "オフにする";
+                        case "Toggle": return "反転（非推奨）";
+                        default: return str;
+                    }
                 }
             ).FlexBasis(100));
 

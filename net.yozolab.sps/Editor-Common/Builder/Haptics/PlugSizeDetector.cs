@@ -40,7 +40,7 @@ namespace YozoLab.SPS.Builder.Haptics {
             VFMultimapSet<VFGameObject, int> matSlots = new VFMultimapSet<VFGameObject, int>();
             if (plug.autoRadius || plug.autoLength || renderers.Count > 0) {
                 if (renderers.Count == 0) {
-                    throw new VRCFBuilderException("Failed to find plug renderer");
+                    throw new VRCFBuilderException("Plug のメッシュが見つからない（「メッシュを自動で探す」を切って、対象のメッシュを指定してください）");
                 }
                 var autoSize = GetAutoWorldSize(renderers, worldPosition, worldRotation, plug);
                 if (autoSize != null) {

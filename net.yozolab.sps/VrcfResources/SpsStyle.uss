@@ -124,3 +124,121 @@ Vector4Field.VrcFuryEditorProp > .unity-vector4-field__input {
     margin-bottom: -3px;
     margin-right: 2px;
 }
+
+/* ---- YozoLab SPS inspector ----
+ * Unity のダーク / ライト両方で読めるよう、色は半透明の重ね塗りにしている。 */
+
+.spsProp {
+    margin-bottom: 3px;
+}
+.spsLabel {
+    -unity-text-align: middle-left;
+}
+.spsLabelBox {
+    align-items: center;
+}
+.spsLabelColumn {
+    width: 40%;
+    min-width: 110px;
+    max-width: 220px;
+    flex-shrink: 0;
+    padding-right: 6px;
+    padding-top: 1px;
+}
+.spsLabelOwnLine {
+    margin-bottom: 2px;
+}
+.spsHelpIcon {
+    width: 12px;
+    height: 12px;
+    margin-left: 3px;
+    flex-shrink: 0;
+    opacity: 0.55;
+}
+.spsCheckboxRow {
+    align-items: center;
+    min-height: 18px;
+}
+.spsCheckbox {
+    margin-right: 4px;
+}
+
+/* まとまり */
+.spsSection {
+    background-color: rgba(0, 0, 0, 0.07);
+    border-width: 1px;
+    border-color: rgba(0, 0, 0, 0.22);
+    border-radius: 4px;
+    padding: 6px 8px 4px 8px;
+    margin: 4px 0 8px 0;
+}
+.spsSectionHeader {
+    margin-bottom: 6px;
+}
+.spsSectionTitle {
+    -unity-font-style: bold;
+}
+.spsSubtitle {
+    font-size: 10px;
+    opacity: 0.65;
+    margin-top: 1px;
+}
+
+/* 開け閉めできるまとまり */
+.spsGroup {
+    margin: 1px 0 1px 0;
+}
+.spsGroup > .unity-foldout__toggle {
+    -unity-font-style: bold;
+    margin-left: 0;
+}
+.spsGroup > .unity-foldout__content {
+    margin-left: 14px;
+    padding: 3px 0 8px 0;
+}
+.spsGroupSummary {
+    margin-left: 8px;
+    opacity: 0.55;
+    -unity-font-style: normal;
+    flex-shrink: 1;
+    overflow: hidden;
+}
+
+/* 注意書き */
+.spsCallout {
+    border-left-width: 3px;
+    border-radius: 3px;
+    padding: 4px 6px 4px 5px;
+    margin: 2px 0 6px 0;
+    align-items: flex-start;
+    background-color: rgba(128, 128, 128, 0.12);
+    border-left-color: rgba(128, 128, 128, 0.6);
+}
+.spsCallout--info {
+    border-left-color: rgb(80, 150, 230);
+    background-color: rgba(80, 150, 230, 0.10);
+}
+.spsCallout--warning {
+    border-left-color: rgb(225, 175, 40);
+    background-color: rgba(225, 175, 40, 0.10);
+}
+.spsCallout--error {
+    border-left-color: rgb(220, 70, 60);
+    background-color: rgba(220, 70, 60, 0.12);
+}
+.spsCallout--status {
+    border-left-color: rgba(128, 128, 128, 0.6);
+    background-color: rgba(128, 128, 128, 0.08);
+}
+.spsCalloutIcon {
+    width: 16px;
+    height: 16px;
+    margin-right: 6px;
+    flex-shrink: 0;
+}
+.spsStatusText {
+    font-size: 11px;
+}
+.spsNotices {
+    margin-bottom: 2px;
+}

@@ -13,7 +13,7 @@ using YozoLab.SPS.Utils;
 using YozoLab.SPS.Utils.Controller;
 
 namespace YozoLab.SPS.Actions {
-    [FeatureTitle("BlendShape")]
+    [FeatureTitle("ブレンドシェイプ")]
     internal class BlendshapeActionBuilder : ActionBuilder<BlendShapeAction> {
         [VFAutowired] private readonly VFGameObject avatarObject;
 
@@ -42,13 +42,13 @@ namespace YozoLab.SPS.Actions {
 
             var row = new VisualElement().Row();
             var blendshapeProp = prop.FindPropertyRelative("blendShape");
-            row.Add(VRCFuryEditorUtils.Prop(blendshapeProp, "Blendshape").FlexGrow(1));
-            var selectButton = new Button(SelectButtonPress) { text = "Search" };
+            row.Add(VRCFuryEditorUtils.Prop(blendshapeProp, "ブレンドシェイプ").FlexGrow(1));
+            var selectButton = new Button(SelectButtonPress) { text = "検索" };
             row.Add(selectButton);
             content.Add(row);
 
             var valueProp = prop.FindPropertyRelative("blendShapeValue");
-            var valueField = VRCFuryEditorUtils.Prop(valueProp, "Value (0-100)");
+            var valueField = VRCFuryEditorUtils.Prop(valueProp, "値 (0〜100)");
             valueField.RegisterCallback<ChangeEvent<float>>(e => {
                 if (e.newValue < 0) {
                     valueProp.floatValue = 0;
@@ -77,7 +77,7 @@ namespace YozoLab.SPS.Actions {
         }
         
         public static void ShowBlendshapeSearchWindow(IList<SkinnedMeshRenderer> skins, Action<string> onSelect) {
-            var window = new VrcfSearchWindow("Blendshapes");
+            var window = new VrcfSearchWindow("ブレンドシェイプ");
 
             var shapes = new Dictionary<string, string>();
             foreach (var skin in skins) {

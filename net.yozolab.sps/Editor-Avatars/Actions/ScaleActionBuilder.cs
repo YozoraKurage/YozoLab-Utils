@@ -9,7 +9,7 @@ using YozoLab.SPS.Utils;
 using YozoLab.SPS.Utils.Controller;
 
 namespace YozoLab.SPS.Actions {
-    [FeatureTitle("Scale")]
+    [FeatureTitle("スケール")]
     internal class ScaleActionBuilder : ActionBuilder<ScaleAction> {
         public VFClip Build(ScaleAction model) {
             var clip = NewClip();
@@ -23,8 +23,8 @@ namespace YozoLab.SPS.Actions {
         [FeatureEditor]
         public static VisualElement Editor(SerializedProperty prop) {
             var row = new VisualElement();
-            row.Add(VRCFuryEditorUtils.Prop(prop.FindPropertyRelative("obj"), "Object"));
-            row.Add( VRCFuryEditorUtils.Prop(prop.FindPropertyRelative("scale"), "Multiplier"));
+            row.Add(VRCFuryEditorUtils.Prop(prop.FindPropertyRelative("obj"), "オブジェクト"));
+            row.Add(VRCFuryEditorUtils.Prop(prop.FindPropertyRelative("scale"), "倍率"));
             return row;
         }
     }

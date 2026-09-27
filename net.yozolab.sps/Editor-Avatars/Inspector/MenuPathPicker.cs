@@ -20,9 +20,9 @@ namespace YozoLab.SPS.Inspector {
             [CanBeNull] VFGameObject avatarObject,
             bool foldersOnly,
             SerializedProperty prop,
-            string label = "Menu Path",
+            string label = "メニューのパス",
             Func<string> append = null,
-            string selectLabel = "Select",
+            string selectLabel = "選択",
             string tooltip = null,
             bool immediate = false,
             Vector2? pos = null
@@ -61,7 +61,7 @@ namespace YozoLab.SPS.Inspector {
                         .ToList();
                     if (prefix.Count == 0) {
                         if (foldersOnly) {
-                            group.Add("<Select this folder>", "");
+                            group.Add("<このフォルダを選択>", "");
                         }
 
                         foreach (var child in children) {
@@ -70,7 +70,7 @@ namespace YozoLab.SPS.Inspector {
                     } else {
                         if (children.Count > 0) {
                             var subGroup = group.AddGroup(prefix.Last());
-                            subGroup.Add("<Select this folder>", PathToString(prefix));
+                            subGroup.Add("<このフォルダを選択>", PathToString(prefix));
                             foreach (var child in children) {
                                 AddItem(subGroup, child);
                             }
@@ -80,7 +80,7 @@ namespace YozoLab.SPS.Inspector {
                     }
                 }
 
-                var window = new VrcfSearchWindow("Avatar Menu Items");
+                var window = new VrcfSearchWindow("アバターのメニュー");
                 AddItem(window.GetMainGroup(), new string[] { });
 
                 window.Open(Apply, pos);

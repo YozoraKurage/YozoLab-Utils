@@ -46,7 +46,7 @@ namespace YozoLab.SPS.Inspector {
         }
 
         protected override VisualElement CreateEditor(SerializedObject serializedObject, SpsComponent target) {
-            return VRCFuryEditorUtils.Error("This SPS component is not available in this type of project");
+            return VRCFuryEditorUtils.Error("この種類のプロジェクトでは、この SPS コンポーネントは使えない");
         }
     }
 
@@ -70,7 +70,7 @@ namespace YozoLab.SPS.Inspector {
             } catch (Exception e) {
                 Debug.LogException(new Exception("Failed to render editor", e));
                 content.Add(versionLabel);
-                content.Add(VRCFuryEditorUtils.Error("Failed to render editor (see unity console)"));
+                content.Add(VRCFuryEditorUtils.Error("インスペクターを表示できなかった（詳しくは Console を見てください）"));
             }
 
             return content;
@@ -78,16 +78,16 @@ namespace YozoLab.SPS.Inspector {
 
         private VisualElement CreateInspectorGUIUnsafe(VisualElement versionLabel) {
             if (!(target is UnityEngine.Component c)) {
-                return VRCFuryEditorUtils.Error("This isn't a component?");
+                return VRCFuryEditorUtils.Error("コンポーネントではない");
             }
             if (!(c is T v)) {
-                return VRCFuryEditorUtils.Error("Unexpected type?");
+                return VRCFuryEditorUtils.Error("想定外の型");
             }
 
             var loadError = v.GetBrokenMessage();
             if (loadError != null) {
                 return VRCFuryEditorUtils.Error(
-                    $"This SPS component failed to load ({loadError}). Please update YozoLab SPS.");
+                    $"この SPS コンポーネントを読み込めなかった（{loadError}）。YozoLab SPS を更新してください。");
             }
             
             var isInstance = PrefabUtility.IsPartOfPrefabInstance(v);
@@ -116,7 +116,7 @@ namespace YozoLab.SPS.Inspector {
                 body.SetEnabled(false);
 
                 var children = copyGameObject.GetComponents<T>();
-                if (children.Length != 1) body.Add(VRCFuryComponentHeader.CreateHeaderOverlay("Legacy Multi-Component"));
+                if (children.Length != 1) body.Add(VRCFuryComponentHeader.CreateHeaderOverlay("古い形式（複数の設定）"));
                 foreach (var child in children) {
                     var childSo = new SerializedObject(child);
                     var childEditor = _CreateEditor(childSo, child);
@@ -133,7 +133,8 @@ namespace YozoLab.SPS.Inspector {
             
             container.Add(body);
 
-            container.Add(VRCFuryEditorUtils.Debug(refreshElement: () => {
+            // アバター全体についての注意書きは、設定より前（一番上）に出す
+            container.Insert(container.IndexOf(body), VRCFuryEditorUtils.Debug(refreshElement: () => {
                 var warning = new VisualElement();
 
                 if (c == null) return warning;
@@ -146,7 +147,7 @@ namespace YozoLab.SPS.Inspector {
                 var isDeleted = EditorOnlyUtils.IsInsideEditorOnly(c.owner());
                 if (isDeleted && !hasDelete) {
                     warning.Add(VRCFuryEditorUtils.Error(
-                        "This SPS component is placed within an object that is tagged as EditorOnly, and thus will not do anything!"));
+                        "このコンポーネントは EditorOnly タグの付いたオブジェクトの中にあるので、ビルドでは何もしない。"));
                 }
                 
                 return warning;
@@ -184,8 +185,8 @@ namespace YozoLab.SPS.Inspector {
         }
         
         private VisualElement CreateOverrideLabel() {
-            var baseText = "The SPS settings in this prefab are overridden on this instance. Please revert them!" +
-                           " If you apply, it may corrupt data in the changed features.";
+            var baseText = "このインスタンスでプレハブの SPS の設定が上書きされている。元に戻してください" +
+                           "（Apply すると、変えた設定のデータが壊れることがある）。";
             var overrideLabel = VRCFuryEditorUtils.Error(baseText);
             overrideLabel.SetVisible(false);
 
@@ -215,25 +216,14 @@ namespace YozoLab.SPS.Inspector {
                 UnityCompatUtils.OpenPrefab(prefabPath, component.owner());
             }
 
-            var row = new VisualElement().Row();
-            row.Add(new VisualElement().FlexGrow(1));
-
-            var label = new Button()
-                .OnClick(Open)
-                .Text("Edit in Prefab")
-                .TextAlign(TextAnchor.MiddleCenter)
-                .TextWrap()
-                .Padding(3, 5)
-                .BorderColor(Color.black)
-                .BorderRadius(5)
-                .Margin(0, 10)
-                .Border(1);
-            label.style.borderTopRightRadius = 0;
-            label.style.borderTopLeftRadius = 0;
-            label.style.marginTop = -2;
-            label.style.borderTopWidth = 0;
-            row.Add(label);
-            return row;
+            var content = new VisualElement();
+            content.Add(VRCFuryEditorUtils.WrappedLabel(
+                "プレハブのインスタンスなので、ここでは変更できない（プレハブの上書きで設定が壊れるのを防ぐため）。プレハブを開いて編集してください。"));
+            var button = new Button(Open) { text = "プレハブを開いて編集" };
+            button.style.alignSelf = Align.FlexStart;
+            button.style.marginTop = 4;
+            content.Add(button);
+            return VRCFuryEditorUtils.Info(content);
         }
     }
 }

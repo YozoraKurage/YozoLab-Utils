@@ -75,7 +75,7 @@ namespace YozoLab.SPS.Inspector {
                     }
                     if (showPlus) {
                         var plus = new Button()
-                            .Text(singleLineEditor != null ? "+" : "Add Action +")
+                            .Text(singleLineEditor != null ? "+" : "アクションを追加 +")
                             .OnClick(OnPlus)
                             .FlexBasis(20)
                             .FlexGrow(showSingleLineEditor ? 0 : 1);

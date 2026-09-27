@@ -11,7 +11,7 @@ using YozoLab.SPS.Utils;
 using YozoLab.SPS.Utils.Controller;
 
 namespace YozoLab.SPS.Actions {
-    [FeatureTitle("World Drop")]
+    [FeatureTitle("ワールドドロップ")]
     [FeatureHideTitleInEditor]
     internal class WorldDropActionBuilder : ActionBuilder<WorldDropAction> {
         
@@ -23,7 +23,7 @@ namespace YozoLab.SPS.Actions {
         public static VisualElement Editor(SerializedProperty prop) {
             var unsupported = VRCFuryEditorUtils.Warn("このアクションは YozoLab SPS では動作しません（VRCFury ではアバター全体のオブジェクト配置を書き換えて実現していたため、持ち込んでいません）。");
             var row = new VisualElement().Row();
-            row.Add(VRCFuryActionDrawer.Title("World Drop").FlexBasis(100));
+            row.Add(VRCFuryActionDrawer.Title("ワールドドロップ").FlexBasis(110));
             row.Add(VRCFuryEditorUtils.Prop(prop.FindPropertyRelative("obj")).FlexGrow(1));
             var col = new VisualElement();
             col.Add(row);

@@ -14,7 +14,7 @@ using YozoLab.SPS.Utils;
 using YozoLab.SPS.Utils.Controller;
 
 namespace YozoLab.SPS.Actions {
-    [FeatureTitle("Animation Clip")]
+    [FeatureTitle("アニメーションクリップ")]
     [FeatureHideTitleInEditor]
     internal class AnimationClipActionBuilder : ActionBuilder<AnimationClipAction> {
         [VFAutowired] private readonly VFGameObject avatarObject;
@@ -56,13 +56,13 @@ namespace YozoLab.SPS.Actions {
         [FeatureEditor]
         public static VisualElement Editor(SerializedProperty prop, VFGameObject componentObject) {
             var row = new VisualElement().Row();
-            row.Add(VRCFuryActionDrawer.Title("Animation Clip").FlexBasis(100));
+            row.Add(VRCFuryActionDrawer.Title("アニメーションクリップ").FlexBasis(110));
             var clipProp = prop.FindPropertyRelative("clip");
             row.Add(VRCFuryEditorUtils.Prop(clipProp).FlexGrow(1));
             row.Add(new Button(() => {
                 var clip = (clipProp.GetObject() as GuidAnimationClip)?.Get();
                 if (clip == null) {
-                    var newPath = EditorUtility.SaveFilePanelInProject("YozoLab SPS Recorder", "New Animation", "anim", "Path to new animation");
+                    var newPath = EditorUtility.SaveFilePanelInProject("YozoLab SPS レコーダー", "New Animation", "anim", "新しいアニメーションの保存先");
                     if (string.IsNullOrEmpty(newPath)) return;
                     clip = VFClip.Create().Save(componentObject) as AnimationClip;
                     VRCFuryAssetDatabase.SaveAsset(clip, newPath);
@@ -70,7 +70,7 @@ namespace YozoLab.SPS.Actions {
                     clipProp.serializedObject.ApplyModifiedProperties();
                 }
                 RecorderUtils.Record(clip, componentObject);
-            }) { text = "Record" });
+            }) { text = "記録", tooltip = "アニメーションの記録を始める。クリップが未設定なら新規作成する" });
             return row;
         }
         

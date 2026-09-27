@@ -9,7 +9,7 @@ using YozoLab.SPS.Utils;
 using YozoLab.SPS.Utils.Controller;
 
 namespace YozoLab.SPS.Actions {
-    [FeatureTitle("Poiyomi Flipbook Frame")]
+    [FeatureTitle("Poiyomi フリップブックのフレーム")]
     internal class PoiyomiFlipbookFrameActionBuilder : ActionBuilder<FlipbookAction> {
         public VFClip Build(FlipbookAction model) {
             var clip = NewClip();
@@ -28,8 +28,8 @@ namespace YozoLab.SPS.Actions {
         [FeatureEditor]
         public static VisualElement Editor(SerializedProperty prop) {
             var output = new VisualElement();
-            output.Add(VRCFuryEditorUtils.Prop(prop.FindPropertyRelative("renderer"), "Renderer"));
-            output.Add(VRCFuryEditorUtils.Prop(prop.FindPropertyRelative("frame"), "Frame Number"));
+            output.Add(VRCFuryEditorUtils.Prop(prop.FindPropertyRelative("renderer"), "レンダラー"));
+            output.Add(VRCFuryEditorUtils.Prop(prop.FindPropertyRelative("frame"), "フレーム番号"));
             return output;
         }
     }

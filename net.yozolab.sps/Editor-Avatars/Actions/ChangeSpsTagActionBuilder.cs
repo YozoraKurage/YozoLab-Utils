@@ -13,7 +13,7 @@ using YozoLab.SPS.Utils;
 using YozoLab.SPS.Utils.Controller;
 
 namespace YozoLab.SPS.Actions {
-    [FeatureTitle("Change SPS Tag")]
+    [FeatureTitle("SPS タグの変更")]
     internal class ChangeSpsTagActionBuilder : ActionBuilder<ChangeSpsTagAction> {
         private enum TargetType {
             None,
@@ -135,7 +135,7 @@ namespace YozoLab.SPS.Actions {
 
             return VRCFuryEditorUtils.RefreshOnChange(() => {
                 var content = new VisualElement();
-                content.Add(VRCFuryEditorUtils.Prop(targetProp, "SPS Plug / Socket"));
+                content.Add(VRCFuryEditorUtils.Prop(targetProp, "対象", tooltip: "SPS Plug または SPS Socket が付いたオブジェクト"));
 
                 var targetType = GetTargetType(targetProp.objectReferenceValue as Transform);
                 var maxSlot = GetMaxSlot(targetType);
@@ -146,7 +146,7 @@ namespace YozoLab.SPS.Actions {
                 }
 
                 if (targetType == TargetType.Plug) {
-                    content.Add(new Label("Set this tag:"));
+                    content.Add(new Label("変更するタグ:"));
                     var includeButton = new Toggle {
                         value = !excludeProp.boolValue && !globalTagProp.boolValue
                     };
@@ -181,44 +181,44 @@ namespace YozoLab.SPS.Actions {
                     });
                     var row = new VisualElement().Row();
                     row.style.flexWrap = Wrap.NoWrap;
-                    var includeProp = VRCFuryEditorUtils.Prop(null, "Include", fieldOverride: includeButton);
+                    var includeProp = VRCFuryEditorUtils.Prop(null, "含める", fieldOverride: includeButton);
                     includeProp.style.marginRight = 12;
                     row.Add(includeProp);
-                    var excludeUi = VRCFuryEditorUtils.Prop(null, "Exclude", fieldOverride: excludeButton);
+                    var excludeUi = VRCFuryEditorUtils.Prop(null, "除外", fieldOverride: excludeButton);
                     excludeUi.style.marginRight = 12;
                     row.Add(excludeUi);
-                    row.Add(VRCFuryEditorUtils.Prop(null, "Global", fieldOverride: globalButton));
+                    row.Add(VRCFuryEditorUtils.Prop(null, "グローバル", fieldOverride: globalButton));
                     content.Add(row);
                 }
 
                 if (targetType == TargetType.Plug && globalTagProp.boolValue) {
-                    content.Add(new Label("To this value: (leave empty to unset)"));
-                    content.Add(VRCFuryEditorUtils.Prop(globalTagEnabledProp, "Enabled"));
+                    content.Add(new Label("設定する値（空欄で解除）:"));
+                    content.Add(VRCFuryEditorUtils.Prop(globalTagEnabledProp, "有効"));
                 } else {
                     if (targetType == TargetType.Socket) {
-                        content.Add(new Label("Set this tag:"));
+                        content.Add(new Label("変更するタグ:"));
                     }
                     tagNumberProp.intValue = clampedSlot;
-                    content.Add(VRCFuryEditorUtils.Prop(tagNumberProp, "Tag #", onChange: () => {
+                    content.Add(VRCFuryEditorUtils.Prop(tagNumberProp, "タグ番号", onChange: () => {
                         tagNumberProp.intValue = Mathf.Clamp(tagNumberProp.intValue <= 0 ? 1 : tagNumberProp.intValue, 1, maxSlot);
                         tagNumberProp.serializedObject.ApplyModifiedProperties();
                     }));
-                    content.Add(new Label("To this value: (leave empty to unset)"));
-                    content.Add(SpsPlugEditor.SpsTagProp(tagProp, "Tag"));
+                    content.Add(new Label("設定する値（空欄で解除）:"));
+                    content.Add(SpsPlugEditor.SpsTagProp(tagProp, "タグ"));
                 }
 
                 if (targetType == TargetType.Plug && !globalTagProp.boolValue) {
                     var row = new VisualElement().Row();
                     row.style.flexWrap = Wrap.NoWrap;
-                    var selfProp = VRCFuryEditorUtils.Prop(allowSelfProp, "Self");
+                    var selfProp = VRCFuryEditorUtils.Prop(allowSelfProp, "自分");
                     selfProp.style.marginRight = 12;
                     row.Add(selfProp);
-                    row.Add(VRCFuryEditorUtils.Prop(allowOthersProp, "Others"));
+                    row.Add(VRCFuryEditorUtils.Prop(allowOthersProp, "他の人"));
                     content.Add(row);
                 }
 
                 if (targetType == TargetType.None && targetProp.objectReferenceValue != null) {
-                    content.Add(VRCFuryEditorUtils.Warn("Target must be an SPS Plug or SPS Socket transform."));
+                    content.Add(VRCFuryEditorUtils.Warn("対象には SPS Plug か SPS Socket が付いたオブジェクトを指定する。"));
                 }
 
                 return content;

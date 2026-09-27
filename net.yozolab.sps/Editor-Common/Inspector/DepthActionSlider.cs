@@ -32,20 +32,20 @@ namespace YozoLab.SPS.Inspector {
 
             var c = new VisualElement();
 
-            var test = new Label(units == SpsSocket.DepthActionUnits.Plugs ? "Fully\n\u2193 Inserted" : units == SpsSocket.DepthActionUnits.Local ? "Tip inside\n\u2193 1 local-unit" : "Tip\n\u2193 inside 1m");
+            var test = new Label(units == SpsSocket.DepthActionUnits.Plugs ? "根元まで\n\u2193 挿入" : units == SpsSocket.DepthActionUnits.Local ? "先端が内側\n\u2193 1 ローカル単位" : "先端が内側\n\u2193 1m");
             test.style.position = Position.Absolute;
             test.style.bottom = 15;
             test.style.fontSize = 9;
             c.Add(test);
 
-            var test2 = new Label("Tip at\n\u2193 Entrance");
+            var test2 = new Label("先端が\n\u2193 入口");
             test2.style.position = Position.Absolute;
             test2.style.bottom = 15;
             test2.style.left = Length.Percent(25);
             test2.style.fontSize = 9;
             c.Add(test2);
         
-            var test3 = new Label(units == SpsSocket.DepthActionUnits.Plugs ? "Tip 3 plug-lengths\naway \u2193" : units == SpsSocket.DepthActionUnits.Local ? "Tip 3 local-units\naway \u2193" : "Tip 3m\naway \u2193");
+            var test3 = new Label(units == SpsSocket.DepthActionUnits.Plugs ? "先端が入口から\nプラグ 3 本分 \u2193" : units == SpsSocket.DepthActionUnits.Local ? "先端が入口から\n3 ローカル単位 \u2193" : "先端が入口から\n3m \u2193");
             test3.style.position = Position.Absolute;
             test3.style.bottom = 15;
             test3.style.right = 0;

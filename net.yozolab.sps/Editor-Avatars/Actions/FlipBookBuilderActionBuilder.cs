@@ -13,7 +13,7 @@ using YozoLab.SPS.Utils;
 using YozoLab.SPS.Utils.Controller;
 
 namespace YozoLab.SPS.Actions {
-    [FeatureTitle("Flipbook Builder")]
+    [FeatureTitle("フリップブック")]
     internal class FlipBookBuilderActionBuilder : ActionBuilder<FlipBookBuilderAction> {
         [VFAutowired] [CanBeNull] private readonly ClipBuilderService clipBuilder;
 
@@ -47,9 +47,9 @@ namespace YozoLab.SPS.Actions {
         public static VisualElement Editor(SerializedProperty prop) {
             var output = new VisualElement();
             output.Add(VRCFuryEditorUtils.Info(
-                "This will create a clip made up of one frame per child action. This is mostly useful for" +
-                " YozoLab SPS Toggles with 'Use a Slider (Radial)' enabled, as you can put various presets in these slots" +
-                " and use the slider to select one of them."
+                "各ページのアクションを 1 フレームずつ並べたクリップを作る。" +
+                "ラジアル（スライダー）で操作するトグルと組み合わせ、各ページにプリセットを入れておくと" +
+                "スライダーでどれか 1 つを選べる。"
             ));
             output.Add(VRCFuryEditorUtils.List(prop.FindPropertyRelative("pages")));
             return output;
@@ -66,7 +66,7 @@ namespace YozoLab.SPS.Actions {
                 } else {
                     pageNum = "?";
                 }
-                content.Add(new Label($"Page #{pageNum}").Bold());
+                content.Add(new Label($"ページ {pageNum}").Bold());
                 content.Add(VRCFuryActionSetDrawer.render(prop.FindPropertyRelative("state"), showDebugInfo: false));
                 return content;
             }

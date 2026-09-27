@@ -11,7 +11,7 @@ using YozoLab.SPS.Utils;
 using YozoLab.SPS.Utils.Controller;
 
 namespace YozoLab.SPS.Actions {
-    [FeatureTitle("Smooth Loop Builder (Breathing, etc)")]
+    [FeatureTitle("なめらかなループ（呼吸など）")]
     internal class SmoothLoopActionBuilder : ActionBuilder<SmoothLoopAction> {
         [VFAutowired] [CanBeNull] private readonly ClipBuilderService clipBuilder;
 
@@ -41,11 +41,11 @@ namespace YozoLab.SPS.Actions {
         public static VisualElement Editor(SerializedProperty prop) {
             var output = new VisualElement();
             output.Add(VRCFuryEditorUtils.Info(
-                "This will create an animation smoothly looping between two states." +
-                " You can use this for a breathing cycle or any other type of smooth two-state loop."));
-            output.Add(VRCFuryActionSetDrawer.render(prop.FindPropertyRelative("state1"), "State A", showDebugInfo: false));
-            output.Add(VRCFuryActionSetDrawer.render(prop.FindPropertyRelative("state2"), "State B", showDebugInfo: false));
-            output.Add(VRCFuryEditorUtils.Prop(prop.FindPropertyRelative("loopTime"), "Loop time (seconds)"));
+                "2 つの状態の間をなめらかに行き来するループアニメーションを作る。" +
+                "呼吸など、2 状態を繰り返す動きに使える。"));
+            output.Add(VRCFuryActionSetDrawer.render(prop.FindPropertyRelative("state1"), "状態 A", showDebugInfo: false));
+            output.Add(VRCFuryActionSetDrawer.render(prop.FindPropertyRelative("state2"), "状態 B", showDebugInfo: false));
+            output.Add(VRCFuryEditorUtils.Prop(prop.FindPropertyRelative("loopTime"), "周期（秒）"));
             return output;
         }
     }

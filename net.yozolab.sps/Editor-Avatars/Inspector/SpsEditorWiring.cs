@@ -59,16 +59,16 @@ namespace YozoLab.SPS.Inspector {
             };
 
             // VRCFury はここにサポート用の診断文字列（VRCFury の設定状態）を出していた。
-            // このポートでは出所だけ分かればよいので固定の表記にする。
+            // このポートでは出所だけ分かればよいので、ダイアログにだけ固定の表記を出す
+            // （インスペクターには出さない。見出しの「YozoLab SPS」で足りる）。
             DialogUtils.debugLineGetter = () => "YozoLab SPS (VRCFury SPS port)";
-            VRCFuryComponentEditor.getDebugLine = component => "YozoLab SPS (VRCFury SPS port)";
 
             FeatureFinder.onInjectEditor = (gameObject, builderType, injector) => {
                 var allowRootFeatures = AllowRootFeatures(gameObject);
                 if (builderType.GetCustomAttribute<FeatureRootOnlyAttribute>() != null && !allowRootFeatures) {
                     throw new RenderFeatureEditorException(
-                        "To avoid abuse by prefab creators, this component can only be placed on the root object" +
-                        " containing the avatar descriptor, OR a child object containing ONLY SPS components."
+                        "このコンポーネントは、Avatar Descriptor のあるルートか、SPS のコンポーネントだけが付いた子オブジェクトにしか置けない" +
+                        "（配布プレハブによる悪用を防ぐため）。"
                     );
                 }
                 injector.Set("avatarObject", gameObject.GetAvatarRoot());
@@ -78,7 +78,7 @@ namespace YozoLab.SPS.Inspector {
                 var avatarObject = gameObject.GetAvatarRoot();
                 var allowRootFeatures = AllowRootFeatures(gameObject);
                 if (builderType.GetCustomAttribute<FeatureRootOnlyAttribute>() != null && !allowRootFeatures) {
-                    throw new Exception($"This SPS component ({title}) is only allowed on the root object of the avatar, but was found in {gameObject.GetPath(avatarObject)}.");
+                    throw new Exception($"この SPS コンポーネント（{title}）はアバターのルートにしか置けないが、{gameObject.GetPath(avatarObject)} にある。");
                 }
             };
 
@@ -127,20 +127,19 @@ namespace YozoLab.SPS.Inspector {
                     var animators = owner.GetComponentsInSelfAndParents<Animator>();
                     if (animators.Any()) {
                         warnings.Add(VRCFuryEditorUtils.Error(
-                            "Your avatar does not have a VRC Avatar Descriptor, and thus this component will not do anything! " +
-                            "Make sure that your avatar can actually be uploaded using the VRCSDK before attempting to add YozoLab SPS things to it."));
+                            "アバターに VRC Avatar Descriptor が無いので、このコンポーネントは何もしない。" +
+                            "先に VRChat SDK でアップロードできる状態にしてください。"));
                     } else {
                         warnings.Add(VRCFuryEditorUtils.Error(
-                            "This SPS component is not placed on an avatar, and thus will not do anything! " +
-                            "If you intended to include this in your avatar, make sure you've placed it within your avatar's " +
-                            "object, and not just alongside it in the scene."));
+                            "この SPS コンポーネントはアバターの中に置かれていないので、何もしない。" +
+                            "アバターに含めるなら、シーンでアバターの横ではなく、アバターのオブジェクトの中に置いてください。"));
                     }
                 }
 
                 if (descriptors.Count > 1) {
                     warnings.Add(VRCFuryEditorUtils.Error(
-                        "There are multiple avatar descriptors in this hierarchy. Each avatar should only have one avatar descriptor on the avatar root." +
-                        " This may cause issues in this inspector or during your avatar build.\n\n" + descriptors.Select(d => d.owner().GetDebugPath()).Join('\n')));
+                        "この階層に Avatar Descriptor が複数ある。Avatar Descriptor はアバターのルートに 1 つだけにしてください" +
+                        "（このインスペクターやビルドで問題が起きることがある）。\n\n" + descriptors.Select(d => d.owner().GetDebugPath()).Join('\n')));
                 }
             };
 

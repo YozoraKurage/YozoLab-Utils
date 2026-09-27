@@ -8,7 +8,7 @@ using YozoLab.SPS.Utils;
 using YozoLab.SPS.Utils.Controller;
 
 namespace YozoLab.SPS.Actions {
-    [FeatureTitle("SCSS Shader Inventory")]
+    [FeatureTitle("SCSS シェーダーインベントリ")]
     internal class ScssShaderInventoryActionBuilder : ActionBuilder<ShaderInventoryAction> {
         public VFClip Build(ShaderInventoryAction model) {
             return MakeClip(model, 1);
@@ -29,8 +29,8 @@ namespace YozoLab.SPS.Actions {
         [FeatureEditor]
         public static VisualElement Editor(SerializedProperty prop) {
             var output = new VisualElement();
-            output.Add(VRCFuryEditorUtils.Prop(prop.FindPropertyRelative("renderer"), "Renderer"));
-            output.Add(VRCFuryEditorUtils.Prop(prop.FindPropertyRelative("slot"), "Slot Number"));
+            output.Add(VRCFuryEditorUtils.Prop(prop.FindPropertyRelative("renderer"), "レンダラー"));
+            output.Add(VRCFuryEditorUtils.Prop(prop.FindPropertyRelative("slot"), "スロット番号"));
             return output;
         }
     }

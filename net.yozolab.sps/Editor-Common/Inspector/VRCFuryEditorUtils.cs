@@ -23,10 +23,10 @@ namespace YozoLab.SPS.Inspector {
             output.AddToClassList("vfList");
 
             if (list == null) {
-                return Error("List is null");
+                return Error("リストが見つからない");
             }
             if (!list.isArray) {
-                return Error("List is not an array");
+                return Error("リストではない");
             }
 
             void OnClickPlus() {
@@ -43,7 +43,7 @@ namespace YozoLab.SPS.Inspector {
                     list.DeleteArrayElementAtIndex(0);
                     list.serializedObject.ApplyModifiedProperties();
                 } else {
-                    DialogUtils.DisplayDialog("YozoLab SPS", "Right click on the element you would like to remove", "Ok");
+                    DialogUtils.DisplayDialog("YozoLab SPS", "消したい項目を右クリックしてください", "OK");
                 }
             }
 
@@ -60,24 +60,24 @@ namespace YozoLab.SPS.Inspector {
                     if (e.menu.MenuItems().Count > 0) {
                         e.menu.AppendSeparator();
                     }
-                    e.menu.AppendAction("🗙 Remove Item", a => {
+                    e.menu.AppendAction("削除", a => {
                         list.DeleteArrayElementAtIndex(offset);
                         list.serializedObject.ApplyModifiedProperties();
                     });
                     e.menu.AppendSeparator();
                     var disabledIfTop = offset == 0 ? DropdownMenuAction.Status.Disabled : DropdownMenuAction.Status.Normal;
                     var disabledIfBottom = offset == list.arraySize - 1 ? DropdownMenuAction.Status.Disabled : DropdownMenuAction.Status.Normal;
-                    e.menu.AppendAction("🡱 Move up", a => {
+                    e.menu.AppendAction("上へ", a => {
                         Move(offset, offset - 1);
                     }, disabledIfTop);
-                    e.menu.AppendAction("🡳 Move down", a => {
+                    e.menu.AppendAction("下へ", a => {
                         Move(offset, offset+1);
                     }, disabledIfBottom);
                     e.menu.AppendSeparator();
-                    e.menu.AppendAction("🡱🡱 Move to top", a => {
+                    e.menu.AppendAction("一番上へ", a => {
                         Move(offset, 0);
                     }, disabledIfTop);
-                    e.menu.AppendAction("🡳🡳 Move to bottom", a => {
+                    e.menu.AppendAction("一番下へ", a => {
                         Move(offset, list.arraySize-1);
                     }, disabledIfBottom);
                     e.StopPropagation();
@@ -167,7 +167,7 @@ namespace YozoLab.SPS.Inspector {
                     if (onEmpty != null) {
                         entries.Add(onEmpty());
                     } else {
-                        var label = WrappedLabel("This list is empty. Click + to add an entry.").Padding(5);
+                        var label = WrappedLabel("まだ何もない。+ で追加する").Padding(5);
                         label.style.unityTextAlign = TextAnchor.MiddleCenter;
                         entries.Add(label);
                     }
@@ -246,7 +246,7 @@ namespace YozoLab.SPS.Inspector {
             string placeholder = null
         ) {
             var el = Prop(prop, label, tooltip: tooltip, fieldOverride: fieldOverride, placeholder: placeholder);
-            el.PaddingBottom(5);
+            el.AddToClassList("spsProp");
             return el;
         }
 
@@ -256,7 +256,7 @@ namespace YozoLab.SPS.Inspector {
             };
 
             void RefreshAutoId() {
-                textField.Placeholder = "Automatic (" + getAutomaticId() + ")";
+                textField.Placeholder = "自動（" + getAutomaticId() + "）";
             }
 
             textField.RegisterValueChangedCallback(_ => {
@@ -268,40 +268,36 @@ namespace YozoLab.SPS.Inspector {
                 label,
                 fieldOverride: textField,
                 onChange: RefreshAutoId
-            ).PaddingBottom(5);
+            );
+            output.AddToClassList("spsProp");
             RefreshAutoId();
             return output;
         }
 
+        /**
+         * 項目名と、その説明。説明はマウスを重ねたときに出す（項目名の横に小さな「?」を付ける）。
+         * 2 つ目の戻り値は、以前は項目名をクリックで開く説明の箱だったもので、今は常に null。
+         */
         public static (VisualElement, VisualElement) CreateTooltip(string label, string content) {
-            VisualElement labelBox = null;
-            if (label != null) {
-                if (content == null) {
-                    return (WrappedLabel(label), null);
-                }
+            if (label == null) return (null, null);
+            var labelText = WrappedLabel(label);
+            labelText.AddToClassList("spsLabel");
+            if (content == null) return (labelText, null);
 
-                labelBox = new VisualElement().Row();
-                labelBox.Add(WrappedLabel(label));
-                var im = new Image {
-                    image = EditorGUIUtility.FindTexture("_Help"),
-                    scaleMode = ScaleMode.ScaleToFit
-                };
-                labelBox.Add(im);
-            }
-
-            VisualElement tooltipBox = null;
-            if (content != null && labelBox != null) {
-                tooltipBox = Info(content);
-                tooltipBox.AddToClassList("vfTooltip");
-                tooltipBox.AddToClassList("vfTooltipHidden");
-                labelBox.AddManipulator(new Clickable(e => {
-                    tooltipBox.ToggleInClassList("vfTooltipHidden");
-                }));
-            }
-
-            return (labelBox, tooltipBox);
+            var labelBox = new VisualElement().Row();
+            labelBox.AddToClassList("spsLabelBox");
+            labelBox.tooltip = content;
+            labelBox.Add(labelText);
+            var help = new Image {
+                image = EditorGUIUtility.FindTexture("_Help"),
+                scaleMode = ScaleMode.ScaleToFit,
+                tooltip = content
+            };
+            help.AddToClassList("spsHelpIcon");
+            labelBox.Add(help);
+            return (labelBox, null);
         }
-        
+
         public static VisualElement Prop(
             SerializedProperty prop,
             string label = null,
@@ -405,44 +401,45 @@ namespace YozoLab.SPS.Inspector {
         ) {
             var (labelBox, tooltipBox) = CreateTooltip(label, tooltip);
             var wrapper = new VisualElement();
-            var addFieldLast = false;
-            if (forceLabelOnOwnLine) {
-                if (labelBox != null) {
-                    wrapper.Add(labelBox);
-                }
-                addFieldLast = true;
-            } else if (isCheckbox && labelBox != null) {
+            wrapper.AddToClassList("spsField");
+
+            // リストや入れ子の設定など、1 行に収まらない物は項目名を上に置く
+            var isBlock = field != null && !(field is BindableElement) && !(field is PropertyField) && !isCheckbox;
+
+            if (labelBox == null || field == null) {
+                if (labelBox != null) wrapper.Add(labelBox);
+                if (field != null) wrapper.Add(field);
+            } else if (isCheckbox) {
+                // チェックボックスは左に箱、右に項目名（クリックでも切り替わる）
                 var row = new VisualElement().Row().FlexShrink(0);
-                field.style.paddingRight = 3;
+                row.AddToClassList("spsCheckboxRow");
+                field.AddToClassList("spsCheckbox");
                 row.Add(field);
                 labelBox.style.flexShrink = 1;
+                labelBox.style.flexGrow = 1;
+                if (field is Toggle toggle) {
+                    labelBox.AddManipulator(new Clickable(() => {
+                        if (toggle.enabledInHierarchy) toggle.value = !toggle.value;
+                    }));
+                }
                 row.Add(labelBox);
                 wrapper.Add(row);
-            } else if ((label != null && label.Length > 16) || labelBox == null || field == null) {
-                if (labelBox != null) {
-                    wrapper.Add(labelBox);
-                }
-                addFieldLast = true;
+            } else if (forceLabelOnOwnLine || isBlock) {
+                labelBox.AddToClassList("spsLabelOwnLine");
+                wrapper.Add(labelBox);
+                wrapper.Add(field);
             } else {
                 var labelRow = new VisualElement().Row();
-                labelBox.style.minWidth = labelWidth;
-                labelBox.style.flexGrow = 0;
+                labelBox.AddToClassList("spsLabelColumn");
                 labelRow.Add(labelBox);
-
                 field.style.flexGrow = 1;
                 field.style.flexShrink = 1;
+                field.style.minWidth = 0;
                 labelRow.Add(field);
-
                 wrapper.Add(labelRow);
             }
 
-            if (tooltipBox != null) {
-                wrapper.Add(tooltipBox);
-            }
-            if (field != null && addFieldLast) {
-                wrapper.Add(field);
-            }
-
+            if (tooltipBox != null) wrapper.Add(tooltipBox);
             return wrapper;
         }
 
@@ -566,22 +563,19 @@ namespace YozoLab.SPS.Inspector {
             return NextFloat(input, -1);
         }
 
+        /** 見出し付きのまとまり。見出しは左寄せ、補足は小さく薄く出す。 */
         public static VisualElement Section(string title = null, string subtitle = null) {
-            var section = new VisualElement() {
-                style = {
-                    backgroundColor = new Color(0,0,0,0.1f),
-                    marginTop = 5,
-                    marginBottom = 10
-                }
-            }.Padding(5).BorderRadius(5);
+            var section = new VisualElement();
+            section.AddToClassList("spsSection");
 
             if (title != null || subtitle != null) {
-                var header = new VisualElement().PaddingBottom(5);
+                var header = new VisualElement();
+                header.AddToClassList("spsSectionHeader");
                 if (title != null) {
-                    header.Add(WrappedLabel(title).Bold().TextAlign(TextAnchor.MiddleCenter));
+                    header.Add(WrappedLabel(title).AddClass("spsSectionTitle"));
                 }
                 if (subtitle != null) {
-                    header.Add(WrappedLabel(subtitle).TextAlign(TextAnchor.MiddleCenter));
+                    header.Add(WrappedLabel(subtitle).AddClass("spsSubtitle"));
                 }
                 section.Add(header);
             }
@@ -589,24 +583,86 @@ namespace YozoLab.SPS.Inspector {
             return section;
         }
 
-        public static VisualElement Info(string message) {
-            var el = new VisualElement() {
-                style = {
-                    backgroundColor = new Color(0,0,0,0.1f),
-                    marginTop = 5,
-                    marginBottom = 10,
-                    flexDirection = FlexDirection.Row,
-                    alignItems = Align.FlexStart
-                }
-            }.Padding(5).BorderRadius(5);
-            el.Add(new Image {
-                image = EditorGUIUtility.FindTexture("_Help"),
-                scaleMode = ScaleMode.ScaleToFit
+        /**
+         * 開け閉めできるまとまり。開閉の状態はエディタのセッション中だけ覚えておく（key ごと）。
+         * summary を渡すと、閉じているときに見出しの横へ中身の要約を出す。
+         */
+        public static Foldout Group(string title, string key, bool defaultOpen = false, Func<string> summary = null) {
+            var stateKey = "YozoLab.SPS.Inspector.Group." + key;
+            var foldout = new Foldout {
+                text = title,
+                value = SessionState.GetBool(stateKey, defaultOpen)
+            };
+            foldout.AddToClassList("spsGroup");
+            foldout.RegisterValueChangedCallback(e => {
+                if (e.target != foldout) return;
+                SessionState.SetBool(stateKey, e.newValue);
             });
-            el.Add(WrappedLabel(message).FlexGrow(1));
+
+            if (summary != null) {
+                var summaryLabel = new Label().AddClass("spsGroupSummary");
+                summaryLabel.pickingMode = PickingMode.Ignore;
+                void Refresh() {
+                    string text = null;
+                    try { text = summary(); } catch (Exception) { }
+                    summaryLabel.text = text ?? "";
+                    summaryLabel.SetVisible(!string.IsNullOrEmpty(text));
+                }
+                foldout.RegisterCallback<AttachToPanelEvent>(_ => {
+                    var toggle = foldout.Q<Toggle>(className: Foldout.toggleUssClassName);
+                    var input = toggle?.Q(className: Toggle.inputUssClassName);
+                    (input ?? toggle)?.Add(summaryLabel);
+                    Refresh();
+                });
+                foldout.schedule.Execute(Refresh).Every(1000);
+            }
+            return foldout;
+        }
+
+        public static T AddClass<T>(this T el, string className) where T : VisualElement {
+            el.AddToClassList(className);
             return el;
         }
-        
+
+        private enum CalloutType { Info, Warning, Error, Status }
+
+        /** 注意書きの箱。左端に色の帯とアイコンを付ける。 */
+        private static VisualElement Callout(CalloutType type, VisualElement content) {
+            var box = new VisualElement().Row();
+            box.AddToClassList("spsCallout");
+            box.AddToClassList("spsCallout--" + type.ToString().ToLowerInvariant());
+            string icon;
+            switch (type) {
+                case CalloutType.Warning: icon = "console.warnicon.sml"; break;
+                case CalloutType.Error: icon = "console.erroricon.sml"; break;
+                case CalloutType.Status: icon = "d_Search Icon"; break;
+                default: icon = "console.infoicon.sml"; break;
+            }
+            var image = new Image {
+                image = EditorGUIUtility.IconContent(icon)?.image,
+                scaleMode = ScaleMode.ScaleToFit
+            };
+            image.AddToClassList("spsCalloutIcon");
+            box.Add(image);
+            content.style.flexGrow = 1;
+            content.style.flexShrink = 1;
+            box.Add(content);
+            return box;
+        }
+
+        public static VisualElement Info(string message) {
+            return Callout(CalloutType.Info, WrappedLabel(message));
+        }
+
+        public static VisualElement Info(VisualElement content) {
+            return Callout(CalloutType.Info, content);
+        }
+
+        /**
+         * 自動で調べた結果を定期的に出し直す箱。
+         * refreshElement なら中身を丸ごと作り直す（空なら何も出さない）。
+         * refreshMessage なら「状態」の箱に文字で出す（空なら隠す）。
+         */
         public static VisualElement Debug(string message = "", Func<string> refreshMessage = null, Func<VisualElement> refreshElement = null, float interval = 1) {
 
             var loggedError = false;
@@ -620,7 +676,7 @@ namespace YozoLab.SPS.Inspector {
                             holder.Add(newContent);
                         }
                     } catch (Exception e) {
-                        holder.Add(DebugBox("Error rendering debug info: " + e.Message));
+                        holder.Add(DebugBox("表示の更新に失敗: " + e.Message));
                         if (!loggedError) {
                             loggedError = true;
                             UnityEngine.Debug.LogException(e);
@@ -632,25 +688,8 @@ namespace YozoLab.SPS.Inspector {
                 return holder;
             }
 
-            var el = new VisualElement() {
-                style = {
-                    backgroundColor = new Color(0,0,0,0.1f),
-                    marginTop = 5,
-                    marginBottom = 10,
-                    flexDirection = FlexDirection.Row,
-                    alignItems = Align.FlexStart
-                }
-            }.Padding(5).BorderRadius(5);
-            el.Add(new Image {
-                image = EditorGUIUtility.FindTexture("d_Lighting"),
-                scaleMode = ScaleMode.ScaleToFit
-            });
-            var rightColumn = new VisualElement();
-            el.Add(rightColumn);
-            rightColumn.Add(WrappedLabel("Debug Info").Bold());
-
-            var label = WrappedLabel(message);
-            rightColumn.Add(label);
+            var label = WrappedLabel(message).AddClass("spsStatusText");
+            var el = Callout(CalloutType.Status, label);
             if (refreshMessage != null) {
                 void Update() {
                     var show = false;
@@ -658,7 +697,7 @@ namespace YozoLab.SPS.Inspector {
                         label.text = refreshMessage();
                         show = !string.IsNullOrWhiteSpace(label.text);
                     } catch (Exception e) {
-                        label.text = $"Error: {e.Message}";
+                        label.text = $"エラー: {e.Message}";
                         show = true;
                     }
                     el.SetVisible(show);
@@ -672,9 +711,7 @@ namespace YozoLab.SPS.Inspector {
         }
 
         public static VisualElement Error(string message) {
-            var i = Section().BorderColor(Color.red).Border(2);
-            i.Add(WrappedLabel(message));
-            return i;
+            return Callout(CalloutType.Error, WrappedLabel(message));
         }
 
         public static VisualElement Warn(string message) {
@@ -682,15 +719,11 @@ namespace YozoLab.SPS.Inspector {
         }
         
         public static VisualElement Warn(VisualElement message) {
-            var i = Section().BorderColor(Color.yellow).Border(2);
-            i.Add(message);
-            return i;
+            return Callout(CalloutType.Warning, message);
         }
         
         public static VisualElement DebugBox(string message) {
-            var i = Section().BorderColor(Color.gray).Border(2);
-            i.Add(WrappedLabel(message));
-            return i;
+            return Callout(CalloutType.Status, WrappedLabel(message));
         }
         
         public static Type GetManagedReferenceType(SerializedProperty prop) {

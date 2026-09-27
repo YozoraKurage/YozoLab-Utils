@@ -36,15 +36,13 @@ namespace YozoLab.SPS.Feature {
             protected override VisualElement CreateEditor(SerializedObject serializedObject, SpsTouchSender target) {
                 var container = new VisualElement();
                 
-                container.Add(VRCFuryEditorUtils.Info(
-                    "This will add an extra contact which can be used to trigger SPS Haptics. " +
-                    "" +
-                    "This is essentially the same as adding a VRChat contact sender with the 'Finger' tag."
-                ));
-
                 container.Add(SpsPlugEditor.ConstraintWarning(target));
-            
-                container.Add(VRCFuryEditorUtils.BetterProp(serializedObject.FindProperty("radius"), "Radius"));
+
+                var section = VRCFuryEditorUtils.Section("触れる側",
+                    "SPS の Touch Zone や Socket の触覚を反応させる当たり判定を足す（「Finger」タグの Contact Sender と同じ）");
+                section.Add(VRCFuryEditorUtils.BetterProp(serializedObject.FindProperty("radius"), "半径",
+                    tooltip: "このオブジェクトのローカル単位"));
+                container.Add(section);
 
                 return container;
             }

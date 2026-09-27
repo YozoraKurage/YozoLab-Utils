@@ -10,6 +10,9 @@ namespace YozoLab.SPS.Inspector {
 
     [CustomPropertyDrawer(typeof(YozoLab.SPS.Model.StateAction.Action))]
     internal class VRCFuryActionDrawer : PropertyDrawer {
+        private const string DesktopOnly = "PC のみ";
+        private const string MobileOnly = "Quest / Android / iOS のみ";
+
         public override VisualElement CreatePropertyGUI(SerializedProperty prop) {
             var el = new VisualElement();
             el.AddToClassList("vfAction");
@@ -26,18 +29,18 @@ namespace YozoLab.SPS.Inspector {
             var desktopActive = prop.FindPropertyRelative("desktopActive");
             var androidActive = prop.FindPropertyRelative("androidActive");
             col.AddManipulator(new ContextualMenuManipulator(e => {
-                if (e.menu.MenuItems().OfType<DropdownMenuAction>().Any(i => i.name == "Desktop Only")) {
+                if (e.menu.MenuItems().OfType<DropdownMenuAction>().Any(i => i.name == DesktopOnly)) {
                     return;
                 }
                 if (e.menu.MenuItems().Count > 0) {
                     e.menu.AppendSeparator();
                 }
-                e.menu.AppendAction("Desktop Only", a => {
+                e.menu.AppendAction(DesktopOnly, a => {
                     desktopActive.boolValue = !desktopActive.boolValue;
                     androidActive.boolValue = false;
                     prop.serializedObject.ApplyModifiedProperties();
                 }, desktopActive.boolValue ? DropdownMenuAction.Status.Checked : DropdownMenuAction.Status.Normal);
-                e.menu.AppendAction("Quest+Android+iOS Only", a => {
+                e.menu.AppendAction(MobileOnly, a => {
                     androidActive.boolValue = !androidActive.boolValue;
                     desktopActive.boolValue = false;
                     prop.serializedObject.ApplyModifiedProperties();
@@ -57,8 +60,8 @@ namespace YozoLab.SPS.Inspector {
                     row.Add(flag);
                 }
                 
-                if (desktopActive.boolValue) AddFlag("Desktop Only");
-                if (androidActive.boolValue) AddFlag("Quest+Android+iOS Only");
+                if (desktopActive.boolValue) AddFlag(DesktopOnly);
+                if (androidActive.boolValue) AddFlag(MobileOnly);
 
                 return row;
             }, desktopActive, androidActive));

@@ -11,7 +11,7 @@ using YozoLab.SPS.Utils;
 using YozoLab.SPS.Utils.Controller;
 
 namespace YozoLab.SPS.Actions {
-    [FeatureTitle("Material Swap")]
+    [FeatureTitle("マテリアルの差し替え")]
     internal class MaterialSwapActionBuilder : ActionBuilder<MaterialAction> {
         public VFClip Build(MaterialAction model) {
             var onClip = NewClip();
@@ -31,13 +31,13 @@ namespace YozoLab.SPS.Actions {
             var rendererProp = prop.FindPropertyRelative("renderer");
             var indexProp = prop.FindPropertyRelative("materialIndex");
 
-            content.Add(VRCFuryEditorUtils.Prop(rendererProp, "Renderer"));
+            content.Add(VRCFuryEditorUtils.Prop(rendererProp, "レンダラー"));
 
             var indexField = VRCFuryEditorUtils.RefreshOnChange(() => {
                 var renderer = rendererProp.objectReferenceValue as Renderer;
                 if (renderer == null) {
                     var f = new PopupField<string>(
-                        new List<string>() { "Select a renderer" },
+                        new List<string>() { "レンダラーを選択してください" },
                         0
                     );
                     f.SetEnabled(false);
@@ -71,8 +71,8 @@ namespace YozoLab.SPS.Actions {
                     return f;
                 }
             }, rendererProp, indexProp);
-            content.Add(VRCFuryEditorUtils.Prop(prop.FindPropertyRelative("materialIndex"), "Slot", fieldOverride: indexField));
-            content.Add(VRCFuryEditorUtils.Prop(prop.FindPropertyRelative("mat"), "Material"));
+            content.Add(VRCFuryEditorUtils.Prop(prop.FindPropertyRelative("materialIndex"), "スロット", fieldOverride: indexField));
+            content.Add(VRCFuryEditorUtils.Prop(prop.FindPropertyRelative("mat"), "マテリアル"));
             return content;
         }
     }

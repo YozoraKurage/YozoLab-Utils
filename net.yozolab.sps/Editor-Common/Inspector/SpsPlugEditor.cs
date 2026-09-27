@@ -85,6 +85,25 @@ namespace YozoLab.SPS.Inspector {
             }
         }
 
+        private static string FormatSpsParam(string param) {
+            switch (param) {
+                case SpsParamDepth: return "深さ";
+                case SpsParamVelocity: return "速さ";
+                case SpsParamPlugLength: return "Plug の長さ";
+                case SpsParamPlugRadius: return "Plug の半径";
+                default: return param;
+            }
+        }
+
+        private static string FormatSpsUnits(string units) {
+            switch (units) {
+                case SpsUnitsMeters: return "メートル";
+                case SpsUnitsLocal: return "ローカル単位";
+                case SpsUnitsPlugLengths: return "Plug の長さ比";
+                default: return units;
+            }
+        }
+
         public static VisualElement RenderSpsInjectParamEditor(SerializedProperty injectProp) {
             var sourceParamProp = injectProp.FindPropertyRelative("sourceParam");
             var parsed = ParseSpsMagicParam(sourceParamProp.stringValue);
@@ -92,8 +111,8 @@ namespace YozoLab.SPS.Inspector {
             var selectedUnits = parsed?.units ?? SpsUnitsMeters;
 
             var content = new VisualElement();
-            var paramField = new PopupField<string>("Parameter", SpsParams.ToList(), selectedParam);
-            var unitsField = new PopupField<string>("Units", SpsUnits.ToList(), selectedUnits);
+            var paramField = new PopupField<string>("値", SpsParams.ToList(), selectedParam, FormatSpsParam, FormatSpsParam);
+            var unitsField = new PopupField<string>("単位", SpsUnits.ToList(), selectedUnits, FormatSpsUnits, FormatSpsUnits);
 
             void Save() {
                 sourceParamProp.stringValue = GetSpsMagicParam(paramField.value, unitsField.value);
@@ -109,8 +128,14 @@ namespace YozoLab.SPS.Inspector {
         }
 
         public static VisualElement SpsTagProp(SerializedProperty prop, string label) {
+            return VRCFuryEditorUtils.Prop(prop, label, fieldOverride: SpsTagTextField(prop));
+        }
+
+        /** タグ名の入力欄。英小文字と数字だけにそろえる。 */
+        public static TextField SpsTagTextField(SerializedProperty prop) {
             var field = new TextField {
-                isDelayed = true
+                isDelayed = true,
+                tooltip = "英小文字と数字だけ（それ以外は取り除かれる）"
             };
             field.SetValueWithoutNotify(SanitizeSpsTag(prop.stringValue));
             field.RegisterValueChangedCallback(cb => {
@@ -121,7 +146,7 @@ namespace YozoLab.SPS.Inspector {
                 prop.stringValue = sanitized;
                 prop.serializedObject.ApplyModifiedProperties();
             });
-            return VRCFuryEditorUtils.Prop(prop, label, fieldOverride: field);
+            return field;
         }
 
         public static string SanitizeSpsTag(string input) {
@@ -147,32 +172,54 @@ namespace YozoLab.SPS.Inspector {
             return item;
         }
 
-        private static VisualElement SpsTagRuleProp(SerializedProperty listProp, int index, string label) {
+        /** タグ 1 つ分の行：[タグ名] [自分] [他の人] [×] */
+        private static VisualElement SpsTagRuleProp(SerializedProperty listProp, int index) {
             var prop = listProp.GetArrayElementAtIndex(index);
-            var row = new VisualElement();
-            row.Add(SpsTagProp(prop.FindPropertyRelative("tag"), label));
-            row.Add(VRCFuryEditorUtils.BetterProp(prop.FindPropertyRelative("allowSelf"), "Self"));
-            row.Add(VRCFuryEditorUtils.BetterProp(prop.FindPropertyRelative("allowOthers"), "Others"));
+            var row = new VisualElement().Row().AlignItems(Align.Center);
+            row.AddToClassList("spsProp");
+
+            var tagField = SpsTagTextField(prop.FindPropertyRelative("tag"));
+            tagField.style.flexGrow = 1;
+            tagField.style.flexShrink = 1;
+            tagField.style.minWidth = 60;
+            row.Add(tagField);
+
+            Toggle SmallToggle(string relative, string text, string tooltip) {
+                var toggle = new Toggle(text) { bindingPath = prop.FindPropertyRelative(relative).propertyPath, tooltip = tooltip };
+                toggle.style.marginLeft = 8;
+                toggle.labelElement.style.minWidth = 0;
+                toggle.labelElement.style.marginRight = 2;
+                return toggle;
+            }
+            row.Add(SmallToggle("allowSelf", "自分", "自分のアバターの Socket に当てはめる"));
+            row.Add(SmallToggle("allowOthers", "他の人", "他の人のアバターの Socket に当てはめる"));
+
             var remove = new Button(() => {
                 listProp.DeleteArrayElementAtIndex(index);
                 listProp.serializedObject.ApplyModifiedProperties();
             }) {
-                text = "Remove"
+                text = "×",
+                tooltip = "このタグを消す"
             };
+            remove.style.marginLeft = 6;
             row.Add(remove);
             return row;
         }
 
-        private static VisualElement SpsTagRuleList(SerializedProperty listProp, string labelPrefix) {
+        private static VisualElement SpsTagRuleList(SerializedProperty listProp, string label, string tooltip) {
             return VRCFuryEditorUtils.RefreshOnChange(() => {
                 var container = new VisualElement();
+                var (labelBox, _) = VRCFuryEditorUtils.CreateTooltip(label, tooltip);
+                labelBox.AddToClassList("spsLabelOwnLine");
+                container.Add(labelBox);
                 for (var i = 0; i < Math.Min(listProp.arraySize, SpsTagRuleCount); i++) {
-                    container.Add(SpsTagRuleProp(listProp, i, $"{labelPrefix} #{i + 1}"));
+                    container.Add(SpsTagRuleProp(listProp, i));
                 }
                 if (listProp.arraySize < SpsTagRuleCount) {
-                    container.Add(new Button(() => AddSpsTagRule(listProp)) {
-                        text = $"Add {labelPrefix}"
-                    });
+                    var add = new Button(() => AddSpsTagRule(listProp)) { text = "＋ タグを追加" };
+                    add.style.alignSelf = Align.FlexStart;
+                    add.AddToClassList("spsProp");
+                    container.Add(add);
                 }
                 return container;
             }, listProp);
@@ -198,196 +245,174 @@ namespace YozoLab.SPS.Inspector {
             var configureTps = serializedObject.FindProperty("configureTps");
             var enableSps = serializedObject.FindProperty("enableSps");
 
+            // 注意書きはまとめて一番上に出す
+            var notices = new VisualElement();
+            notices.AddToClassList("spsNotices");
+            container.Add(notices);
             if (DexProtectUtils.IsDexProtectPresent()) {
-                container.Add(VRCFuryEditorUtils.Warn("This avatar uses DexProtect. Plug may not scale properly when deforming. If affected, consider removing DexProtect."));
+                notices.Add(VRCFuryEditorUtils.Warn("このアバターは DexProtect を使っている。変形のときに Plug の大きさが正しくならないことがある。気になるなら DexProtect を外してください。"));
             }
             if (MaterialLocker.UsesD4rk(target.owner().uploadRoots.First(), false)) {
-                container.Add(VRCFuryEditorUtils.Warn("This avatar uses D4rk Optimizer. Plug may break unexpectedly when deforming. If affected, consider removing D4rk Optimizer."));
+                notices.Add(VRCFuryEditorUtils.Warn("このアバターは d4rk Avatar Optimizer を使っている。変形が崩れることがある。気になるなら d4rk Avatar Optimizer を外してください。"));
             }
-            
-            container.Add(ConstraintWarning(target));
-            
+            notices.Add(ConstraintWarning(target));
             var boneWarning = VRCFuryEditorUtils.Warn(
-                "WARNING: This renderer is rigged with bones, but you didn't put the SPS Plug inside a bone! When SPS is used" +
-                " with rigged meshes, you should put the SPS Plug inside the bone nearest the 'base'!");
+                "メッシュにボーンが入っているのに、SPS Plug がボーンの中に置かれていない。" +
+                "ボーン入りのメッシュでは、根元にいちばん近いボーンの子に SPS Plug を置いてください。");
             boneWarning.SetVisible(false);
-            container.Add(boneWarning);
+            notices.Add(boneWarning);
 
-            var sizeSection = VRCFuryEditorUtils.Section("Size and Masking");
+            // ---- メッシュとサイズ ----
+            var sizeSection = VRCFuryEditorUtils.Section("メッシュとサイズ");
             container.Add(sizeSection);
-            
+
             var autoMesh = serializedObject.FindProperty("autoRenderer");
-            sizeSection.Add(VRCFuryEditorUtils.BetterProp(autoMesh, "Automatically find mesh"));
+            sizeSection.Add(VRCFuryEditorUtils.BetterProp(autoMesh, "メッシュを自動で探す",
+                tooltip: "この Plug の近く（同じオブジェクト・親・ボーンのウェイト）からメッシュを探す"));
             sizeSection.Add(VRCFuryEditorUtils.RefreshOnChange(() => {
-                var c = new VisualElement();
-                if (!autoMesh.boolValue) {
-                    c.Add(VRCFuryEditorUtils.List(serializedObject.FindProperty("configureTpsMesh")));
-                }
-                return c;
+                if (autoMesh.boolValue) return new VisualElement();
+                return VRCFuryEditorUtils.BetterProp(
+                    serializedObject.FindProperty("configureTpsMesh"),
+                    "対象のメッシュ",
+                    fieldOverride: VRCFuryEditorUtils.List(serializedObject.FindProperty("configureTpsMesh")));
             }, autoMesh));
 
-            sizeSection.Add(VRCFuryEditorUtils.RefreshOnChange(() => {
-                var c = new VisualElement();
-                if (!configureTps.boolValue && !enableSps.boolValue) {
-                    c.Add(VRCFuryEditorUtils.BetterProp(serializedObject.FindProperty("autoPosition"),
-                        "Detect position/rotation from mesh"));
-                }
-                return c;
-            }, configureTps, enableSps));
-
             var autoLength = serializedObject.FindProperty("autoLength");
-            sizeSection.Add(VRCFuryEditorUtils.BetterProp(autoLength, "Detect length from mesh"));
+            sizeSection.Add(VRCFuryEditorUtils.BetterProp(autoLength, "長さをメッシュから測る"));
             sizeSection.Add(VRCFuryEditorUtils.RefreshOnChange(() => {
-                var c = new VisualElement();
-                if (!autoLength.boolValue) {
-                    c.Add(VRCFuryEditorUtils.BetterProp(serializedObject.FindProperty("length"), "Length"));
-                }
-                return c;
+                if (autoLength.boolValue) return new VisualElement();
+                return VRCFuryEditorUtils.BetterProp(serializedObject.FindProperty("length"), "長さ",
+                    tooltip: "メートル（古い設定の「ワールド単位」を切っているときはローカル単位）");
             }, autoLength));
 
             var autoRadius = serializedObject.FindProperty("autoRadius");
-            sizeSection.Add(VRCFuryEditorUtils.BetterProp(autoRadius, "Detect radius from mesh"));
+            sizeSection.Add(VRCFuryEditorUtils.BetterProp(autoRadius, "太さをメッシュから測る"));
             sizeSection.Add(VRCFuryEditorUtils.RefreshOnChange(() => {
-                var c = new VisualElement();
-                if (!autoRadius.boolValue) {
-                    c.Add(VRCFuryEditorUtils.BetterProp(serializedObject.FindProperty("radius"), "Radius"));
-                }
-                return c;
+                if (autoRadius.boolValue) return new VisualElement();
+                return VRCFuryEditorUtils.BetterProp(serializedObject.FindProperty("radius"), "半径",
+                    tooltip: "メートル（古い設定の「ワールド単位」を切っているときはローカル単位）");
             }, autoRadius));
-            
-            sizeSection.Add(VRCFuryEditorUtils.BetterProp(
-                serializedObject.FindProperty("useBoneMask"),
-                "Automatically mask using bone weights"
-            ));
 
             sizeSection.Add(VRCFuryEditorUtils.BetterProp(
-                serializedObject.FindProperty("textureMask"),
-                "Optional additional texture mask (white = 'do not deform or use in length calculations')"
+                serializedObject.FindProperty("useBoneMask"),
+                "ボーンのウェイトで範囲を決める",
+                tooltip: "Plug のボーンにウェイトが乗っている頂点だけを、変形と長さの計算に使う"
             ));
-            
+            sizeSection.Add(VRCFuryEditorUtils.BetterProp(
+                serializedObject.FindProperty("textureMask"),
+                "マスク用テクスチャ",
+                tooltip: "任意。白い部分は変形させず、長さの計算にも使わない"
+            ));
+
             sizeSection.Add(VRCFuryEditorUtils.Debug(refreshMessage: () => {
                 var size = PlugSizeDetector.GetWorldSize(target);
                 var text = new List<string>();
-                text.Add("Attached renderers: " + size.renderers.Select(r => r.owner().name).Join(", "));
-                text.Add($"Detected Length: {size.worldLength}m");
-                text.Add($"Detected Radius: {size.worldRadius}m");
+                text.Add("メッシュ: " + size.renderers.Select(r => r.owner().name).Join(", "));
+                text.Add($"長さ {size.worldLength:0.000} m ／ 半径 {size.worldRadius:0.000} m");
 
-                text.Add("Patching Material Slots:");
+                var slots = new List<string>();
                 foreach (var renderer in size.matSlots.GetKeys()) {
-                    text.Add($"  {renderer.name}");
                     foreach (var slot in size.matSlots.Get(renderer)) {
-                        var matName = renderer.GetComponent<Renderer>()?.sharedMaterials[slot]?.name ?? "Unset";
-                        text.Add($"    #{slot} (currently {matName})");
+                        var matName = renderer.GetComponent<Renderer>()?.sharedMaterials[slot]?.name ?? "未設定";
+                        slots.Add($"{renderer.name} #{slot}（{matName}）");
                     }
                 }
+                if (slots.Count > 0) text.Add("加工するマテリアル: " + slots.Join(", "));
 
                 var bones = size.renderers.OfType<SkinnedMeshRenderer>()
                     .SelectMany(skin => skin.bones)
                     .Where(bone => bone != null)
                     .ToArray();
                 var isInsideBone = bones.Any(bone => target.owner().IsSameOrChildOf(bone));
-                var displayWarning = bones.Length > 0 && !isInsideBone;
-                boneWarning.SetVisible(displayWarning);
-                
+                boneWarning.SetVisible(bones.Length > 0 && !isInsideBone);
+
                 return text.Join('\n');
             }));
-            
-            container.Add(VRCFuryEditorUtils.BetterProp(enableSps, "Enable Deformation"));
-            container.Add(VRCFuryEditorUtils.RefreshOnChange(() => {
-                var c = new VisualElement();
-                if (enableSps.boolValue) {
-                    var spsBox = VRCFuryEditorUtils.Section("Deformation (Super Plug Shader)", "This plug will deform toward SPS/TPS/DPS sockets\nCheck out vrcfury.com/sps for details");
-                    c.Add(spsBox);
-                    spsBox.Add(VRCFuryEditorUtils.BetterProp(
-                        serializedObject.FindProperty("spsAutorig"),
-                        "Auto-Rig (If mesh is static, add bones and a physbone to make it sway)"
-                    ));
-                    
-                    spsBox.Add(VRCFuryEditorUtils.BetterProp(
-                        serializedObject.FindProperty("postBakeActions"),
-                        "Post-Bake Actions",
-                        tooltip: "SPS Plug meshes should be posed 'straight' so that length and pose calculations" +
-                                 " can be performed. If you'd like it to appear in a different way by default in game, you can add actions here" +
-                                 " which will be applied to the avatar after the calculations are finished."
-                    ));
 
-                    var animatedProp = serializedObject.FindProperty("spsAnimatedEnabled");
-                    var animatedField = new Toggle();
-                    animatedField.SetValueWithoutNotify(animatedProp.floatValue > 0);
-                    animatedField.RegisterValueChangedCallback(cb => {
-                        animatedProp.floatValue = cb.newValue ? 1 : 0;
-                        animatedProp.serializedObject.ApplyModifiedProperties();
-                    });
-                    spsBox.Add(VRCFuryEditorUtils.BetterProp(
-                        serializedObject.FindProperty("spsAnimatedEnabled"),
-                        "Animated Toggle",
-                        fieldOverride: animatedField,
-                        tooltip: "You can ANIMATE this box on and off with an animation clip, in order to" +
-                                 " turn deformation off during certain situations."
-                    ));
-                    spsBox.Add(VRCFuryEditorUtils.BetterProp(
-                        serializedObject.FindProperty("spsBlendshapes"),
-                        "Animated blendshapes to keep while deforming",
-                        fieldOverride: VRCFuryEditorUtils.List(serializedObject.FindProperty("spsBlendshapes")),
-                        tooltip: "Usually, SPS penetrators revert blendshapes back to exactly the way they look in the editor while deforming toward a socket." +
-                                 " You can specify up to 16 blendshapes in this list which can still be animated while deforming."
-                    ));
-                    spsBox.Add(VRCFuryEditorUtils.BetterProp(
-                        serializedObject.FindProperty("spsOverrun"),
-                        "Allow Hole Overrun",
-                        tooltip: "This allows the plug to extend very slightly past holes to improve collapse visuals." +
-                                 " Beware that disabling this may cause plug to appear to 'fold in' near holes like a map, which may be strange."
-                    ));
-                }
+            // ---- 変形 ----
+            var spsSection = VRCFuryEditorUtils.Section("変形（SPS）", "近くの Socket に向かって曲がる（SPS / TPS / DPS の Socket が対象）");
+            container.Add(spsSection);
+            spsSection.Add(VRCFuryEditorUtils.BetterProp(enableSps, "変形させる"));
+            spsSection.Add(VRCFuryEditorUtils.RefreshOnChange(() => {
+                var c = new VisualElement();
+                if (!enableSps.boolValue) return c;
+
+                c.Add(VRCFuryEditorUtils.BetterProp(
+                    serializedObject.FindProperty("spsAutorig"),
+                    "ボーンを自動で入れる",
+                    tooltip: "メッシュにボーンが無いとき、ボーンと PhysBone を足して揺れるようにする"
+                ));
+
+                var animatedProp = serializedObject.FindProperty("spsAnimatedEnabled");
+                var animatedField = new Toggle();
+                animatedField.SetValueWithoutNotify(animatedProp.floatValue > 0);
+                animatedField.RegisterValueChangedCallback(cb => {
+                    animatedProp.floatValue = cb.newValue ? 1 : 0;
+                    animatedProp.serializedObject.ApplyModifiedProperties();
+                });
+                c.Add(VRCFuryEditorUtils.BetterProp(
+                    animatedProp,
+                    "変形 ON（アニメーション用）",
+                    fieldOverride: animatedField,
+                    tooltip: "アニメーションでこの値を切り替えると、場面に応じて変形を止められる"
+                ));
+                c.Add(VRCFuryEditorUtils.BetterProp(
+                    serializedObject.FindProperty("spsOverrun"),
+                    "穴の少し奥まで伸ばす",
+                    tooltip: "穴の入口をわずかに越えて伸ばし、潰れ方を自然にする。" +
+                             "切ると、穴の手前で地図を畳んだように折れて見えることがある"
+                ));
+                c.Add(VRCFuryEditorUtils.BetterProp(
+                    serializedObject.FindProperty("spsBlendshapes"),
+                    "変形中も動かすブレンドシェイプ",
+                    fieldOverride: VRCFuryEditorUtils.List(serializedObject.FindProperty("spsBlendshapes")),
+                    tooltip: "変形中のブレンドシェイプは、ふつうエディタでの見た目に固定される。" +
+                             "ここに挙げたもの（16 個まで）は変形中もアニメーションで動かせる"
+                ));
+                c.Add(VRCFuryEditorUtils.BetterProp(
+                    serializedObject.FindProperty("postBakeActions"),
+                    "計算の後に適用するアクション",
+                    tooltip: "長さや向きの計算のため、Plug はまっすぐな姿勢で置いておく必要がある。" +
+                             "ゲーム内の普段の見た目を変えたいときは、ここにアクションを足す（計算の後にアバターへ適用される）"
+                ));
                 return c;
             }, enableSps));
 
-            // Depth Animations
-            var list = serializedObject.FindProperty("depthActions2");
-            container.Add(VRCFuryEditorUtils.CheckboxList(
-                list,
-                "Enable Depth Animations",
-                "Allows you to animate anything based on the proximity of a socket near this plug",
-                "Depth Animations",
-                VRCFuryEditorUtils.List(list, () => {
-                    VRCFuryEditorUtils.AddToList(list, newAction => {
-                        newAction.FindPropertyRelative("range").vector2Value = new Vector2(-1, 0);
-                        newAction.FindPropertyRelative("units").enumValueIndex =
-                            (int)SpsSocket.DepthActionUnits.Plugs;
-                    });
-                })
-            ));
-
-            container.Add(GetOgbHapticsSection(haptics => {
-                haptics.Add(SpsEditorUtils.AutoHapticIdProp(
-                    serializedObject.FindProperty("name"),
-                    "ID sent to OGB",
-                    target,
-                    target.owner(),
-                    avatar => avatar.GetComponentsInSelfAndChildren<SpsPlug>(),
-                    GetOscId
-                ));
+            // ---- 深度アニメーション ----
+            var depthList = serializedObject.FindProperty("depthActions2");
+            var depth = VRCFuryEditorUtils.Group("深度アニメーション", "plug.depth",
+                defaultOpen: depthList.arraySize > 0,
+                summary: () => depthList.arraySize > 0 ? $"{depthList.arraySize} 件" : "なし");
+            depth.Add(VRCFuryEditorUtils.WrappedLabel("Socket との距離に応じて、好きなものを動かす").AddClass("spsSubtitle"));
+            depth.Add(VRCFuryEditorUtils.List(depthList, () => {
+                VRCFuryEditorUtils.AddToList(depthList, newAction => {
+                    newAction.FindPropertyRelative("range").vector2Value = new Vector2(-1, 0);
+                    newAction.FindPropertyRelative("units").enumValueIndex =
+                        (int)SpsSocket.DepthActionUnits.Plugs;
+                });
             }));
+            container.Add(depth);
 
-            var tags = VRCFuryEditorUtils.Section("Tags", "Filter which sockets this plug will target");
+            // ---- ターゲットの絞り込み ----
+            var useSharedTag = serializedObject.FindProperty("useSharedTag");
             var includeTags = serializedObject.FindProperty("includeTags");
             var excludeTags = serializedObject.FindProperty("excludeTags");
-            tags.Add(SpsTagRuleList(includeTags, "Include"));
-            tags.Add(SpsTagRuleList(excludeTags, "Exclude"));
-            var useSharedTag = serializedObject.FindProperty("useSharedTag");
-            tags.Add(VRCFuryEditorUtils.BetterProp(useSharedTag, "Include 'Global' SPS2 Tag",
-                tooltip: "Adds the global SPS tag so this plug can target most normal sockets."));
+            var tags = VRCFuryEditorUtils.Group("狙う Socket の絞り込み", "plug.tags",
+                summary: () => !useSharedTag.boolValue ? "共通タグなし" :
+                    includeTags.arraySize + excludeTags.arraySize > 0 ? "タグあり" : "既定");
+            tags.Add(VRCFuryEditorUtils.BetterProp(useSharedTag, "共通の SPS タグを含める",
+                tooltip: "ふつうの Socket はこのタグで狙える。切ると、ほとんどの Socket を狙わなくなる"));
             tags.Add(VRCFuryEditorUtils.RefreshOnChange(() => {
                 if (useSharedTag.boolValue) return new VisualElement();
-                return VRCFuryEditorUtils.Warn("This plug does not include the global SPS2 tag, so it will not target most sockets!");
+                return VRCFuryEditorUtils.Warn("共通の SPS タグを含めていないので、ほとんどの Socket を狙わない。");
             }, useSharedTag));
-            tags.Add(VRCFuryEditorUtils.BetterProp(serializedObject.FindProperty("useLights"), "Include 'Global' SPS1/DPS/TPS Tag",
-                tooltip: "Allows this plug to target SPS1/DPS/TPS sockets (looking for lights)."));
+            tags.Add(VRCFuryEditorUtils.BetterProp(serializedObject.FindProperty("useLights"), "古い形式の Socket も狙う",
+                tooltip: "ライトで位置を示す SPS1 / DPS / TPS の Socket も狙う"));
             var useHipAvoidance = serializedObject.FindProperty("useHipAvoidance");
             tags.Add(VRCFuryEditorUtils.BetterProp(
                 useHipAvoidance,
-                "Exclude sockets on own Hips",
-                tooltip: "If this plug is on your hips, it will not target sockets on your hips."
+                "自分の腰の Socket は狙わない",
+                tooltip: "この Plug が腰にあるとき、同じく腰にある自分の Socket を狙わない"
             ));
             tags.Add(VRCFuryEditorUtils.RefreshOnChange(() => {
                 if (!useHipAvoidance.boolValue) return new VisualElement();
@@ -397,51 +422,60 @@ namespace YozoLab.SPS.Inspector {
                 if (autoTagGenerator?.GetClosestBone(target.owner()) != HumanBodyBones.Hips) {
                     return new VisualElement();
                 }
-                return VRCFuryEditorUtils.Info("This plug will exclude sockets on your hips.");
+                return VRCFuryEditorUtils.Info("この Plug は腰にあるので、自分の腰の Socket は狙わない。");
             }, useHipAvoidance));
+            tags.Add(SpsTagRuleList(includeTags, "狙うタグ", "このタグを持つ Socket も狙う"));
+            tags.Add(SpsTagRuleList(excludeTags, "狙わないタグ", "このタグを持つ Socket は狙わない"));
             container.Add(tags);
 
-            var adv = new Foldout {
-                text = "Advanced Plug Options",
-                value = false
-            };
-            container.Add(adv);
-            adv.Add(VRCFuryEditorUtils.BetterProp(serializedObject.FindProperty("unitsInMeters"), "(Deprecated) Units are in world-space"));
-            adv.Add(VRCFuryEditorUtils.BetterProp(serializedObject.FindProperty("useLegacyRendererFinder"), "(Deprecated) Use legacy renderer search"));
-            adv.Add(VRCFuryEditorUtils.BetterProp(configureTps, "(Deprecated) Auto-configure Poiyomi TPS"));
-            adv.Add(VRCFuryEditorUtils.BetterProp(serializedObject.FindProperty("addDpsTipLight"), "(Deprecated) Add legacy DPS tip light (must enable in menu)"));
+            // ---- 触覚 ----
+            container.Add(GetOgbHapticsSection("plug.haptics", haptics => {
+                haptics.Add(SpsEditorUtils.AutoHapticIdProp(
+                    serializedObject.FindProperty("name"),
+                    "OGB に送る名前",
+                    target,
+                    target.owner(),
+                    avatar => avatar.GetComponentsInSelfAndChildren<SpsPlug>(),
+                    GetOscId
+                ));
+            }));
+
+            // ---- 古い設定 ----
+            var legacy = VRCFuryEditorUtils.Group("古い設定（非推奨）", "plug.legacy");
+            legacy.Add(VRCFuryEditorUtils.RefreshOnChange(() => {
+                if (configureTps.boolValue || enableSps.boolValue) return new VisualElement();
+                return VRCFuryEditorUtils.BetterProp(serializedObject.FindProperty("autoPosition"),
+                    "位置と向きをメッシュから決める");
+            }, configureTps, enableSps));
+            legacy.Add(VRCFuryEditorUtils.BetterProp(serializedObject.FindProperty("unitsInMeters"), "長さ・半径をワールド単位（メートル）で扱う"));
+            legacy.Add(VRCFuryEditorUtils.BetterProp(serializedObject.FindProperty("useLegacyRendererFinder"), "古いメッシュの探し方を使う"));
+            legacy.Add(VRCFuryEditorUtils.BetterProp(configureTps, "Poiyomi の TPS を自動で設定する"));
+            legacy.Add(VRCFuryEditorUtils.BetterProp(serializedObject.FindProperty("addDpsTipLight"), "DPS 用の先端ライトを足す",
+                tooltip: "メニューで有効にしたときだけ働く"));
+            container.Add(legacy);
 
             return container;
         }
 
         public static Func<bool> getHapticsEnabled;
-        public static VisualElement GetOgbHapticsSection(Action<VisualElement> buildBody) {
-            var container = new VisualElement();
-            if (getHapticsEnabled == null) return container;
+
+        /** OGB（触覚デバイス連携）の設定のまとまり */
+        public static VisualElement GetOgbHapticsSection(string key, Action<VisualElement> buildBody) {
+            if (getHapticsEnabled == null) return new VisualElement();
 
             var hapticsEnabled = getHapticsEnabled();
-            var hapticsEnabledToggle = new Toggle();
-            hapticsEnabledToggle.SetValueWithoutNotify(hapticsEnabled);
-            hapticsEnabledToggle.SetEnabled(false);
-            container.Add(VRCFuryEditorUtils.BetterProp(
-                null,
-                "Enable OGB Haptics",
-                fieldOverride: hapticsEnabledToggle
-            ));
-
-            var haptics = VRCFuryEditorUtils.Section("OGB Haptics");
+            var haptics = VRCFuryEditorUtils.Group("触覚デバイス（OGB）", key,
+                summary: () => hapticsEnabled ? null : "設定で OFF");
             if (!hapticsEnabled) {
-                haptics.Add(VRCFuryEditorUtils.Error("Haptics have been disabled in the YozoLab SPS settings (Tools/YozoLab SPS/Settings)"));
+                haptics.Add(VRCFuryEditorUtils.Info("触覚デバイスへの連携は、YozoLab SPS の設定（Tools/YozoLab SPS/Settings）で OFF になっている。"));
             }
             buildBody(haptics);
-            container.Add(haptics);
-
-            return container;
+            return haptics;
         }
 
         public static VisualElement ConstraintWarning(UnityEngine.Component c, bool isSocket = false) {
             var reg = new VrcRegistryConfig();
-            
+
             return VRCFuryEditorUtils.Debug(refreshElement: () => {
                 var output = new VisualElement();
                 var legacyRendererPaths = new List<string>();
@@ -462,69 +496,47 @@ namespace YozoLab.SPS.Inspector {
                 foreach (var renderer in c.owner().GetComponentsInUploadRoot<Renderer>()) {
                     foreach (var m in renderer.sharedMaterials) {
                         if (DpsConfigurer.IsDps(m) || TpsConfigurer.IsTps(m)) {
-                            legacyRendererPaths.Add($"{m.name} in {renderer.owner().GetDebugPath()}");
+                            legacyRendererPaths.Add($"{m.name}（{renderer.owner().GetDebugPath()}）");
                         }
                     }
                 }
 
-                output.Clear();
+                const string upgradeHint = "SPS への移し替えは Tools/YozoLab SPS/Upgrade DPS to SPS で行える。";
                 if (tipLightPaths.Any()) {
-                    var warning = VRCFuryEditorUtils.Warn(
-                        "This avatar still contains a DPS tip light! This means your avatar has not been fully converted to SPS," +
-                        " and your DPS penetrator may cause issues if too many sockets are on nearby." +
-                        " Check out https://vrcfury.com/sps for details about how to fully upgrade a DPS penetrator to an SPS plug.\n\n" +
-                        tipLightPaths.Join('\n')
-                    );
-                    output.Add(warning);
+                    output.Add(VRCFuryEditorUtils.Warn(
+                        "DPS の先端ライトが残っている。SPS に移し替えきれておらず、近くに Socket が多いと不具合が出ることがある。" +
+                        upgradeHint + "\n\n" + tipLightPaths.Join('\n')));
                 }
                 if (orificeLightPaths.Any()) {
-                    var warning = VRCFuryEditorUtils.Warn(
-                        "This avatar still contains un-upgraded DPS orifice lights! This means your avatar has not been fully converted to SPS," +
-                        " and your DPS orifices may cause issues if too many are active at the same time." +
-                        " Check out https://vrcfury.com/sps for details about how to upgrade DPS orifices to SPS sockets.\n\n" +
-                        orificeLightPaths.Join('\n')
-                    );
-                    output.Add(warning);
+                    output.Add(VRCFuryEditorUtils.Warn(
+                        "SPS に移し替えていない DPS の穴のライトが残っている。同時に多く有効になると不具合が出ることがある。" +
+                        upgradeHint + "\n\n" + orificeLightPaths.Join('\n')));
                 }
                 if (legacyRendererPaths.Any()) {
-                    var warning = VRCFuryEditorUtils.Warn(
-                        "This avatar still contains a legacy DPS or TPS penetrator! This means your avatar has not been fully converted to SPS," +
-                        " and your legacy penetrator may cause issues if too many sockets are on nearby." +
-                        " Check out https://vrcfury.com/sps for details about how to fully upgrade a DPS penetrator to an SPS plug.\n\n" +
-                        legacyRendererPaths.Join('\n')
-                    );
-                    output.Add(warning);
+                    output.Add(VRCFuryEditorUtils.Warn(
+                        "古い DPS / TPS の Plug が残っている。近くに Socket が多いと不具合が出ることがある。" +
+                        upgradeHint + "\n\n" + legacyRendererPaths.Join('\n')));
                 }
 
-                var inConstraints = c.owner().GetConstraints(true).Any();
-                if (inConstraints) {
-                    var warning = VRCFuryEditorUtils.Warn(
-                        "This SPS component is used within a Constraint! " +
-                        "AVOID using SPS within constraints if at all possible. " +
-                        (isSocket
-                            ? "Sharing one socket in multiple locations will make your avatar LESS performant, not more! "
-                            : "") +
-                        " Check out https://vrcfury.com/sps/constraints for details.");
-                    output.Add(warning);
+                if (c.owner().GetConstraints(true).Any()) {
+                    output.Add(VRCFuryEditorUtils.Warn(
+                        "この SPS コンポーネントは Constraint の中にある。できるだけ Constraint の中では使わないでください。" +
+                        (isSocket ? "1 つの Socket を複数の場所で使い回すと、かえって重くなる。" : "")));
                 }
 
                 if (reg.TryGet("VRC_AV_INTERACT_SELF", out var val) && val != 1) {
                     output.Add(VRCFuryEditorUtils.Error(
-                        "You must enable 'Settings > Avatar > Avatar Interactions > Avatar Self Interact' in the VRChat settings" +
-                        " for SPS to work properly."
-                    ));
+                        "VRChat の設定で「Settings > Avatar > Avatar Interactions > Avatar Self Interact」を ON にしてください（SPS が正しく動かない）。"));
                 }
                 if (reg.TryGet("VRC_AV_INTERACT_LEVEL", out var val2) && val2 != 2) {
                     output.Add(VRCFuryEditorUtils.Warn(
-                        "You do not have 'Settings > Avatar > Avatar Interactions > Avatar Allowed to Interact' set to 'Everyone' in the VRChat settings." +
-                        " This may prevent SPS from working properly with other players."
-                    ));
+                        "VRChat の設定「Settings > Avatar > Avatar Interactions > Avatar Allowed to Interact」が「Everyone」になっていない。" +
+                        "他の人との間で SPS が働かないことがある。"));
                 }
                 if (reg.TryGet("PIXEL_LIGHT_COUNT", out var val3) && val3 != 3) {
                     output.Add(VRCFuryEditorUtils.Warn(
-                        "Your VRChat 'Pixel Light Count' setting is not set to HIGH. This may cause SPS to work improperly in some worlds." +
-                        " Please set 'Settings > Graphics > Advanced > Pixel Light Count' to 'High' in the VRChat settings."
-                    ));
+                        "VRChat の設定「Settings > Graphics > Advanced > Pixel Light Count」が「High」になっていない。" +
+                        "ワールドによって SPS が正しく動かないことがある。"));
                 }
 
                 return output;

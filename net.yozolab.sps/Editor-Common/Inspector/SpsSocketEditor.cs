@@ -55,22 +55,33 @@ namespace YozoLab.SPS.Inspector {
         private static VisualElement SpsTagList(SerializedProperty listProp) {
             return VRCFuryEditorUtils.RefreshOnChange(() => {
                 var container = new VisualElement();
+                var (labelBox, _) = VRCFuryEditorUtils.CreateTooltip("追加のタグ", "このタグを狙うように設定した Plug も、この Socket を狙う");
+                labelBox.AddToClassList("spsLabelOwnLine");
+                container.Add(labelBox);
                 for (var i = 0; i < Math.Min(listProp.arraySize, SpsTagCount); i++) {
                     var index = i;
-                    var row = new VisualElement();
-                    row.Add(SpsPlugEditor.SpsTagProp(listProp.GetArrayElementAtIndex(index), $"Tag #{index + 1}"));
-                    row.Add(new Button(() => {
+                    var row = new VisualElement().Row().AlignItems(Align.Center);
+                    row.AddToClassList("spsProp");
+                    var field = SpsPlugEditor.SpsTagTextField(listProp.GetArrayElementAtIndex(index));
+                    field.style.flexGrow = 1;
+                    field.style.flexShrink = 1;
+                    row.Add(field);
+                    var remove = new Button(() => {
                         listProp.DeleteArrayElementAtIndex(index);
                         listProp.serializedObject.ApplyModifiedProperties();
                     }) {
-                        text = "Remove"
-                    });
+                        text = "×",
+                        tooltip = "このタグを消す"
+                    };
+                    remove.style.marginLeft = 6;
+                    row.Add(remove);
                     container.Add(row);
                 }
                 if (listProp.arraySize < SpsTagCount) {
-                    container.Add(new Button(() => AddSpsTag(listProp)) {
-                        text = "Add Tag"
-                    });
+                    var add = new Button(() => AddSpsTag(listProp)) { text = "＋ タグを追加" };
+                    add.style.alignSelf = Align.FlexStart;
+                    add.AddToClassList("spsProp");
+                    container.Add(add);
                 }
                 return container;
             }, listProp);
@@ -92,223 +103,268 @@ namespace YozoLab.SPS.Inspector {
                 var container = new VisualElement();
 
                 string FormatSlot(int slot) {
-                    if (slot == -1) return "Root";
-                    return $"Stop {slot+1}";
+                    if (slot == -1) return "入口";
+                    return $"中継点 {slot + 1}";
                 }
 
                 for (var i = 0; i < Math.Min(listProp.arraySize, GuidedPathCount); i++) {
                     var index = i;
-                    var row = new VisualElement();
                     var item = listProp.GetArrayElementAtIndex(index);
                     var customizeTangentOut = item.FindPropertyRelative("customizeTangentOut");
                     var customizeTangentIn = item.FindPropertyRelative("customizeTangentIn");
 
-                    row.Add(VRCFuryEditorUtils.Prop(customizeTangentOut, $"Customize Tangent exiting {FormatSlot(index-1)}"));
+                    var box = VRCFuryEditorUtils.Section(FormatSlot(index));
+                    box.Add(VRCFuryEditorUtils.BetterProp(item.FindPropertyRelative("transform"), "位置",
+                        tooltip: "この中継点になるオブジェクト"));
+                    box.Add(VRCFuryEditorUtils.BetterProp(item.FindPropertyRelative("shrink"),
+                        $"{FormatSlot(index - 1)}〜{FormatSlot(index)}の間で潰す"));
+                    box.Add(VRCFuryEditorUtils.BetterProp(customizeTangentOut, $"{FormatSlot(index - 1)}から出る向きを指定"));
                     if (customizeTangentOut.boolValue) {
-                        row.Add(VRCFuryEditorUtils.Prop(item.FindPropertyRelative("tangentOutLocal")));
+                        box.Add(VRCFuryEditorUtils.BetterProp(item.FindPropertyRelative("tangentOutLocal"), "向き"));
                     }
-                    row.Add(VRCFuryEditorUtils.Prop(item.FindPropertyRelative("shrink"), $"Collapse plug between {FormatSlot(index-1)} and {FormatSlot(index)}"));
-                    row.Add(VRCFuryEditorUtils.Prop(customizeTangentIn, $"Customize Tangent entering {FormatSlot(index)}"));
+                    box.Add(VRCFuryEditorUtils.BetterProp(customizeTangentIn, $"{FormatSlot(index)}へ入る向きを指定"));
                     if (customizeTangentIn.boolValue) {
-                        row.Add(VRCFuryEditorUtils.Prop(item.FindPropertyRelative("tangentInLocal")));
+                        box.Add(VRCFuryEditorUtils.BetterProp(item.FindPropertyRelative("tangentInLocal"), "向き"));
                     }
-
-                    row.Add(VRCFuryEditorUtils.Prop(item.FindPropertyRelative("transform"), FormatSlot(index)));
-
-                    row.Add(new Button(() => {
+                    var remove = new Button(() => {
                         listProp.DeleteArrayElementAtIndex(index);
                         listProp.serializedObject.ApplyModifiedProperties();
                     }) {
-                        text = "Remove"
-                    });
-                    container.Add(row);
+                        text = "この中継点を消す"
+                    };
+                    remove.style.alignSelf = Align.FlexEnd;
+                    box.Add(remove);
+                    container.Add(box);
                 }
                 if (listProp.arraySize < GuidedPathCount) {
-                    container.Add(new Button(() => AddGuidedPath(listProp)) {
-                        text = "Add Stop to Path"
-                    });
+                    var add = new Button(() => AddGuidedPath(listProp)) { text = "＋ 中継点を追加" };
+                    add.style.alignSelf = Align.FlexStart;
+                    container.Add(add);
                 }
 
                 return container;
             }, refreshProps.ToArray());
         }
 
+        private static readonly string[] ModeNames = { "自動", "穴", "輪", "片側だけの輪（まれ）" };
+
         protected override VisualElement CreateEditor(SerializedObject serializedObject, SpsSocket target) {
             var container = new VisualElement();
-            
-            container.Add(SpsPlugEditor.ConstraintWarning(target, true));
-            
+
+            var notices = new VisualElement();
+            notices.AddToClassList("spsNotices");
+            notices.Add(SpsPlugEditor.ConstraintWarning(target, true));
+            container.Add(notices);
+
+            // ---- 変形 ----
             var addLightProp = serializedObject.FindProperty("addLight");
-            var spsEnabledCheckbox = new Toggle();
             var noneIndex = (int)SpsSocket.AddLight.None;
             var autoIndex = (int)SpsSocket.AddLight.Auto;
+            var spsSection = VRCFuryEditorUtils.Section("変形（SPS）", "SPS の Plug がこの Socket に向かって曲がる。入口はこのオブジェクトの +Z 側");
+            container.Add(spsSection);
+
+            var spsEnabledCheckbox = new Toggle();
             spsEnabledCheckbox.SetValueWithoutNotify(addLightProp.enumValueIndex != noneIndex);
             spsEnabledCheckbox.RegisterValueChangedCallback(cb => {
-                if (cb.newValue) addLightProp.enumValueIndex = autoIndex;
-                else addLightProp.enumValueIndex = noneIndex;
+                addLightProp.enumValueIndex = cb.newValue ? autoIndex : noneIndex;
                 addLightProp.serializedObject.ApplyModifiedProperties();
             });
-            container.Add(VRCFuryEditorUtils.BetterProp(addLightProp, "Enable Deformation", fieldOverride: spsEnabledCheckbox));
-            container.Add(VRCFuryEditorUtils.RefreshOnChange(() => {
-                if (addLightProp.enumValueIndex == noneIndex) return new VisualElement();
+            spsSection.Add(VRCFuryEditorUtils.BetterProp(addLightProp, "Plug を受け入れる", fieldOverride: spsEnabledCheckbox,
+                tooltip: "切ると、子にある古い DPS のライトがあればそれに従う"));
+            spsSection.Add(VRCFuryEditorUtils.RefreshOnChange(() => {
                 var output = new VisualElement();
+                if (addLightProp.enumValueIndex == noneIndex) return output;
 
-                var section = VRCFuryEditorUtils.Section("Deformation (Super Plug Shader)", "SPS2 plugs will deform toward this socket\nCheck out vrcfury.com/sps for details");
+                // enum の並び: None, Hole, Ring, Auto, RingOneWay
+                var index = addLightProp.enumValueIndex;
                 var modeField = new PopupField<string>(
-                    new List<string>() { "Auto", "Hole", "Ring", "One-Way Ring (Uncommon)" },
-                    addLightProp.enumValueIndex == 4 ? 3 : addLightProp.enumValueIndex == 2 ? 2 : addLightProp.enumValueIndex == 1 ? 1 : 0
+                    ModeNames.ToList(),
+                    index == (int)SpsSocket.AddLight.RingOneWay ? 3
+                        : index == (int)SpsSocket.AddLight.Ring ? 2
+                        : index == (int)SpsSocket.AddLight.Hole ? 1
+                        : 0
                 );
                 modeField.RegisterValueChangedCallback(cb => {
-                    addLightProp.enumValueIndex = cb.newValue == "Hole" ? 1 : cb.newValue == "Ring" ? 2 : cb.newValue == "One-Way Ring (Uncommon)" ? 4 : 3;
+                    var i = ModeNames.ToList().IndexOf(cb.newValue);
+                    addLightProp.enumValueIndex = i == 1 ? (int)SpsSocket.AddLight.Hole
+                        : i == 2 ? (int)SpsSocket.AddLight.Ring
+                        : i == 3 ? (int)SpsSocket.AddLight.RingOneWay
+                        : autoIndex;
                     addLightProp.serializedObject.ApplyModifiedProperties();
                 });
-                section.Add(VRCFuryEditorUtils.BetterProp(addLightProp, "Mode", fieldOverride: modeField,
-                    tooltip: "'Auto' will set to Hole if attached to hips or head bone.\n" +
-                             "'Rings' can be entered from either side using SPS, but TPS/DPS will only enter one side.\n" +
-                             "'One-Way Rings' can only be entered from one side."));
-                section.Add(VRCFuryEditorUtils.BetterProp(
+                output.Add(VRCFuryEditorUtils.BetterProp(addLightProp, "形", fieldOverride: modeField,
+                    tooltip: "穴: 奥で止まる。\n" +
+                             "輪: 通り抜けられる（SPS なら裏からも入れる。TPS / DPS は片側だけ）。\n" +
+                             "片側だけの輪: 表からだけ通り抜けられる。\n" +
+                             "自動: 腰か頭に付いていれば穴、それ以外は輪。"));
+                output.Add(VRCFuryEditorUtils.BetterProp(
                     serializedObject.FindProperty("useRadiusOffset"),
-                    "Radius Offset",
-                    tooltip: "Offsets SPS targeting in the socket up direction by the resolver radius. Legacy lights are also moved upward slightly for TPS/DPS compatibility."
+                    "Plug の太さぶん上にずらす",
+                    tooltip: "狙う位置を、Plug の半径だけ Socket の上方向にずらす。古い形式のライトも、TPS / DPS に合わせて少し上に動く"
                 ));
-                section.Add(VRCFuryEditorUtils.BetterProp(
+                output.Add(VRCFuryEditorUtils.BetterProp(
                     serializedObject.FindProperty("guidedPathStops"),
-                    "Guided Path",
+                    "通り道（中継点）",
                     fieldOverride: GuidedPathList(serializedObject.FindProperty("guidedPathStops")),
-                    tooltip: "If provided, the plug will be guided through these transforms after passing through the socket. If the socket is a hole, the collapse will occur at the last transform in the path."
+                    tooltip: "入口を通った後、ここに挙げたオブジェクトを順にたどって曲がる。穴なら、最後の中継点で潰れる"
                 ));
-                output.Add(section);
 
-                var enableBackwardCompatibility = serializedObject.FindProperty("useLights");
-                output.Add(VRCFuryEditorUtils.BetterProp(enableBackwardCompatibility, "Enable Legacy Compatibility"));
+                var useLights = serializedObject.FindProperty("useLights");
+                output.Add(VRCFuryEditorUtils.BetterProp(useLights, "古い形式の Plug も受け入れる",
+                    tooltip: "ライトを置いて、SPS1 / DPS / TPS の Plug も曲がるようにする"));
                 output.Add(VRCFuryEditorUtils.RefreshOnChange(() => {
-                    if (!enableBackwardCompatibility.boolValue) return new VisualElement();
-                    var legacySupport = VRCFuryEditorUtils.Section("Legacy Compatibility",
-                        "SPS1/DPS/TPS plugs will deform toward this socket\nUses Lights");
+                    if (!useLights.boolValue) return new VisualElement();
+                    var legacy = new VisualElement();
+                    legacy.style.marginLeft = 18;
                     var overrideLegacySocketType = serializedObject.FindProperty("overrideLegacySocketType");
-                    legacySupport.Add(VRCFuryEditorUtils.BetterProp(
-                        overrideLegacySocketType,
-                        "Override Legacy Type"
-                    ));
-                    legacySupport.Add(VRCFuryEditorUtils.RefreshOnChange(() => {
+                    legacy.Add(VRCFuryEditorUtils.BetterProp(overrideLegacySocketType, "古い形式での形を別に指定"));
+                    legacy.Add(VRCFuryEditorUtils.RefreshOnChange(() => {
                         if (!overrideLegacySocketType.boolValue) return new VisualElement();
-                        return VRCFuryEditorUtils.BetterProp(
+                        return VRCFuryEditorUtils.Prop(
                             serializedObject.FindProperty("legacySocketType"),
-                            "Legacy Type"
-                        );
+                            "形",
+                            formatEnum: FormatLegacyType
+                        ).AddClass("spsProp");
                     }, overrideLegacySocketType));
                     var overrideLegacyOffset = serializedObject.FindProperty("overrideLegacyOffset");
-                    legacySupport.Add(VRCFuryEditorUtils.BetterProp(
-                        overrideLegacyOffset,
-                        "Override Legacy Offset"
-                    ));
-                    legacySupport.Add(VRCFuryEditorUtils.RefreshOnChange(() => {
+                    legacy.Add(VRCFuryEditorUtils.BetterProp(overrideLegacyOffset, "古い形式での入口の位置を別に指定"));
+                    legacy.Add(VRCFuryEditorUtils.RefreshOnChange(() => {
                         if (!overrideLegacyOffset.boolValue) return new VisualElement();
                         return VRCFuryEditorUtils.BetterProp(
                             serializedObject.FindProperty("legacyOffsetLocal"),
-                            "Legacy Entry Offset"
+                            "位置のずれ"
                         );
                     }, overrideLegacyOffset));
-                    return legacySupport;
-                }, enableBackwardCompatibility));
+                    return legacy;
+                }, useLights));
 
                 return output;
             }, addLightProp));
 
+            // ---- メニュー ----
+            var menu = VRCFuryEditorUtils.Section("メニュー");
+            container.Add(menu);
             var addMenuItemProp = serializedObject.FindProperty("addMenuItem");
-            container.Add(VRCFuryEditorUtils.BetterProp(addMenuItemProp, "Enable Menu Toggle"));
-            container.Add(VRCFuryEditorUtils.RefreshOnChange(() => {
+            menu.Add(VRCFuryEditorUtils.BetterProp(addMenuItemProp, "メニューにオン/オフを作る",
+                tooltip: "SPS のメニューに、この Socket を有効にする項目を足す"));
+            menu.Add(VRCFuryEditorUtils.RefreshOnChange(() => {
                 if (!addMenuItemProp.boolValue) return new VisualElement();
-                var toggles = VRCFuryEditorUtils.Section("Menu Toggle", "A menu item will be created for this socket");
+                var toggles = new VisualElement();
                 toggles.Add(SpsEditorUtils.AutoHapticIdProp(
                     serializedObject.FindProperty("name"),
-                    "Name in menu",
+                    "メニューでの名前",
                     target,
                     target.owner(),
                     avatar => avatar.GetComponentsInSelfAndChildren<SpsSocket>(),
                     GetMenuName
                 ));
-                toggles.Add(VRCFuryEditorUtils.BetterProp(serializedObject.FindProperty("enableAuto"), "Include in Auto selection?", tooltip: "If checked, this socket will be eligible to be chosen during 'Auto Mode', which is an option in your menu which will automatically enable the socket nearest to a plug."));
-                toggles.Add(VRCFuryEditorUtils.BetterProp(serializedObject.FindProperty("menuIcon"), "Menu Icon", tooltip: "Override the menu icon used for this socket's individual toggle. Looking to move or change the icon of the main SPS menu? Add an 'SPS Options' component to the avatar root."));
+                toggles.Add(VRCFuryEditorUtils.BetterProp(serializedObject.FindProperty("enableAuto"), "「自動」の候補にする",
+                    tooltip: "メニューの「自動」を選んだとき、Plug にいちばん近い Socket を自動で有効にする。その候補に入れる"));
+                toggles.Add(VRCFuryEditorUtils.BetterProp(serializedObject.FindProperty("menuIcon"), "アイコン",
+                    tooltip: "この Socket の項目のアイコン。SPS のメニュー全体の場所やアイコンは、アバターのルートの「SPS Options」で変える"));
                 return toggles;
             }, addMenuItemProp));
 
-            // Depth Animations
-            container.Add(VRCFuryEditorUtils.CheckboxList(
-                serializedObject.FindProperty("depthActions2"),
-                "Enable Depth Animations",
-                "Allows you to animate anything based on the proximity of a plug near this socket",
-                "Depth Animations"
-            ));
+            // ---- 深度アニメーション ----
+            var depthList = serializedObject.FindProperty("depthActions2");
+            var depth = VRCFuryEditorUtils.Group("深度アニメーション", "socket.depth",
+                defaultOpen: depthList.arraySize > 0,
+                summary: () => depthList.arraySize > 0 ? $"{depthList.arraySize} 件" : "なし");
+            depth.Add(VRCFuryEditorUtils.WrappedLabel("Plug がどこまで入っているかに応じて、好きなものを動かす").AddClass("spsSubtitle"));
+            depth.Add(VRCFuryEditorUtils.List(depthList));
+            container.Add(depth);
 
-            // Active Animations
-            container.Add(VRCFuryEditorUtils.CheckboxList(
-                serializedObject.FindProperty("activeActions.actions"),
-                "Enable Active Animation",
-                "This animation will be active whenever the socket is enabled in the menu",
-                "Active Animation",
-                VRCFuryEditorUtils.BetterProp(serializedObject.FindProperty("activeActions"))
-            ));
+            // ---- 有効なときのアニメーション ----
+            var activeList = serializedObject.FindProperty("activeActions.actions");
+            var active = VRCFuryEditorUtils.Group("有効なときのアニメーション", "socket.active",
+                defaultOpen: activeList.arraySize > 0,
+                summary: () => activeList.arraySize > 0 ? $"{activeList.arraySize} 件" : "なし");
+            active.Add(VRCFuryEditorUtils.WrappedLabel("メニューでこの Socket を有効にしている間、ずっと適用する").AddClass("spsSubtitle"));
+            active.Add(VRCFuryEditorUtils.BetterProp(serializedObject.FindProperty("activeActions")));
+            container.Add(active);
 
-            container.Add(SpsPlugEditor.GetOgbHapticsSection(haptics => {
-                haptics.Add(SpsEditorUtils.AutoHapticIdProp(
-                    serializedObject.FindProperty("oscId"),
-                    "ID sent to OGB",
-                    target,
-                    target.owner(),
-                    avatar => avatar.GetComponentsInSelfAndChildren<SpsSocket>(),
-                    GetOscId
-                ));
-                haptics.Add(VRCFuryEditorUtils.BetterProp(
-                    serializedObject.FindProperty("enableHandTouchZone2"),
-                    "Enable hand touch zone? (Auto will add only if child of Hips)"
-                ));
-                haptics.Add(VRCFuryEditorUtils.BetterProp(
-                    serializedObject.FindProperty("length"),
-                    "Hand touch zone depth override in meters:\nNote, this zone is only used for hand touches, not plug interaction."
-                ));
-            }));
-
-            var tags = VRCFuryEditorUtils.Section("Tags", "Filter which plugs can target this socket");
-            tags.Add(SpsTagList(serializedObject.FindProperty("tags")));
+            // ---- 狙われる条件 ----
             var useSharedTag = serializedObject.FindProperty("useSharedTag");
-            tags.Add(VRCFuryEditorUtils.BetterProp(useSharedTag, "'Global' SPS2 Tag",
-                tooltip: "Allows all SPS2 plugs (which are configured using the defaults) to target this socket."));
+            var tagsProp = serializedObject.FindProperty("tags");
+            var tags = VRCFuryEditorUtils.Group("狙う Plug の条件（タグ）", "socket.tags",
+                summary: () => !useSharedTag.boolValue ? "共通タグなし" : tagsProp.arraySize > 0 ? "タグあり" : "既定");
+            tags.Add(VRCFuryEditorUtils.BetterProp(useSharedTag, "共通の SPS タグを持つ",
+                tooltip: "ふつうの設定の Plug は、このタグを持つ Socket を狙う"));
             tags.Add(VRCFuryEditorUtils.RefreshOnChange(() => {
                 if (!useSharedTag.boolValue) {
-                    return VRCFuryEditorUtils.Warn("This socket does not have the global SPS2 tag, so most plugs will not target it.");
+                    return VRCFuryEditorUtils.Warn("共通の SPS タグを持たないので、ほとんどの Plug はこの Socket を狙わない。");
                 }
                 var autoTags = VRCFuryPerFrameInjector.GetPerFrameInjector(target.owner())
                     .GetService<SpsConfigurer>()
                     .GetAutoSocketTagNames(target);
                 if (autoTags.Count > 0) {
-                    return VRCFuryEditorUtils.Info("Additional automatic tags included: " + autoTags.Join(", "));
+                    return VRCFuryEditorUtils.Info("付いている場所から、自動でこのタグも持つ: " + autoTags.Join(", "));
                 }
                 return new VisualElement();
             }, useSharedTag));
+            tags.Add(SpsTagList(tagsProp));
             container.Add(tags);
-            
-            var adv = new Foldout {
-                text = "Advanced",
-                value = false,
-            };
-            container.Add(adv);
-            
-            var plugParams = VRCFuryEditorUtils.Section("Global Plug Parameters");
+
+            // ---- 触覚 ----
+            container.Add(SpsPlugEditor.GetOgbHapticsSection("socket.haptics", haptics => {
+                haptics.Add(SpsEditorUtils.AutoHapticIdProp(
+                    serializedObject.FindProperty("oscId"),
+                    "OGB に送る名前",
+                    target,
+                    target.owner(),
+                    avatar => avatar.GetComponentsInSelfAndChildren<SpsSocket>(),
+                    GetOscId
+                ));
+                haptics.Add(VRCFuryEditorUtils.Prop(
+                    serializedObject.FindProperty("enableHandTouchZone2"),
+                    "手で触れる範囲",
+                    formatEnum: FormatTouchZone,
+                    tooltip: "手で触れたことを触覚デバイスへ送る範囲。自動なら腰に付いているときだけ作る"
+                ).AddClass("spsProp"));
+                haptics.Add(VRCFuryEditorUtils.BetterProp(
+                    serializedObject.FindProperty("length"),
+                    "手で触れる範囲の深さ",
+                    tooltip: "メートル。0 なら自動。手で触れる判定だけに使い、Plug には関係しない"
+                ));
+            }));
+
+            // ---- 詳細 ----
+            var adv = VRCFuryEditorUtils.Group("詳細", "socket.advanced");
+            adv.Add(VRCFuryEditorUtils.BetterProp(serializedObject.FindProperty("position"), "入口の位置のずれ",
+                tooltip: "このオブジェクトからの位置のずれ（ローカル）"));
+            adv.Add(VRCFuryEditorUtils.BetterProp(serializedObject.FindProperty("rotation"), "入口の向きのずれ",
+                tooltip: "このオブジェクトからの回転のずれ（ローカル、度）"));
+            adv.Add(VRCFuryEditorUtils.BetterProp(serializedObject.FindProperty("unitsInMeters"), "長さをワールド単位（メートル）で扱う"));
+            var plugParams = VRCFuryEditorUtils.Section("Plug の大きさをパラメーターに出す（非推奨）",
+                "代わりにアニメーターへのパラメーター注入を使ってください");
+            plugParams.Add(VRCFuryEditorUtils.BetterProp(serializedObject.FindProperty("enablePlugLengthParameter"), "長さ（メートル）"));
+            plugParams.Add(VRCFuryEditorUtils.BetterProp(serializedObject.FindProperty("plugLengthParameterName"), "パラメーター名"));
+            plugParams.Add(VRCFuryEditorUtils.BetterProp(serializedObject.FindProperty("enablePlugWidthParameter"), "半径（メートル）"));
+            plugParams.Add(VRCFuryEditorUtils.BetterProp(serializedObject.FindProperty("plugWidthParameterName"), "パラメーター名"));
             adv.Add(plugParams);
-            var enablePlugLengthParameterProp = serializedObject.FindProperty("enablePlugLengthParameter");
-            var enablePlugWidthParameterProp = serializedObject.FindProperty("enablePlugWidthParameter");
-            plugParams.Add(VRCFuryEditorUtils.BetterProp(enablePlugLengthParameterProp, "Plug Length (meters) (Deprecated, use Inject Parameters on Full Controller)"));
-            plugParams.Add(VRCFuryEditorUtils.BetterProp(serializedObject.FindProperty("plugLengthParameterName")));
-            plugParams.Add(VRCFuryEditorUtils.BetterProp(enablePlugWidthParameterProp, "Plug Radius (meters) (Deprecated, use Inject Parameters on Full Controller)"));
-            plugParams.Add(VRCFuryEditorUtils.BetterProp(serializedObject.FindProperty("plugWidthParameterName")));
-            adv.Add(VRCFuryEditorUtils.BetterProp(serializedObject.FindProperty("unitsInMeters"), "Units are in world-space"));
-            adv.Add(VRCFuryEditorUtils.BetterProp(serializedObject.FindProperty("position"), "Position"));
-            adv.Add(VRCFuryEditorUtils.BetterProp(serializedObject.FindProperty("rotation"), "Rotation"));
+            container.Add(adv);
 
             return container;
         }
-        
+
+        private static string FormatLegacyType(string name) {
+            switch (name) {
+                case "Hole": return "穴";
+                case "Ring": return "輪";
+                case "Ring One Way": return "片側だけの輪";
+                default: return name;
+            }
+        }
+
+        private static string FormatTouchZone(string name) {
+            switch (name) {
+                case "Auto": return "自動";
+                case "On": return "作る";
+                case "Off": return "作らない";
+                default: return name;
+            }
+        }
+
         [CustomPropertyDrawer(typeof(SpsSocket.DepthActionNew))]
         public class DepthActionDrawer : PropertyDrawer {
             public override VisualElement CreatePropertyGUI(SerializedProperty prop) {
@@ -318,20 +374,27 @@ namespace YozoLab.SPS.Inspector {
                 c.Add(VRCFuryEditorUtils.RefreshOnChange(() =>
                     VRCFuryEditorUtils.BetterProp(
                         null,
-                        "Activation distance",
-                        tooltip: "Animation will begin at the far distance, and 'max' at the near distance. If you provide a static action or clip," +
-                                 " the animation will be fully 'off' at the far distance, and fully 'on' at the near distance.",
+                        "動かす範囲",
+                        tooltip: "遠い側から動き始め、近い側で最大になる。動きの無いアクションやクリップなら、" +
+                                 "遠い側で完全に OFF、近い側で完全に ON になる",
                         fieldOverride: new DepthActionSlider(prop.FindPropertyRelative("range"), (SpsSocket.DepthActionUnits)units.enumValueIndex)
                     )
                 , units));
-                c.Add(VRCFuryEditorUtils.BetterProp(
-                    units,
-                    "Range Units"
-                ));
-                c.Add(VRCFuryEditorUtils.BetterProp(prop.FindPropertyRelative("enableSelf"), "Allow avatar to trigger its own animation?"));
-                c.Add(VRCFuryEditorUtils.BetterProp(prop.FindPropertyRelative("smoothingSeconds"), "Smoothing Seconds", tooltip: "It will take approximately this many seconds to smoothly blend to the target depth. Beware that this smoothing is based on framerate, so higher FPS will result in faster smoothing."));
-                c.Add(VRCFuryEditorUtils.BetterProp(prop.FindPropertyRelative("reverseClip"), "Reverse clip (unusual)"));
+                c.Add(VRCFuryEditorUtils.Prop(units, "範囲の単位", formatEnum: FormatUnits).AddClass("spsProp"));
+                c.Add(VRCFuryEditorUtils.BetterProp(prop.FindPropertyRelative("enableSelf"), "自分のアバターでも動かす"));
+                c.Add(VRCFuryEditorUtils.BetterProp(prop.FindPropertyRelative("smoothingSeconds"), "なめらかにする秒数",
+                    tooltip: "目標の深さへ、だいたいこの秒数をかけて近づく。フレームレートに依存するので、FPS が高いほど速くなる"));
+                c.Add(VRCFuryEditorUtils.BetterProp(prop.FindPropertyRelative("reverseClip"), "クリップを逆再生する（まれ）"));
                 return c;
+            }
+
+            private static string FormatUnits(string name) {
+                switch (name) {
+                    case "Meters": return "メートル";
+                    case "Plugs": return "Plug の長さ";
+                    case "Local": return "ローカル単位";
+                    default: return name;
+                }
             }
         }
 

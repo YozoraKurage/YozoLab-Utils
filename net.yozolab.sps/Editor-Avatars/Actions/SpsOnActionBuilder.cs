@@ -8,7 +8,7 @@ using YozoLab.SPS.Utils;
 using YozoLab.SPS.Utils.Controller;
 
 namespace YozoLab.SPS.Actions {
-    [FeatureTitle("Enable SPS")]
+    [FeatureTitle("SPS の有効化")]
     [FeatureHideTitleInEditor]
     internal class SpsOnActionBuilder : ActionBuilder<SpsOnAction> {
         public VFClip Build(SpsOnAction model) {
@@ -31,7 +31,7 @@ namespace YozoLab.SPS.Actions {
         [FeatureEditor]
         public static VisualElement Editor(SerializedProperty prop) {
             var row = new VisualElement().Row();
-            row.Add(VRCFuryActionDrawer.Title("Enable SPS").FlexBasis(100));
+            row.Add(VRCFuryActionDrawer.Title("SPS の有効化").FlexBasis(110));
             row.Add(VRCFuryEditorUtils.Prop(prop.FindPropertyRelative("target")).FlexGrow(1));
             return row;
         }

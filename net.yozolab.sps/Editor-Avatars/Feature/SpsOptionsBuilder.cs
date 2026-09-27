@@ -14,8 +14,9 @@ namespace YozoLab.SPS.Feature {
 
         [FeatureEditor]
         public static VisualElement Editor(SerializedProperty prop, VFGameObject avatarObject) {
-            var c = new VisualElement();
-            c.Add(VRCFuryEditorUtils.Prop(prop.FindPropertyRelative("menuIcon"), "SPS Menu Icon Override"));
+            var c = VRCFuryEditorUtils.Section("SPS のメニュー", "アバターに 1 つだけ置く");
+            c.Add(VRCFuryEditorUtils.BetterProp(prop.FindPropertyRelative("menuIcon"), "アイコン",
+                tooltip: "空なら既定のアイコン"));
             
             var pathProp = prop.FindPropertyRelative("menuPath");
             c.Add(MenuPathPicker.SelectButton(
@@ -23,14 +24,15 @@ namespace YozoLab.SPS.Feature {
                 true,
                 pathProp,
                 append: () => "SPS",
-                label: "SPS Menu Path Override (Default: SPS)",
-                selectLabel: "Select"
+                label: "置き場所（空なら「SPS」）",
+                selectLabel: "選択"
             ));
 
-            c.Add(VRCFuryEditorUtils.Prop(prop.FindPropertyRelative("saveSockets"), "Save Sockets Between Worlds"));
-            c.Add(VRCFuryEditorUtils.Prop(
+            c.Add(VRCFuryEditorUtils.BetterProp(prop.FindPropertyRelative("saveSockets"), "Socket のオン/オフをワールド間で保存する"));
+            c.Add(VRCFuryEditorUtils.BetterProp(
                 prop.FindPropertyRelative("legacyModeEnabledOnAvatarLoad"),
-                "Legacy Mode enabled on avatar load"
+                "アバターを読み込んだとき古い形式のモードを ON にする",
+                tooltip: "古い形式（SPS1 / DPS / TPS）の Plug と組み合わせるためのモード"
             ));
             return c;
         }

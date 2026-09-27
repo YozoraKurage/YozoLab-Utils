@@ -10,7 +10,7 @@ using YozoLab.SPS.Utils;
 using YozoLab.SPS.Utils.Controller;
 
 namespace YozoLab.SPS.Actions {
-    [FeatureTitle("Disable Blinking")]
+    [FeatureTitle("まばたきの無効化")]
     internal class BlockBlinkingActionBuilder : ActionBuilder<BlockBlinkingAction> {
 
         public VFClip Build(string actionName) {

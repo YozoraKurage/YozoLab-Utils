@@ -12,7 +12,7 @@ using YozoLab.SPS.Utils;
 using YozoLab.SPS.Utils.Controller;
 
 namespace YozoLab.SPS.Actions {
-    [FeatureTitle("Reset Physbone")]
+    [FeatureTitle("PhysBone のリセット")]
     [FeatureHideTitleInEditor]
     internal class ResetPhysboneActionBuilder : ActionBuilder<ResetPhysboneAction> {
         [VFAutowired] [CanBeNull] private readonly PhysboneResetService physboneResetService;
@@ -29,7 +29,7 @@ namespace YozoLab.SPS.Actions {
         [FeatureEditor]
         public static VisualElement Editor(SerializedProperty prop) {
             var row = new VisualElement().Row();
-            row.Add(VRCFuryActionDrawer.Title("Reset Physbone").FlexBasis(100));
+            row.Add(VRCFuryActionDrawer.Title("PhysBone のリセット").FlexBasis(110));
             row.Add(VRCFuryEditorUtils.Prop(prop.FindPropertyRelative("physBone")).FlexGrow(1));
             return row;
         }

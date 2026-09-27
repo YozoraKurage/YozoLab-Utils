@@ -10,7 +10,7 @@ using YozoLab.SPS.Utils;
 using YozoLab.SPS.Utils.Controller;
 
 namespace YozoLab.SPS.Actions {
-    [FeatureTitle("Set an FX Float")]
+    [FeatureTitle("FX の Float パラメーターを設定")]
     internal class SetAnFxFloatActionBuilder : ActionBuilder<FxFloatAction> {
         public VFClip Build(FxFloatAction model) {
             var onClip = NewClip();
@@ -36,8 +36,8 @@ namespace YozoLab.SPS.Actions {
             col.Add(row);
                 
             col.Add(VRCFuryEditorUtils.Warn(
-                "Warning: This will cause the FX parameter to be 'animated', which means it cannot be used" +
-                " in a menu or otherwise controlled by VRChat."));
+                "このパラメーターはアニメーションで上書きされるようになるため、" +
+                "メニューなど VRChat 側からは操作できなくなる。"));
 
             return col;
         }

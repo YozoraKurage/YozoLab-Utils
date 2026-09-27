@@ -9,7 +9,7 @@ using YozoLab.SPS.Utils;
 using YozoLab.SPS.Utils.Controller;
 
 namespace YozoLab.SPS.Actions {
-    [FeatureTitle("Poiyomi UV Tile")]
+    [FeatureTitle("Poiyomi UV タイル")]
     internal class PoiyomiUVTileActionBuilder : ActionBuilder<PoiyomiUVTileAction> {
 
         public VFClip Build(PoiyomiUVTileAction model) {
@@ -39,16 +39,16 @@ namespace YozoLab.SPS.Actions {
         public static VisualElement Editor(SerializedProperty prop) {
             var content = new VisualElement();
 
-            content.Add(VRCFuryEditorUtils.Prop(prop.FindPropertyRelative("renderer"), "Renderer"));
-            content.Add(VRCFuryEditorUtils.Prop(prop.FindPropertyRelative("row"), "Row (0-3)"));
-            content.Add(VRCFuryEditorUtils.Prop(prop.FindPropertyRelative("column"), "Column (0-3)"));
+            content.Add(VRCFuryEditorUtils.Prop(prop.FindPropertyRelative("renderer"), "レンダラー"));
+            content.Add(VRCFuryEditorUtils.Prop(prop.FindPropertyRelative("row"), "行 (0〜3)"));
+            content.Add(VRCFuryEditorUtils.Prop(prop.FindPropertyRelative("column"), "列 (0〜3)"));
 
             var adv = new Foldout {
-                text = "Advanced UV Tile Options",
+                text = "UV タイルの詳細設定",
                 value = false
             };
-            adv.Add(VRCFuryEditorUtils.Prop(prop.FindPropertyRelative("dissolve"), "Use UV Tile Dissolve"));
-            adv.Add(VRCFuryEditorUtils.Prop(prop.FindPropertyRelative("renamedMaterial"), "Renamed Material", tooltip: "Material suffix when using poiyomi renamed properties"));
+            adv.Add(VRCFuryEditorUtils.Prop(prop.FindPropertyRelative("dissolve"), "UV Tile Dissolve を使う"));
+            adv.Add(VRCFuryEditorUtils.Prop(prop.FindPropertyRelative("renamedMaterial"), "リネーム接尾辞", tooltip: "Poiyomi のプロパティリネーム（Rename）を使っている場合のマテリアル側の接尾辞"));
             content.Add(adv);
             return content;
         }

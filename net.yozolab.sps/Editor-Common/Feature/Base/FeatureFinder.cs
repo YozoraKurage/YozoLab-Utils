@@ -54,7 +54,7 @@ namespace YozoLab.SPS.Feature.Base {
                     foreach (var alias in e.Value.GetCustomAttributes<FeatureAliasAttribute>()) {
                         entries.Add(new FoundMenuItem {
                             title = alias.OldTitle, modelType = e.Key, builderType = e.Value,
-                            warning = $"{alias.OldTitle} has been renamed to {titleAttribute.Title}"
+                            warning = $"{alias.OldTitle} は {titleAttribute.Title} に名前が変わった"
                         });
                     }
 
@@ -74,19 +74,19 @@ namespace YozoLab.SPS.Feature.Base {
             try {
                 var gameObject = prop.serializedObject.GetGameObject();
                 if (gameObject == null) {
-                    throw new RenderFeatureEditorException("Failed to find game object");
+                    throw new RenderFeatureEditorException("GameObject が見つからない");
                 }
 
                 var modelType = VRCFuryEditorUtils.GetManagedReferenceType(prop);
                 if (modelType == null) {
-                    throw new RenderFeatureEditorException("YozoLab SPS doesn't have code for this feature. Is your YozoLab SPS up to date?");
+                    throw new RenderFeatureEditorException("この機能に対応するコードが YozoLab SPS にない。YozoLab SPS が最新か確認してください。");
                 }
 
                 title = modelType.Name;
 
                 builderType = GetBuilderType(modelType);
                 if (builderType == null) {
-                    throw new RenderFeatureEditorException("This component is not available in your project type, and will be ignored.");
+                    throw new RenderFeatureEditorException("このプロジェクトの種類ではこのコンポーネントは使えないため、無視される。");
                 }
 
                 var titleAttribute = builderType.GetCustomAttribute<FeatureTitleAttribute>();
@@ -101,7 +101,7 @@ namespace YozoLab.SPS.Feature.Base {
                 if (staticEditorMethod == null) {
                     return RenderFeatureEditor(
                         title,
-                        VRCFuryEditorUtils.Error("Failed to find Editor method"),
+                        VRCFuryEditorUtils.Error("エディタ用のメソッドが見つからない"),
                         builderType
                     );
                 }
@@ -119,7 +119,7 @@ namespace YozoLab.SPS.Feature.Base {
                 Debug.LogException(e);
                 return RenderFeatureEditor(
                     title,
-                    VRCFuryEditorUtils.Error("Editor threw an exception, check the unity console"),
+                    VRCFuryEditorUtils.Error("エディタの表示中に例外が発生した。Unity のコンソールを確認してください。"),
                     null
                 );
             }

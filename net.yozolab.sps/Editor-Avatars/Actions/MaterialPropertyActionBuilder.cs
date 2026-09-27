@@ -14,7 +14,7 @@ using YozoLab.SPS.Utils;
 using YozoLab.SPS.Utils.Controller;
 
 namespace YozoLab.SPS.Actions {
-    [FeatureTitle("Material Property")]
+    [FeatureTitle("マテリアルのプロパティ")]
     internal class MaterialPropertyActionBuilder : ActionBuilder<MaterialPropertyAction> {
         [VFAutowired] private readonly VFGameObject avatarObject;
 
@@ -79,31 +79,31 @@ namespace YozoLab.SPS.Actions {
                 rendererProp
             ));
             
-            var valueFloat = VRCFuryEditorUtils.Prop(prop.FindPropertyRelative("value"), "Value");
-            var valueVector = VRCFuryEditorUtils.Prop(prop.FindPropertyRelative("valueVector"), "Value");
-            var valueColor = VRCFuryEditorUtils.Prop(prop.FindPropertyRelative("valueColor"), "Value");
+            var valueFloat = VRCFuryEditorUtils.Prop(prop.FindPropertyRelative("value"), "値");
+            var valueVector = VRCFuryEditorUtils.Prop(prop.FindPropertyRelative("valueVector"), "値");
+            var valueColor = VRCFuryEditorUtils.Prop(prop.FindPropertyRelative("valueColor"), "値");
             var valueStField = new VisualElement();
             var valueStScale = new VisualElement().Row().AddTo(valueStField);
-            valueStScale.Add(new Label("Scale").FlexBasis(60));
+            valueStScale.Add(new Label("スケール").FlexBasis(60));
             valueStScale.Add(new Label("X"));
             valueStScale.Add(VRCFuryEditorUtils.Prop(prop.FindPropertyRelative("valueVector.x")).FlexBasis(0).FlexGrow(1));
             valueStScale.Add(new Label("Y"));
             valueStScale.Add(VRCFuryEditorUtils.Prop(prop.FindPropertyRelative("valueVector.y")).FlexBasis(0).FlexGrow(1));
             var valueStOffset = new VisualElement().Row().AddTo(valueStField);
-            valueStOffset.Add(new Label("Offset").FlexBasis(60));
+            valueStOffset.Add(new Label("オフセット").FlexBasis(60));
             valueStOffset.Add(new Label("X"));
             valueStOffset.Add(VRCFuryEditorUtils.Prop(prop.FindPropertyRelative("valueVector.z")).FlexBasis(0).FlexGrow(1));
             valueStOffset.Add(new Label("Y"));
             valueStOffset.Add(VRCFuryEditorUtils.Prop(prop.FindPropertyRelative("valueVector.w")).FlexBasis(0).FlexGrow(1));
-            var valueSt = VRCFuryEditorUtils.Prop(null, "Value", fieldOverride: valueStField);
+            var valueSt = VRCFuryEditorUtils.Prop(null, "値", fieldOverride: valueStField);
 
             var propertyTypeProp = prop.FindPropertyRelative("propertyType");
             var propertyNameProp = prop.FindPropertyRelative("propertyName");
             {
                 var row = new VisualElement().Row();
-                row.Add(VRCFuryEditorUtils.Prop(propertyNameProp, "Property").FlexGrow(1));
+                row.Add(VRCFuryEditorUtils.Prop(propertyNameProp, "プロパティ").FlexGrow(1));
                 row.Add(VRCFuryEditorUtils.OnChange(propertyNameProp, () => UpdateValueType(true)));
-                row.Add(new Button(SearchClick) { text = "Search" }.Margin(0));
+                row.Add(new Button(SearchClick) { text = "検索" }.Margin(0));
                 content.Add(row);
             }
 
@@ -118,19 +118,19 @@ namespace YozoLab.SPS.Actions {
                 if (e.menu.MenuItems().Count > 0) {
                     e.menu.AppendSeparator();
                 }
-                e.menu.AppendAction("Force type to Float", a => {
+                e.menu.AppendAction("型を Float に固定", a => {
                     propertyTypeProp.enumValueIndex = (int)MaterialPropertyAction.Type.Float;
                     propertyTypeProp.serializedObject.ApplyModifiedProperties();
                 }, propertyTypeProp.enumValueIndex == (int)MaterialPropertyAction.Type.Float ? DropdownMenuAction.Status.Checked : DropdownMenuAction.Status.Normal);
-                e.menu.AppendAction("Force type to Color", a => {
+                e.menu.AppendAction("型を Color に固定", a => {
                     propertyTypeProp.enumValueIndex = (int)MaterialPropertyAction.Type.Color;
                     propertyTypeProp.serializedObject.ApplyModifiedProperties();
                 }, propertyTypeProp.enumValueIndex == (int)MaterialPropertyAction.Type.Color ? DropdownMenuAction.Status.Checked : DropdownMenuAction.Status.Normal);
-                e.menu.AppendAction("Force type to Vector", a => {
+                e.menu.AppendAction("型を Vector に固定", a => {
                     propertyTypeProp.enumValueIndex = (int)MaterialPropertyAction.Type.Vector;
                     propertyTypeProp.serializedObject.ApplyModifiedProperties();
                 }, propertyTypeProp.enumValueIndex == (int)MaterialPropertyAction.Type.Vector ? DropdownMenuAction.Status.Checked : DropdownMenuAction.Status.Normal);
-                e.menu.AppendAction("Force type to Texture Scale+Offset", a => {
+                e.menu.AppendAction("型をテクスチャのスケール+オフセットに固定", a => {
                     propertyTypeProp.enumValueIndex = (int)MaterialPropertyAction.Type.St;
                     propertyTypeProp.serializedObject.ApplyModifiedProperties();
                 }, propertyTypeProp.enumValueIndex == (int)MaterialPropertyAction.Type.St ? DropdownMenuAction.Status.Checked : DropdownMenuAction.Status.Normal);
@@ -162,7 +162,7 @@ namespace YozoLab.SPS.Actions {
             return content;
 
             void SearchClick() {
-                var searchWindow = new VrcfSearchWindow("Material Properties");
+                var searchWindow = new VrcfSearchWindow("マテリアルのプロパティ");
                 GetTreeEntries(searchWindow);
                 searchWindow.Open(value => {
                     propertyNameProp.stringValue = value;
@@ -185,13 +185,13 @@ namespace YozoLab.SPS.Actions {
                     if (sharedMaterials.Length == 0) continue;
 
                     var rendererGroup = renderers.Count > 1
-                        ? mainGroup.AddGroup("Mesh: " + renderer.owner().GetPath(avatarObject))
+                        ? mainGroup.AddGroup("メッシュ: " + renderer.owner().GetPath(avatarObject))
                         : mainGroup;
                     foreach (var material in sharedMaterials) {
                         if (material == null) continue;
 
                         var matGroup = sharedMaterials.Length > 1
-                            ? rendererGroup.AddGroup("Material: " + material.name)
+                            ? rendererGroup.AddGroup("マテリアル: " + material.name)
                             : rendererGroup;
                         var shader = material.shader;
                         
@@ -266,13 +266,13 @@ namespace YozoLab.SPS.Actions {
 
                             var entryName = readableName;
                             if (propType == ShaderPropertyType.Texture) {
-                                entryName += " (Scale+Offset)";
+                                entryName += " (スケール+オフセット)";
                             }
                             if (renderers.Count > 1) {
-                                entryName += $" (Mesh: {renderer.owner().GetPath(avatarObject)})";
+                                entryName += $" (メッシュ: {renderer.owner().GetPath(avatarObject)})";
                             }
                             if (sharedMaterials.Length > 1) {
-                                entryName += $" (Mat: {material.name})";
+                                entryName += $" (マテリアル: {material.name})";
                             }
                             if (showPropertyNameSuffix) {
                                 entryName += $" ({propertyName})";
@@ -287,18 +287,18 @@ namespace YozoLab.SPS.Actions {
         public static VisualElement RendererSelector(SerializedProperty allRenderersProp, SerializedProperty rendererProp) {
             var content = new VisualElement();
 
-            var allRenderersField = VRCFuryEditorUtils.Prop(allRenderersProp, "Apply to all renderers");
+            var allRenderersField = VRCFuryEditorUtils.Prop(allRenderersProp, "すべてのレンダラーに適用");
             content.Add(allRenderersField);
 
             VisualElement rendererField;
             if (VRCFuryEditorUtils.GetPropertyType(rendererProp) == typeof(GameObject)) {
                 rendererField = VRCFuryEditorUtils.Prop(
                     null,
-                    "Renderer",
+                    "レンダラー",
                     fieldOverride: VRCFuryEditorUtils.FilteredGameObjectProp<Renderer>(rendererProp)
                 );
             } else {
-                rendererField = VRCFuryEditorUtils.Prop(rendererProp, "Renderer");
+                rendererField = VRCFuryEditorUtils.Prop(rendererProp, "レンダラー");
             }
             content.Add(rendererField);
 

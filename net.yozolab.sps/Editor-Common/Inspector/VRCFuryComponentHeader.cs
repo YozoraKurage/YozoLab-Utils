@@ -46,56 +46,35 @@ namespace YozoLab.SPS.Inspector {
             VRCFuryEditorUtils.HoverHighlight(row);
             headerArea.Add(row);
 
-            var normalLabelColor = new Color(0.05f, 0.05f, 0.05f);
-             
-            var triangleLeft = new VisualElement {
+            // 「YozoLab SPS」の小さな札。元の見出しの文字の上に重ねて出す
+            var label = new Label("SPS") {
                 style = {
-                    borderRightColor = normalLabelColor,
-                    borderBottomColor = normalLabelColor,
-                    borderLeftWidth = 5,
-                    borderTopWidth = 10,
-                    borderRightWidth = 5,
-                    borderBottomWidth = 10,
-                },
-                pickingMode = PickingMode.Ignore
-            }.FlexShrink(0);
-            row.Add(triangleLeft);
-            
-            var label = new Label("YozoLab SPS") {
-                style = {
-                    color = new Color(0.8f, 0.4f, 0f),
-                    borderTopRightRadius = 0,
-                    borderBottomRightRadius = 0,
-                    paddingLeft = 3,
-                    paddingRight = 3,
-                    backgroundColor = normalLabelColor,
+                    color = new Color(1f, 0.62f, 0.25f),
+                    backgroundColor = new Color(1f, 0.55f, 0.1f, 0.16f),
+                    borderTopLeftRadius = 3,
+                    borderTopRightRadius = 3,
+                    borderBottomLeftRadius = 3,
+                    borderBottomRightRadius = 3,
+                    paddingLeft = 4,
+                    paddingRight = 4,
+                    marginTop = 2,
+                    marginBottom = 2,
+                    marginLeft = 2,
+                    fontSize = 10,
                     unityTextAlign = TextAnchor.MiddleCenter,
                     unityFontStyleAndWeight = FontStyle.Bold,
-                    flexShrink = 1,
                 },
-                pickingMode = PickingMode.Ignore
+                pickingMode = PickingMode.Ignore,
+                tooltip = "YozoLab SPS"
             }.FlexShrink(0);
             row.Add(label);
-
-            var triangleRight = new VisualElement {
-                style = {
-                    borderLeftColor = normalLabelColor,
-                    borderTopColor = normalLabelColor,
-                    borderLeftWidth = 5,
-                    borderTopWidth = 10,
-                    borderRightWidth = 5,
-                    borderBottomWidth = 10,
-                },
-                pickingMode = PickingMode.Ignore
-            }.FlexShrink(0);
-            row.Add(triangleRight);
 
             var name = new Label(title) {
                 style = {
                     //color = Color.white,
                     unityTextAlign = TextAnchor.MiddleLeft,
                     unityFontStyleAndWeight = FontStyle.Bold,
-                    paddingLeft = 3
+                    paddingLeft = 5
                 },
                 pickingMode = PickingMode.Ignore
             }.FlexGrow(1);

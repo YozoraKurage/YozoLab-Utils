@@ -55,16 +55,16 @@ namespace YozoLab.SPS.Feature {
             protected override VisualElement CreateEditor(SerializedObject serializedObject, SpsTouchReceiver target) {
                 var container = new VisualElement();
                 
-                container.Add(VRCFuryEditorUtils.Info(
-                    "This will add an extra SPS Touch Zone (for purposes unrelated to Plugs / Sockets), which will activate OGB haptics when touched. " +
-                    "Haptic level will increase to 100% at the center of the sphere. " +
-                    "This touch zone can be activated by Hands, Fingers, Feet, SPS Plugs, SPS Touch Senders, and Heads (other players only)."));
-
                 container.Add(SpsPlugEditor.ConstraintWarning(target));
-                container.Add(VRCFuryEditorUtils.BetterProp(serializedObject.FindProperty("radius"), "Radius"));
-                container.Add(SpsEditorUtils.AutoHapticIdProp(
+
+                var section = VRCFuryEditorUtils.Section("触れられる範囲",
+                    "触れられると触覚デバイス（OGB）を動かす。球の中心に近いほど強くなる（中心で 100%）。" +
+                    "手・指・足・SPS の Plug・Touch Sender、他の人の頭で反応する。Plug / Socket とは関係なく使える");
+                section.Add(VRCFuryEditorUtils.BetterProp(serializedObject.FindProperty("radius"), "半径",
+                    tooltip: "このオブジェクトのローカル単位"));
+                section.Add(SpsEditorUtils.AutoHapticIdProp(
                     serializedObject.FindProperty("name"),
-                    "ID sent to OGB",
+                    "OGB に送る名前",
                     target,
                     target.owner(),
                     avatar => avatar.GetComponentsInSelfAndChildren<SpsTouchReceiver>(),
@@ -74,6 +74,7 @@ namespace YozoLab.SPS.Feature {
                         r => HapticUtils.GetFallbackId(r.owner())
                     )
                 ));
+                container.Add(section);
 
                 return container;
             }

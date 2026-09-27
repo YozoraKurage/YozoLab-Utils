@@ -46,7 +46,7 @@ namespace YozoLab.SPS.Inspector {
                     var parsed = VrcfObjectId.FromId(idProp.stringValue);
                     var missingId = "";
                     if (!string.IsNullOrWhiteSpace(parsed.objectName)) {
-                        missingId = $"{parsed.objectName} from {parsed.fileName}";
+                        missingId = $"{parsed.fileName} の {parsed.objectName}";
                     } else if (!string.IsNullOrWhiteSpace(parsed.fileName)) {
                         missingId = parsed.fileName;
                     } else if (!string.IsNullOrWhiteSpace(parsed.guid)) {
@@ -54,7 +54,7 @@ namespace YozoLab.SPS.Inspector {
                     } else {
                         missingId = "?";
                     }
-                    lastSeenLabel.text = $"Last seen at {missingId}";
+                    lastSeenLabel.text = $"参照先が見つからない（最後の参照先: {missingId}）";
                     lastSeenLabel.SetVisible(true);
                 }
             }
