@@ -49,10 +49,16 @@ namespace YozoLab.UtilSettings
         public string Define;
 
 
-        /// <summary>設定やウィンドウを開くメニュー項目（無ければ null）。</summary>
+        /// <summary>
+        /// 「開く」で実行するメニュー項目（アドオン自身の設定・ウィンドウ）。無ければ null で、
+        /// そのときは <see cref="Toggles"/> を小窓に並べる。
+        /// </summary>
         public string OpenMenuPath;
 
-        /// <summary>コンパイルされているときだけ触れる、実行時の ON/OFF。</summary>
+        /// <summary>
+        /// コンパイルされているときだけ触れる、実行時の ON/OFF。自身のウィンドウを持たない
+        /// アドオンの「開く」で出す（ウィンドウを持つアドオンでは、そのウィンドウに同じものがある）。
+        /// </summary>
         public RuntimeToggle[] Toggles = Array.Empty<RuntimeToggle>();
     }
 

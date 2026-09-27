@@ -8,15 +8,17 @@ using UnityEngine;
 namespace YozoLab.UtilSettings
 {
     /// <summary>
-    /// このリポジトリのユーティリティを一覧し、二つの軸で切り替える窓。
+    /// このリポジトリのアドオンを一覧し、それぞれを使う/使わないを切り替える窓。
     ///
-    ///   コンパイル … asmdef を書き換えてアセンブリごと通す/通さないを決める。
-    ///                Apply を押すまで反映されず、押すと再コンパイルが走る。
-    ///                切ったパッケージは Harmony への参照ごと消える。
-    ///   有効        … コンパイル済みのものを実行時に ON/OFF する。即時。
+    /// ここで扱うのはコンパイルの有効・無効だけ。asmdef を書き換えてアセンブリごと
+    /// 通す/通さないを決め、Apply を押すまで反映しない（押すと再コンパイルが走る）。
+    /// 切ったパッケージは Harmony への参照ごと消える。
     ///
-    /// 対象パッケージの型は一切参照していない（<see cref="RuntimeToggle"/> 参照）。
-    /// コンパイルを切られた相手を参照すると、この窓自身が巻き添えで壊れるため。
+    /// 各アドオンの中の設定は、行の右の「開く」から。アドオン自身のウィンドウがあれば
+    /// それを開き、無ければ実行時の ON/OFF（<see cref="RuntimeToggle"/>）を小さな窓で出す。
+    ///
+    /// 対象パッケージの型は一切参照していない。コンパイルを切られた相手を参照すると、
+    /// この窓自身が巻き添えで壊れるため。
     /// </summary>
     internal sealed class UtilsSettingsWindow : EditorWindow
     {
@@ -50,9 +52,9 @@ namespace YozoLab.UtilSettings
             if (pending == null) Reload();
 
             EditorGUILayout.HelpBox(
-                "「コンパイル」を外したパッケージはアセンブリごとビルドされなくなります"
+                "チェックを外したアドオンは、アセンブリごとビルドされなくなります"
                 + "（Harmony への参照も含めて消えます）。Apply を押すと再コンパイルが走ります。\n"
-                + "「有効」はコンパイル済みのものを実行時に切り替えるもので、即座に反映されます。",
+                + "各アドオンの設定は、右の「開く」から。",
                 MessageType.None);
 
             scroll = EditorGUILayout.BeginScrollView(scroll);
@@ -79,19 +81,10 @@ namespace YozoLab.UtilSettings
                     }
 
                     GUILayout.FlexibleSpace();
-
-                    bool compiled = UtilsCompileState.IsCompiledIn(package);
-                    if (!string.IsNullOrEmpty(package.OpenMenuPath))
-                    {
-                        using (new EditorGUI.DisabledScope(!compiled))
-                        {
-                            if (GUILayout.Button("開く", GUILayout.Width(48f)))
-                                EditorApplication.ExecuteMenuItem(package.OpenMenuPath);
-                        }
-                    }
+                    DrawOpenButton(package);
                 }
 
-                EditorGUILayout.LabelField(package.Description, EditorStyles.miniLabel);
+                EditorGUILayout.LabelField(package.Description, EditorStyles.wordWrappedMiniLabel);
 
                 if (pending.Contains(package.Id) != saved.Contains(package.Id))
                 {
@@ -99,33 +92,55 @@ namespace YozoLab.UtilSettings
                         saved.Contains(package.Id) ? "→ Apply で無効になります" : "→ Apply で有効になります",
                         EditorStyles.miniBoldLabel);
                 }
-
-                DrawRuntimeToggles(package);
             }
         }
 
-        private void DrawRuntimeToggles(UtilPackage package)
+        /// <summary>
+        /// 行の右端の「開く」。アドオン自身のウィンドウがあればそれを、無ければ
+        /// 実行時の ON/OFF の小窓を開く。開くものが無いアドオンでは出さない。
+        /// </summary>
+        private static void DrawOpenButton(UtilPackage package)
         {
-            if (package.Toggles == null || package.Toggles.Length == 0) return;
+            bool hasWindow = !string.IsNullOrEmpty(package.OpenMenuPath);
+            bool hasToggles = package.Toggles != null && package.Toggles.Length > 0;
+            if (!hasWindow && !hasToggles) return;
 
-            using (new EditorGUI.IndentLevelScope())
+            bool compiled = UtilsCompileState.IsCompiledIn(package);
+            var content = new GUIContent("開く", compiled ? null : "コンパイルされていないので開けません");
+            Rect rect = GUILayoutUtility.GetRect(content, GUI.skin.button, GUILayout.Width(48f));
+            using (new EditorGUI.DisabledScope(!compiled))
             {
+                if (!GUI.Button(rect, content)) return;
+            }
+
+            if (hasWindow) EditorApplication.ExecuteMenuItem(package.OpenMenuPath);
+            else PopupWindow.Show(rect, new RuntimeTogglesPopup(package));
+        }
+
+        /// <summary>自分のウィンドウを持たないアドオンの、実行時の ON/OFF を並べる小窓。</summary>
+        private sealed class RuntimeTogglesPopup : PopupWindowContent
+        {
+            private readonly UtilPackage package;
+
+            public RuntimeTogglesPopup(UtilPackage package) => this.package = package;
+
+            public override Vector2 GetWindowSize()
+            {
+                return new Vector2(300f, 30f + package.Toggles.Length * (EditorGUIUtility.singleLineHeight + 2f));
+            }
+
+            public override void OnGUI(Rect rect)
+            {
+                EditorGUILayout.LabelField(package.DisplayName, EditorStyles.boldLabel);
                 foreach (RuntimeToggle toggle in package.Toggles)
                 {
                     Type type = FindType(toggle.TypeName);
-                    if (type == null)
-                    {
-                        // コンパイルされていない、あるいは名前が変わった。触れるものが無い。
-                        using (new EditorGUI.DisabledScope(true))
-                            EditorGUILayout.ToggleLeft(new GUIContent(toggle.Label + "（コンパイルされていません）"), false);
-                        continue;
-                    }
-
-                    bool? state = ReadEnabled(type);
+                    bool? state = type != null ? ReadEnabled(type) : null;
                     if (state == null)
                     {
+                        // コンパイルされていない、名前が変わった、または状態を読めない。
                         using (new EditorGUI.DisabledScope(true))
-                            EditorGUILayout.ToggleLeft(new GUIContent(toggle.Label + "（状態を読めません）"), false);
+                            EditorGUILayout.ToggleLeft(new GUIContent(toggle.Label + "（使えません）"), false);
                         continue;
                     }
 
