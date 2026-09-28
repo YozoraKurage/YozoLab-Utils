@@ -99,6 +99,7 @@ ENV DEVCONTAINER=true
 RUN mkdir -p \
   /workspace \
   /home/node/.claude \
+  /home/node/.codex \
   /home/node/unity-testproject \
   /home/node/.unity-license \
   /home/node/.config/unity3d \
@@ -130,6 +131,11 @@ RUN sh -c "$(wget -O- https://github.com/deluan/zsh-in-docker/releases/download/
 
 ARG CLAUDE_CODE_VERSION=latest
 RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
+
+# Codex CLI (OpenAI)。Claude Code と同じく npm のグローバルに入れる。
+# 設定と認証は ~/.codex に置かれ、ボリュームで永続化している（devcontainer.json）。
+ARG CODEX_VERSION=latest
+RUN npm install -g @openai/codex@${CODEX_VERSION}
 
 # vrc-get: VPM パッケージ (VRChat SDK / NDMF など) をコンテナ内で入れるための CLI。
 # 静的リンクの単一バイナリなので置くだけでよい。

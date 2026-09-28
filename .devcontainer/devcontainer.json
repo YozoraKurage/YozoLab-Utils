@@ -1,10 +1,11 @@
 {
-  "name": "YozoLab-Utils (Claude Code + Unity)",
+  "name": "YozoLab-Utils (Claude Code + Codex + Unity)",
   "build": {
     "dockerfile": "Dockerfile",
     "args": {
       "TZ": "${localEnv:TZ:Asia/Tokyo}",
       "CLAUDE_CODE_VERSION": "latest",
+      "CODEX_VERSION": "latest",
       "GIT_DELTA_VERSION": "0.18.2",
       "ZSH_IN_DOCKER_VERSION": "1.2.0",
       "UNITY_VERSION": "2022.3.22f1",
@@ -47,6 +48,8 @@
   "mounts": [
     "source=claude-code-bashhistory-${devcontainerId},target=/commandhistory,type=volume",
     "source=claude-code-config-${devcontainerId},target=/home/node/.claude,type=volume",
+    // Codex CLI の設定と認証 (auth.json)。再ビルドしてもログインし直さずに済む。
+    "source=codex-config-${devcontainerId},target=/home/node/.codex,type=volume",
     // Unity テストプロジェクト。Library/ キャッシュがここに溜まるので、
     // ボリュームにしておくと再ビルドしても 2 回目以降のテストが速いまま。
     // ワークスペース (ホストの bind マウント) ではなくボリュームに置くのは
