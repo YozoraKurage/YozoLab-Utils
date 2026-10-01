@@ -8,6 +8,7 @@
 #   run-capture.sh out.png --select        オブジェクトを選んで Inspector に中身を出す
 #   run-capture.sh out.png --theme-name "My Theme"  テーマを選んで撮る
 #   run-capture.sh out.png --windows AnimationWindow,ConsoleWindow  指定のウィンドウも開く
+#   run-capture.sh out.png --components SpsPlug  そのコンポーネントを付けたオブジェクトを選んで撮る
 #
 # batchmode では窓が無く、何も描かれない。ここでは Xvfb の仮想ディスプレイに
 # GUI の Unity を立ち上げ、画面が落ち着いた頃に Unity 自身の ReadScreenPixel で
@@ -18,7 +19,7 @@
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/common.sh"
 
 OUT="${1:?出力する PNG のパスが要る}"; shift || true
-THEME=1; DEBUG_PAINT=0; TRACE=0; SELECT=0; WINDOWS=""; THEME_NAME=""
+THEME=1; DEBUG_PAINT=0; TRACE=0; SELECT=0; WINDOWS=""; THEME_NAME=""; COMPONENTS=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -28,6 +29,7 @@ while [[ $# -gt 0 ]]; do
     --select)      SELECT=1; shift ;;
     --windows)     WINDOWS="${2:?--windows に型名が要る}"; shift 2 ;;
     --theme-name)  THEME_NAME="${2:?--theme-name に名前が要る}"; shift 2 ;;
+    --components)  COMPONENTS="${2:?--components に型名が要る}"; shift 2 ;;
     *) die "不明な引数: $1" ;;
   esac
 done
@@ -66,7 +68,8 @@ YOZOLAB_TRACE_PAINT="$TRACE" \
 YOZOLAB_CAPTURE_SELECT="$SELECT" \
 YOZOLAB_CAPTURE_WINDOWS="$WINDOWS" \
 YOZOLAB_CAPTURE_THEME_NAME="$THEME_NAME" \
-  "$UNITY_BIN" -projectPath "$UNITY_PROJECT" -logFile "$LOG" || true
+YOZOLAB_CAPTURE_COMPONENTS="$COMPONENTS" \
+  "$UNITY_BIN" -projectPath "$UNITY_PROJECT" -logFile "$LOG" ${YOZOLAB_CAPTURE_UNITY_ARGS:-} || true
 
 if [[ -s "$OUT" ]]; then
   info "撮れた: $OUT ($(stat -c%s "$OUT") bytes)"

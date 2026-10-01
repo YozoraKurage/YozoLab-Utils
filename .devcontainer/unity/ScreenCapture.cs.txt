@@ -28,6 +28,7 @@ namespace YozoLab.CaptureTool
         private static readonly string WindowsToOpen = Environment.GetEnvironmentVariable("YOZOLAB_CAPTURE_WINDOWS");
         private static readonly string SelectFlag = Environment.GetEnvironmentVariable("YOZOLAB_CAPTURE_SELECT");
         private static readonly string ThemeNameFlag = Environment.GetEnvironmentVariable("YOZOLAB_CAPTURE_THEME_NAME");
+        private static readonly string ComponentsToAdd = Environment.GetEnvironmentVariable("YOZOLAB_CAPTURE_COMPONENTS");
 
         private const int SettleFrames = 150;
         private const int AfterApplyFrames = 150;
@@ -105,12 +106,31 @@ namespace YozoLab.CaptureTool
         /// </summary>
         private static void PopulateSelection()
         {
-            if (SelectFlag != "1") return;
+            if (SelectFlag != "1" && string.IsNullOrEmpty(ComponentsToAdd)) return;
 
             var go = new GameObject("CaptureTarget");
             go.hideFlags = HideFlags.DontSave;
-            go.AddComponent<BoxCollider>();
-            go.AddComponent<Light>();
+            if (string.IsNullOrEmpty(ComponentsToAdd))
+            {
+                go.AddComponent<BoxCollider>();
+                go.AddComponent<Light>();
+            }
+            else
+            {
+                // 調べたいコンポーネントを型名（カンマ区切り）で指定して付ける
+                foreach (string raw in ComponentsToAdd.Split(','))
+                {
+                    string wanted = raw.Trim();
+                    if (wanted.Length == 0) continue;
+                    Type found = AppDomain.CurrentDomain.GetAssemblies()
+                        .SelectMany(a => { try { return a.GetTypes(); } catch { return new Type[0]; } })
+                        .FirstOrDefault(t => typeof(Component).IsAssignableFrom(t)
+                                             && (t.Name == wanted || t.FullName == wanted));
+                    if (found == null) { Debug.Log($"[CAPTURE] コンポーネント型が無い: {wanted}"); continue; }
+                    go.AddComponent(found);
+                    Debug.Log($"[CAPTURE] 付けた: {found.FullName}");
+                }
+            }
             Selection.activeGameObject = go;
             Debug.Log("[CAPTURE] 選択を作った: CaptureTarget");
         }
