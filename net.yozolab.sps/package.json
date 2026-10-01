@@ -7,7 +7,7 @@
   "author": {
     "name": "Yozolab"
   },
-  "license": "SEE LICENSE IN LICENSE-VRCFury.md",
+  "license": "SEE LICENSE IN LICENSE.md",
   "keywords": [],
   "vpmDependencies": {
     "com.vrchat.avatars": ">=3.7.0",

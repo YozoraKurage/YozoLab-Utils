@@ -10,7 +10,7 @@
 ## ライセンス
 
 **このフォルダの中身は MIT ではなく、VRCFury のライセンスに従う。** 全文は
-[LICENSE-VRCFury.md](LICENSE-VRCFury.md) にある。
+[LICENSE.md](LICENSE.md) にある。
 
 ```
 VRCFury (c) 2022 Senky
