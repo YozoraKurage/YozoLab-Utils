@@ -3,6 +3,7 @@
   "version": "0.8.0",
   "displayName": "YozoLab FBX Animation Extractor",
   "description": "FBX からアニメーションを取り出す。com.unity.formats.fbx が要る。",
+  "license": "MIT",
   "unity": "2022.3",
   "author": {
     "name": "Yozolab"

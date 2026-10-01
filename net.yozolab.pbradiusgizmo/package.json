@@ -3,6 +3,7 @@
   "version": "0.8.0",
   "displayName": "YozoLab PhysBone Radius Gizmo",
   "description": "PhysBone の Collision Radius をシーン上のハンドルで変える。",
+  "license": "MIT",
   "unity": "2022.3",
   "author": {
     "name": "Yozolab"

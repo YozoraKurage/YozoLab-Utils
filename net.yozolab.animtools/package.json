@@ -3,6 +3,7 @@
   "version": "0.8.0",
   "displayName": "YozoLab Animation Tools",
   "description": "Animation ウィンドウまわりの拡張。Harmony を使う。",
+  "license": "MIT",
   "unity": "2022.3",
   "author": {
     "name": "Yozolab"

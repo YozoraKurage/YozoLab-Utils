@@ -3,6 +3,7 @@
   "version": "0.8.0",
   "displayName": "YozoLab Mesh Baker",
   "description": "メッシュとマテリアルの統合。",
+  "license": "MIT",
   "unity": "2022.3",
   "author": {
     "name": "Yozolab"

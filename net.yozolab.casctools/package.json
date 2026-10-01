@@ -3,6 +3,7 @@
   "version": "0.8.0",
   "displayName": "YozoLab Qrigcasc Generator",
   "description": "Humanoid 向けの qrigcasc 生成。",
+  "license": "MIT",
   "unity": "2022.3",
   "author": {
     "name": "Yozolab"
