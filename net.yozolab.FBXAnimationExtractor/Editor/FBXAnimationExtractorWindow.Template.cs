@@ -30,6 +30,8 @@ public partial class FBXAnimationExtractorWindow
             genericExtract = src.genericExtract,
             genericOutputMode = src.genericOutputMode,
             genericExtractTargets = CopyExtractTargets(src.genericExtractTargets),
+            authoredAvatarModel = src.authoredAvatarModel,
+            targetAvatarModel = src.targetAvatarModel,
             ignoreScaleKey = src.ignoreScaleKey,
             fixScale = src.fixScale,
             fixScaleObjects = src.fixScaleObjects == null ? new List<string>() : new List<string>(src.fixScaleObjects),
@@ -63,6 +65,8 @@ public partial class FBXAnimationExtractorWindow
             dst.genericExtract = ruleTemplate.genericExtract;
             dst.genericOutputMode = ruleTemplate.genericOutputMode;
             dst.genericExtractTargets = CopyExtractTargets(ruleTemplate.genericExtractTargets);
+            dst.authoredAvatarModel = ruleTemplate.authoredAvatarModel;
+            dst.targetAvatarModel = ruleTemplate.targetAvatarModel;
             dst.ignoreScaleKey = ruleTemplate.ignoreScaleKey;
             dst.fixScale = ruleTemplate.fixScale;
             dst.fixScaleObjects = ruleTemplate.fixScaleObjects == null
@@ -90,6 +94,7 @@ public partial class FBXAnimationExtractorWindow
                 targetObjectName = t.targetObjectName,
                 enableRepath = t.enableRepath,
                 repathTo = t.repathTo,
+                destAvatarScale = t.destAvatarScale,
             });
         }
         return result;
@@ -129,6 +134,8 @@ public partial class FBXAnimationExtractorWindow
         public bool genericExtract;
         public GenericOutputMode genericOutputMode;
         public List<GenericExtractTargetRule> genericExtractTargets;
+        public GameObject authoredAvatarModel;
+        public GameObject targetAvatarModel;
         public bool ignoreScaleKey;
         public bool fixScale;
         public List<string> fixScaleObjects;

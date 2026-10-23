@@ -128,6 +128,12 @@ public class AnimationPostProcessRule
     [Tooltip("Target object names for Generic extraction. Only objects under the specified names are extracted (leave empty to extract all)")]
     public List<GenericExtractTargetRule> genericExtractTargets = new List<GenericExtractTargetRule>();
 
+    [Tooltip("Avatar model the animation was authored on (FBX or prefab). Together with Target Avatar Model, the Hips height ratio scales the extract targets' positions")]
+    public GameObject authoredAvatarModel;
+
+    [Tooltip("Avatar model the animation will play on (FBX or prefab). Together with Authored Avatar Model, the Hips height ratio scales the extract targets' positions")]
+    public GameObject targetAvatarModel;
+
     [Tooltip("Exclude Transform Scale (m_LocalScale) curves when extracting Generic animations")]
     public bool ignoreScaleKey = false;
 
@@ -189,4 +195,7 @@ public class GenericExtractTargetRule
 
     [Tooltip("Destination path for remapping (e.g. Root/Armature)")]
     public string repathTo;
+
+    [Tooltip("Scale of the destination avatar, with the source avatar as 1. The target object's position curves are divided by this so it lands on the same world position (1 = no correction)")]
+    public float destAvatarScale = 1f;
 }

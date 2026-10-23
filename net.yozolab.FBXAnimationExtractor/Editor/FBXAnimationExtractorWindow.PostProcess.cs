@@ -162,6 +162,12 @@ public partial class FBXAnimationExtractorWindow
         signatureBuilder.Append("|genericOutputMode:").Append((int)rule.genericOutputMode);
         signatureBuilder.Append("|ignoreScaleKey:").Append(rule.ignoreScaleKey);
         signatureBuilder.Append("|fixScale:").Append(rule.fixScale);
+        signatureBuilder.Append("|authoredAvatar:").Append(GetObjectReferenceSignature(rule.authoredAvatarModel));
+        signatureBuilder.Append("|targetAvatar:").Append(GetObjectReferenceSignature(rule.targetAvatarModel));
+        // モデル側が書き換わったときも撮り直すよう、実際に使う比も入れる
+        signatureBuilder.Append("|avatarRatio:").Append(TryGetAvatarModelRatio(rule, out float avatarRatio)
+            ? avatarRatio.ToString("R", System.Globalization.CultureInfo.InvariantCulture)
+            : string.Empty);
 
         signatureBuilder.Append("|frames:");
         if (rule.framesToDelete != null)
@@ -208,6 +214,7 @@ public partial class FBXAnimationExtractorWindow
                 signatureBuilder.Append(target.targetObjectName?.Trim() ?? string.Empty);
                 signatureBuilder.Append(">").Append(target.enableRepath);
                 signatureBuilder.Append(">").Append(target.repathTo?.Trim() ?? string.Empty);
+                signatureBuilder.Append(">").Append(target.destAvatarScale.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
             }
         }
 
@@ -406,6 +413,7 @@ public partial class FBXAnimationExtractorWindow
             if (genericClip == null) return;
 
             bool collectMarkers = markerEventSources != null;
+            bool hasAvatarModelRatio = TryGetAvatarModelRatio(rule, out float avatarModelRatio);
             bool fixScaleTargetActive = rule.genericExtract
                 && rule.fixScale
                 && rule.fixScaleObjects != null
@@ -477,6 +485,17 @@ public partial class FBXAnimationExtractorWindow
                     continue;
 
                 AnimationCurve curve = AnimationUtility.GetEditorCurve(genericClip, binding);
+
+                // 対象オブジェクト自身の位置だけを補正する。子孫の位置は対象からの相対値なので、
+                // 対象が正しいワールド位置に載れば一緒に正しくなる。
+                if (string.IsNullOrEmpty(relativePathFromTarget) && IsPositionProperty(binding.propertyName))
+                {
+                    float positionFactor = hasAvatarModelRatio
+                        ? avatarModelRatio
+                        : DestAvatarPositionFactor(matchedExtractTarget);
+                    curve = ScaleCurveValues(curve, positionFactor);
+                }
+
                 EditorCurveBinding outputBinding = ApplyRepathToBinding(binding, matchedExtractTarget, relativePathFromTarget);
                 AnimationUtility.SetEditorCurve(genericOutputClip, outputBinding, curve);
             }
@@ -690,6 +709,104 @@ public partial class FBXAnimationExtractorWindow
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// 作成元と適用先のアバターモデルから、位置に掛ける比(適用先の Hips の高さ ÷ 作成元の Hips の高さ)を求める。
+    /// Humanoid の再生はアバターの Hips の高さで位置を正規化するので、ルート直下の prop も同じ比で
+    /// 動かせば体に対して同じところへ載る。両方そろって、どちらも Hips が見つかったときだけ true。
+    /// </summary>
+    internal static bool TryGetAvatarModelRatio(AnimationPostProcessRule rule, out float ratio)
+    {
+        ratio = 1f;
+        if (rule == null
+            || !TryGetHipsHeight(rule.authoredAvatarModel, out float authoredHeight)
+            || !TryGetHipsHeight(rule.targetAvatarModel, out float targetHeight))
+            return false;
+
+        ratio = targetHeight / authoredHeight;
+        return true;
+    }
+
+    /// <summary>
+    /// モデルの既定姿勢での Hips の高さ(モデルのルートから見た Y)。
+    /// Humanoid Avatar があればその Hips 割り当てを使い、無ければ "Hips" という名前の Transform を探す。
+    /// </summary>
+    internal static bool TryGetHipsHeight(GameObject model, out float height)
+    {
+        height = 0f;
+        if (model == null)
+            return false;
+
+        Transform root = model.transform;
+        Transform hips = null;
+
+        Animator animator = model.GetComponentInChildren<Animator>(true);
+        if (animator != null && animator.avatar != null && animator.avatar.isHuman)
+        {
+            foreach (HumanBone humanBone in animator.avatar.humanDescription.human)
+            {
+                if (humanBone.humanName == "Hips")
+                {
+                    hips = FindDescendant(root, humanBone.boneName);
+                    break;
+                }
+            }
+        }
+
+        if (hips == null)
+            hips = FindDescendant(root, "Hips");
+        if (hips == null)
+            return false;
+
+        height = root.InverseTransformPoint(hips.position).y;
+        return height > 1e-5f;
+    }
+
+    private static Transform FindDescendant(Transform parent, string name)
+    {
+        if (string.IsNullOrEmpty(name))
+            return null;
+
+        foreach (Transform child in parent.GetComponentsInChildren<Transform>(true))
+        {
+            if (string.Equals(child.name, name, StringComparison.OrdinalIgnoreCase))
+                return child;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// src アバターのスケールを 1 としたときの dist アバターのスケール s から、位置に掛ける係数 1/s を返す。
+    /// 未指定・不正値は補正なし(1)。
+    /// </summary>
+    private static float DestAvatarPositionFactor(GenericExtractTargetRule target)
+    {
+        if (target == null || target.destAvatarScale <= 0f || float.IsNaN(target.destAvatarScale) || float.IsInfinity(target.destAvatarScale))
+            return 1f;
+        return 1f / target.destAvatarScale;
+    }
+
+    /// <summary>キーの値と接線を factor 倍した新しいカーブを返す(時間はそのまま)。</summary>
+    private static AnimationCurve ScaleCurveValues(AnimationCurve curve, float factor)
+    {
+        if (curve == null || Mathf.Approximately(factor, 1f))
+            return curve;
+
+        Keyframe[] keys = curve.keys;
+        for (int i = 0; i < keys.Length; i++)
+        {
+            keys[i].value *= factor;
+            keys[i].inTangent *= factor;
+            keys[i].outTangent *= factor;
+        }
+
+        var scaled = new AnimationCurve(keys)
+        {
+            preWrapMode = curve.preWrapMode,
+            postWrapMode = curve.postWrapMode,
+        };
+        return scaled;
     }
 
     private EditorCurveBinding ApplyRepathToBinding(EditorCurveBinding binding, GenericExtractTargetRule matchedTarget, string relativePathFromTarget)

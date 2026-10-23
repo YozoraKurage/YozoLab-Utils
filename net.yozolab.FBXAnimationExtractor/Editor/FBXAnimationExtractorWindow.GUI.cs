@@ -1032,6 +1032,8 @@ public partial class FBXAnimationExtractorWindow
         SerializedProperty genericOutputModeProp = ruleProp.FindPropertyRelative("genericOutputMode");
         SerializedProperty genericExtractTargetsProp = ruleProp.FindPropertyRelative("genericExtractTargets");
         SerializedProperty ignoreScaleKeyProp = ruleProp.FindPropertyRelative("ignoreScaleKey");
+        SerializedProperty authoredAvatarModelProp = ruleProp.FindPropertyRelative("authoredAvatarModel");
+        SerializedProperty targetAvatarModelProp = ruleProp.FindPropertyRelative("targetAvatarModel");
         SerializedProperty fixScaleProp = ruleProp.FindPropertyRelative("fixScale");
         SerializedProperty fixScaleObjectsProp = ruleProp.FindPropertyRelative("fixScaleObjects");
         SerializedProperty eventMarkersProp = ruleProp.FindPropertyRelative("eventMarkers");
@@ -1084,7 +1086,8 @@ public partial class FBXAnimationExtractorWindow
         {
             EditorGUI.indentLevel++;
             EditorGUILayout.PropertyField(genericOutputModeProp, new GUIContent("Output Mode", L10n.T("Merge=Humanoid clipにマージ / Separate=<fbxName>_generic.anim へ分離出力", "Merge = combine into the humanoid clip / Separate = emit a sibling <fbxName>_generic.anim")));
-            DrawGenericExtractTargets(genericExtractTargetsProp);
+            DrawAvatarModelScale(authoredAvatarModelProp, targetAvatarModelProp);
+            DrawGenericExtractTargets(genericExtractTargetsProp, AvatarModelsAssigned(authoredAvatarModelProp, targetAvatarModelProp));
             EditorGUILayout.PropertyField(ignoreScaleKeyProp, new GUIContent("Ignore Scale Key", L10n.T("抽出時にTransformのScaleキー(m_LocalScale)を除外する", "Exclude Transform Scale (m_LocalScale) keys during extraction")));
             EditorGUILayout.PropertyField(fixScaleProp, new GUIContent("Fix Scale"));
             DrawStringListEditor(fixScaleObjectsProp, "Fix Scale Objects");
@@ -1164,7 +1167,39 @@ public partial class FBXAnimationExtractorWindow
         }
     }
 
-    private void DrawGenericExtractTargets(SerializedProperty genericExtractTargetsProp)
+    private static bool AvatarModelsAssigned(SerializedProperty authoredProp, SerializedProperty targetProp)
+    {
+        return authoredProp.objectReferenceValue != null && targetProp.objectReferenceValue != null;
+    }
+
+    private void DrawAvatarModelScale(SerializedProperty authoredProp, SerializedProperty targetProp)
+    {
+        EditorGUILayout.PropertyField(authoredProp, new GUIContent("Authored Avatar",
+            L10n.T("アニメーションを作ったアバターの FBX / Prefab", "FBX or prefab of the avatar the animation was authored on")));
+        EditorGUILayout.PropertyField(targetProp, new GUIContent("Target Avatar",
+            L10n.T("アニメーションを再生するアバターの FBX / Prefab", "FBX or prefab of the avatar the animation will play on")));
+
+        if (!AvatarModelsAssigned(authoredProp, targetProp))
+            return;
+
+        var authored = authoredProp.objectReferenceValue as GameObject;
+        var target = targetProp.objectReferenceValue as GameObject;
+        if (!TryGetHipsHeight(authored, out float authoredHeight) || !TryGetHipsHeight(target, out float targetHeight))
+        {
+            EditorGUILayout.HelpBox(L10n.T(
+                "Hips が見つからないため補正しません。Humanoid の Avatar を持つモデルか、Hips という名前のボーンがあるモデルを指定してください",
+                "No Hips found, so no correction is applied. Use a model with a Humanoid avatar or a bone named Hips"), MessageType.Warning);
+            return;
+        }
+
+        float ratio = targetHeight / authoredHeight;
+        EditorGUILayout.HelpBox(L10n.T(
+            $"Hips の高さ {authoredHeight:0.####} → {targetHeight:0.####}。抽出対象の位置を ×{ratio:0.#####} します(各 Target の Dest Avatar Scale より優先)",
+            $"Hips height {authoredHeight:0.####} → {targetHeight:0.####}. Extract targets' positions are multiplied by {ratio:0.#####} (overrides each target's Dest Avatar Scale)"),
+            MessageType.Info);
+    }
+
+    private void DrawGenericExtractTargets(SerializedProperty genericExtractTargetsProp, bool avatarModelsAssigned)
     {
         EditorGUILayout.LabelField($"Extract Targets: {genericExtractTargetsProp.arraySize}", EditorStyles.miniBoldLabel);
 
@@ -1176,6 +1211,7 @@ public partial class FBXAnimationExtractorWindow
             SerializedProperty targetObjectNameProp = targetProp.FindPropertyRelative("targetObjectName");
             SerializedProperty enableRepathProp = targetProp.FindPropertyRelative("enableRepath");
             SerializedProperty repathToProp = targetProp.FindPropertyRelative("repathTo");
+            SerializedProperty destAvatarScaleProp = targetProp.FindPropertyRelative("destAvatarScale");
 
             string title = string.IsNullOrWhiteSpace(targetObjectNameProp.stringValue)
                 ? $"Target {i + 1}"
@@ -1196,6 +1232,14 @@ public partial class FBXAnimationExtractorWindow
             if (enableRepathProp.boolValue)
             {
                 EditorGUILayout.PropertyField(repathToProp, new GUIContent("Repath To"));
+            }
+            using (new EditorGUI.DisabledScope(avatarModelsAssigned))
+            EditorGUILayout.PropertyField(destAvatarScaleProp, new GUIContent("Dest Avatar Scale",
+                L10n.T("src アバターのスケールを 1 としたときの dist アバターのスケール。対象の位置を 1/この値 にして、同じワールド位置に合わせる(1=補正なし)",
+                       "Scale of the destination avatar with the source avatar as 1. The target's position is divided by it so it lands on the same world position (1 = no correction)")));
+            if (destAvatarScaleProp.floatValue <= 0f)
+            {
+                EditorGUILayout.HelpBox(L10n.T("0 以下は補正なし(1)として扱います", "Zero or less is treated as 1 (no correction)"), MessageType.Warning);
             }
             EditorGUILayout.EndVertical();
 
@@ -1218,6 +1262,7 @@ public partial class FBXAnimationExtractorWindow
             newTargetProp.FindPropertyRelative("targetObjectName").stringValue = string.Empty;
             newTargetProp.FindPropertyRelative("enableRepath").boolValue = false;
             newTargetProp.FindPropertyRelative("repathTo").stringValue = string.Empty;
+            newTargetProp.FindPropertyRelative("destAvatarScale").floatValue = 1f;
         }
     }
 
@@ -1363,6 +1408,8 @@ public partial class FBXAnimationExtractorWindow
         ruleProp.FindPropertyRelative("genericExtract").boolValue = false;
         ruleProp.FindPropertyRelative("genericOutputMode").enumValueIndex = (int)GenericOutputMode.Merge;
         ruleProp.FindPropertyRelative("genericExtractTargets").ClearArray();
+        ruleProp.FindPropertyRelative("authoredAvatarModel").objectReferenceValue = null;
+        ruleProp.FindPropertyRelative("targetAvatarModel").objectReferenceValue = null;
         ruleProp.FindPropertyRelative("ignoreScaleKey").boolValue = false;
         ruleProp.FindPropertyRelative("fixScale").boolValue = false;
         ruleProp.FindPropertyRelative("fixScaleObjects").ClearArray();
